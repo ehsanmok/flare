@@ -30,7 +30,6 @@ from ..crypto.base64 import base64_encode as _b64_encode_srv
 from ..http.response import Status
 from ..tcp import TcpListener, TcpStream
 from ..net import SocketAddr, NetworkError, _find_flare_lib
-from ..runtime._asyncrt import check_asyncrt_capacity
 from ..runtime._thread import ThreadHandle, _OpaquePtr, _null_ptr
 from ..runtime.reuseport import bind_reuseport
 from ..utils.dylib import dl_sym
@@ -1167,8 +1166,8 @@ def _spawn_ws_offload(
     var th: ThreadHandle
     try:
         # One thread per offloaded connection, alive as long as the
-        # connection: a dedicated OS thread even under -D FLARE_ASYNCRT,
-        # where it would hold one of the pool's fixed workers each.
+        # connection: a dedicated OS thread, since a pool task would
+        # hold one of the pool's fixed workers each.
         th = ThreadHandle.spawn_os[_ws_offload_entry](arg)
     except e:
         ctx_ptr.unsafe_deinit_pointee()
@@ -1256,7 +1255,6 @@ def _ws_serve_multicore(
     )
     if num_workers <= 1:
         raise Error("_ws_serve_multicore: num_workers must be >= 2")
-    check_asyncrt_capacity("_ws_serve_multicore", num_workers)
 
     from std.memory.alloc import unsafe_alloc
 
@@ -1290,16 +1288,16 @@ def _ws_serve_multicore(
         var arg = ctx_ptr.unsafe_bitcast[UInt8]()
         var addr_int = Int(arg)
         ctx_addrs.append(addr_int)
-        var th = ThreadHandle.spawn[_ws_worker_entry](
+        var th = ThreadHandle.spawn_serving[_ws_worker_entry](
             Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=addr_int)
         )
         (threads_ptr.unsafe_offset(i)).unsafe_write(th^)
     # See Scheduler.start: no serving loop may stay queued on the
-    # AsyncRT pool. No-op for pthreads.
+    # AsyncRT pool. No-op for OS threads.
     for i in range(num_workers):
         (threads_ptr.unsafe_offset(i))[].wait_started()
 
-    # Workers run forever; this join blocks until each pthread
+    # Workers run forever; this join blocks until each worker
     # exits (normally never, since the per-worker listener
     # stays open). Closing the listener from another thread
     # would unblock the worker's accept call -- the intended

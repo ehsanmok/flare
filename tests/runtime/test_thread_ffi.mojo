@@ -1,4 +1,4 @@
-"""Tests for ``flare.runtime._thread`` — pthread + CPU pinning FFI.
+"""Tests for ``flare.runtime._thread`` — thread handles + CPU pinning FFI.
 
 Covers:
 
@@ -7,7 +7,8 @@ Covers:
 - ``ThreadHandle.spawn`` + ``join`` round-trips.
 - Multiple worker threads can each deliver a per-thread result back
   via the argument pointer.
-- ``pin_to_cpu`` succeeds on Linux (first CPU) and is a no-op on macOS.
+- ``pin_to_cpu`` on an OS thread succeeds on Linux (first CPU) and is
+  a no-op on macOS.
 
 Threads that write into a caller-provided counter prove the thread
 actually ran and saw the argument pointer.
@@ -18,7 +19,6 @@ from std.memory import Pointer
 from std.sys.info import CompilationTarget
 from std.ffi import c_int
 
-from flare.runtime._asyncrt import FLARE_USE_ASYNCRT
 from flare.runtime._thread import (
     ThreadHandle,
     num_cpus,
@@ -148,9 +148,9 @@ def test_spawn_multiple_threads() raises:
 
 
 def test_pin_to_cpu0_after_spawn() raises:
-    """``pin_to_cpu(0)`` succeeds on Linux, no-op on macOS."""
+    """``pin_to_cpu(0)`` on an OS thread succeeds on Linux, no-op on macOS."""
     var value = 0
-    var h = ThreadHandle.spawn[_write_42](_ptr_to_int(value))
+    var h = ThreadHandle.spawn_os[_write_42](_ptr_to_int(value))
     h.pin_to_cpu(0)
     h.join()
     assert_equal(value, 42)
@@ -162,7 +162,7 @@ def test_pin_to_cpu_min_of_available() raises:
     var target = 0
     if n > 1:
         target = 1
-    var h = ThreadHandle.spawn[_nop](_null_out())
+    var h = ThreadHandle.spawn_os[_nop](_null_out())
     h.pin_to_cpu(target)
     h.join()
 
@@ -185,14 +185,27 @@ def _write_tid(
     return _null_out()
 
 
-def test_thread_id_unique_across_workers() raises:
-    """Each spawned thread writes its pthread_self into a slot; the
-    two slots differ from each other and from the main thread.
+def test_thread_id_unique_across_os_threads() raises:
+    """Each OS thread writes its pthread_self into a slot; the two
+    slots differ from each other and from the main thread."""
+    var t1 = UInt64(0)
+    var t2 = UInt64(0)
+    var h1 = ThreadHandle.spawn_os[_write_tid](_ptr_to_u64(t1))
+    var h2 = ThreadHandle.spawn_os[_write_tid](_ptr_to_u64(t2))
+    h1.join()
+    h2.join()
+    assert_true(t1 != UInt64(0))
+    assert_true(t2 != UInt64(0))
+    assert_true(t1 != t2)
+    var main_tid = current_thread_id()
+    assert_true(t1 != main_tid)
+    assert_true(t2 != main_tid)
 
-    Under ``-D FLARE_ASYNCRT`` the two are pool tasks, and two short
-    tasks may run one after the other on the same pool worker, so only
-    "not the main thread" is guaranteed there.
-    """
+
+def test_tasks_see_a_thread_id() raises:
+    """Pool tasks see a real thread id. No distinctness check: two short
+    tasks may share one worker, and under ``mojo run`` main is itself a
+    pool worker whose join can run a task inline."""
     var t1 = UInt64(0)
     var t2 = UInt64(0)
     var h1 = ThreadHandle.spawn[_write_tid](_ptr_to_u64(t1))
@@ -201,11 +214,6 @@ def test_thread_id_unique_across_workers() raises:
     h2.join()
     assert_true(t1 != UInt64(0))
     assert_true(t2 != UInt64(0))
-    comptime if not FLARE_USE_ASYNCRT:
-        assert_true(t1 != t2)
-    var main_tid = current_thread_id()
-    assert_true(t1 != main_tid)
-    assert_true(t2 != main_tid)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────
@@ -213,7 +221,7 @@ def test_thread_id_unique_across_workers() raises:
 
 def main() raises:
     print("=" * 60)
-    print("test_thread_ffi.mojo — pthread + CPU pinning")
+    print("test_thread_ffi.mojo — thread handles + CPU pinning")
     print("=" * 60)
     print()
     TestSuite.discover_tests[__functions_in_module()]().run()

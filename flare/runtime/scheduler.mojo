@@ -1,6 +1,6 @@
-"""Multicore scheduler: 1 shared listener, N reactors, N pthread workers.
+"""Multicore scheduler: 1 shared listener, N reactors, N workers.
 
-Runs N single-threaded reactor loops in parallel, one per pthread,
+Runs N single-threaded reactor loops in parallel, one per worker thread,
 all sharing a *single* listener fd. Each worker registers the
 listener fd in its own reactor with ``EPOLLEXCLUSIVE`` (on Linux
 >= 4.5) so the kernel wakes exactly one worker per accept event.
@@ -83,12 +83,6 @@ from std.sys.info import CompilationTarget
 from ..net import SocketAddr
 from ..tcp import TcpListener
 
-from ._asyncrt import (
-    FLARE_USE_ASYNCRT,
-    asyncrt_pool_alive,
-    asyncrt_worker_capacity,
-    check_asyncrt_capacity,
-)
 from ._thread import ThreadHandle, num_cpus, _OpaquePtr
 from .frontend import Frontend
 from .reuseport import bind_reuseport, bind_shared
@@ -184,7 +178,7 @@ def _scheduler_free_ctxs[F: Frontend](addrs: List[Int]):
 
 
 struct Scheduler[F: Frontend](Movable):
-    """Owns ``num_workers`` pthread workers, each running a frontend's
+    """Owns ``num_workers`` workers, each running a frontend's
     serving loop sharing a single listener fd (or its own
     SO_REUSEPORT listener when the strategy demands).
 
@@ -335,12 +329,10 @@ struct Scheduler[F: Frontend](Movable):
             serve until ``shutdown()`` is called.
 
         Raises:
-            Error: If ``num_workers`` is outside ``1..=256`` (or,
-                under ``-D FLARE_ASYNCRT``, above
-                ``parallelism_level() - 1``), if the
-                listener fails to bind, or if ``pthread_create``
-                fails; partially-started workers are best-effort
-                joined before re-raising.
+            Error: If ``num_workers`` is outside ``1..=256``, if the
+                listener fails to bind, or if spawning a worker fails;
+                partially-started workers are best-effort joined before
+                re-raising.
         """
         if num_workers < 1 or num_workers > 256:
             raise Error(
@@ -348,7 +340,6 @@ struct Scheduler[F: Frontend](Movable):
                 + String(num_workers)
                 + ")"
             )
-        check_asyncrt_capacity("Scheduler.start", num_workers)
         var s = Scheduler[Self.F]()
 
         # Heap-allocate the stopping flag. Using a struct field would
@@ -579,7 +570,7 @@ struct Scheduler[F: Frontend](Movable):
 
             var spawned = False
             try:
-                var th = ThreadHandle.spawn[_worker_entry[Self.F]](arg)
+                var th = ThreadHandle.spawn_serving[_worker_entry[Self.F]](arg)
                 # Move the (non-Copyable) handle into the next slot
                 # of the worker array; bump the live-slot counter.
                 s._workers_ptr.unsafe_offset(s._workers_len).unsafe_write(th^)
@@ -636,10 +627,9 @@ struct Scheduler[F: Frontend](Movable):
                 s._stopping_addr = 0
                 raise Error("pthread_create failed in Scheduler.start")
 
-        # Under -D FLARE_ASYNCRT the workers are pool tasks. Don't hand
-        # back the scheduler while one is still queued: a donating join
-        # elsewhere could run it inline and never return. No-op for
-        # pthreads.
+        # Workers holding a lease are pool tasks. Don't hand back the
+        # scheduler while one is still queued: a donating join elsewhere
+        # could run it inline and never return. No-op for OS threads.
         for i in range(s._workers_len):
             s._workers_ptr.unsafe_offset(i)[].wait_started()
         return s^
@@ -945,12 +935,5 @@ def default_worker_count() -> Int:
     For IO-bound HTTP plaintext the best throughput is usually
     num_cpus workers; CPU-heavy handlers may prefer num_cpus // 2 to
     leave headroom for the kernel network stack.
-
-    Under ``-D FLARE_ASYNCRT`` it is capped at
-    ``parallelism_level() - 1``, the most workers ``Scheduler.start``
-    accepts on that engine.
     """
-    comptime if FLARE_USE_ASYNCRT:
-        if asyncrt_pool_alive():
-            return min(num_cpus(), asyncrt_worker_capacity())
     return num_cpus()

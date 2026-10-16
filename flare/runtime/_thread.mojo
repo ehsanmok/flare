@@ -1,15 +1,15 @@
-"""Low-level pthread FFI and CPU pinning for flare's scheduler.
+"""Thread handles and CPU pinning for flare's scheduler.
 
-Wraps just enough of libpthread (and, on Linux, ``pthread_setaffinity_np``)
-for the multicore ``Scheduler`` to spawn + join N worker threads, each
-pinned to a specific core. The API is intentionally small and unsafe:
+Just enough surface for the multicore ``Scheduler`` to spawn + join N
+workers, each pinned to a specific core. The API is intentionally small
+and unsafe:
 
-- ``ThreadHandle.spawn(start, arg)`` wraps ``pthread_create``. The
-  start routine is a ``def(Pointer[None]) thin abi("C") -> Pointer[None]``
-  that never raises; the reactor loop inside the worker is responsible
-  for converting Mojo exceptions into a sentinel pointer.
-- ``ThreadHandle.join()`` wraps ``pthread_join``. Returns the worker's
-  return value (usually unused).
+- ``ThreadHandle.spawn(start, arg)`` runs ``start(arg)`` as an AsyncRT
+  task. The start routine is a
+  ``def(Pointer[None]) thin abi("C") -> Pointer[None]`` that never
+  raises; the reactor loop inside the worker is responsible for
+  converting Mojo exceptions into a sentinel pointer.
+- ``ThreadHandle.join()`` waits for the task (or thread) to finish.
 - ``ThreadHandle.pin_to_cpu(cpu)`` pins the thread to a specific core
   on Linux via ``pthread_setaffinity_np``. On macOS this is a no-op
   placeholder (Mach's ``thread_policy_set`` with
@@ -21,17 +21,21 @@ Threads that outlive their ``ThreadHandle`` are undefined behaviour
 unless the handle was ``detach()``ed first. Join before dropping, or
 detach and let the OS reclaim the thread.
 
-Platform notes:
+Platform notes (``spawn_os``, pinning):
 - Linux uses libpthread (``libpthread.so.0``); symbols are resolved via
   ``external_call`` like the rest of ``flare/net/_libc.mojo``.
 - macOS bundles pthread into ``libSystem.dylib``; symbols there are
   reachable from the default dynamic link namespace.
 
-Thread engine. By default ``spawn`` creates a pthread. Built with
-``-D FLARE_ASYNCRT`` it enqueues a task on Mojo's AsyncRT pool instead
-(``flare.runtime._asyncrt``); ``spawn_os`` always creates a pthread,
-for threads that never return or that live as long as a connection.
-Both kinds share ``join`` / ``detach`` / the move-only handle.
+Thread engine. ``spawn`` enqueues a task on Mojo's AsyncRT pool
+(``flare.runtime._asyncrt``), the same pool the stdlib uses, so a flare
+process has one thread engine. ``spawn_serving`` does the same for
+server workers while a serving lease is free. ``spawn_os`` creates a
+dedicated OS thread, for the work a fixed-size pool can't host: threads
+that never return, threads that live as long as a connection, serving
+loops beyond the pool's capacity, and every spawn in a forked child,
+which has no pool workers. All kinds share ``join`` / ``detach`` / the
+move-only handle.
 
 This file is *internal* — it is used by the runtime, the WebSocket
 server, async DNS and the H3/H2 connect race.
@@ -48,11 +52,11 @@ from std.memory import Layout, Pointer, alloc, unsafe_memset_zero
 from std.sys.info import CompilationTarget
 
 from ._asyncrt import (
-    FLARE_USE_ASYNCRT,
     asyncrt_detach,
     asyncrt_join,
     asyncrt_pool_alive,
     asyncrt_spawn,
+    asyncrt_try_lease,
     asyncrt_wait_started,
 )
 
@@ -131,13 +135,13 @@ struct ThreadHandle(Movable):
     def spawn[
         start: def(_OpaquePtr) thin -> _OpaquePtr
     ](arg: _OpaquePtr,) raises -> ThreadHandle:
-        """Run ``start(arg)`` on the configured thread engine.
+        """Run ``start(arg)`` as a task on the AsyncRT pool.
 
-        A pthread by default. Built with ``-D FLARE_ASYNCRT``, a task
-        on the AsyncRT pool: it runs once a pool worker is free, and
-        holds that worker until ``start`` returns. In a process whose
-        pool has no workers (a forked child) it is a pthread anyway. Use ``spawn_os`` for
-        work that never returns or lives as long as a connection.
+        The task runs once a pool worker is free, and holds that worker
+        until ``start`` returns. In a process whose pool has no workers
+        (a forked child) it is a dedicated OS thread instead. Use
+        ``spawn_os`` for work that never returns or lives as long as a
+        connection.
 
         Parameters:
             start: Entry function; same contract as ``spawn_os``.
@@ -149,22 +153,54 @@ struct ThreadHandle(Movable):
             A handle the caller must ``join()`` or ``detach()``.
 
         Raises:
-            Error: If ``pthread_create`` fails (pthread engine only).
+            Error: If ``pthread_create`` fails (forked child only).
         """
-        comptime if FLARE_USE_ASYNCRT:
-            # A forked child has no pool workers; see asyncrt_pool_alive.
-            if asyncrt_pool_alive():
-                return ThreadHandle(
-                    _thread_id=asyncrt_spawn[start](arg), _kind=_KIND_ASYNCRT
-                )
+        # A forked child has no pool workers; see asyncrt_pool_alive.
+        if asyncrt_pool_alive():
+            return ThreadHandle(
+                _thread_id=asyncrt_spawn[start](arg), _kind=_KIND_ASYNCRT
+            )
+        return ThreadHandle.spawn_os[start](arg)
+
+    @staticmethod
+    def spawn_serving[
+        start: def(_OpaquePtr) thin -> _OpaquePtr
+    ](arg: _OpaquePtr,) raises -> ThreadHandle:
+        """Run a serving loop: ``start(arg)`` returns only at shutdown.
+
+        A pool task while a serving lease is free (see
+        ``asyncrt_try_lease``), otherwise a dedicated OS thread. Call
+        ``wait_started`` on every handle before letting anything else
+        join on the pool.
+
+        Parameters:
+            start: Entry function; same contract as ``spawn_os``.
+
+        Args:
+            arg: Opaque pointer delivered to the start function.
+
+        Returns:
+            A handle the caller must ``join()`` or ``detach()``.
+
+        Raises:
+            Error: If ``pthread_create`` fails (OS-thread case only).
+        """
+        if asyncrt_pool_alive() and asyncrt_try_lease():
+            return ThreadHandle(
+                _thread_id=asyncrt_spawn[start, leased=True](arg),
+                _kind=_KIND_ASYNCRT,
+            )
         return ThreadHandle.spawn_os[start](arg)
 
     @staticmethod
     def spawn_os[
         start: def(_OpaquePtr) thin -> _OpaquePtr
     ](arg: _OpaquePtr,) raises -> ThreadHandle:
-        """Spawn a dedicated OS thread (pthread) that runs ``start(arg)``,
-        whatever engine ``spawn`` is configured for.
+        """Spawn a dedicated OS thread (pthread) that runs ``start(arg)``.
+
+        For work a fixed-size pool can't host: a thread that never
+        returns (process exit waits for running pool tasks) or one per
+        connection (the pool doesn't grow when a task blocks).
 
         Parameters:
             start: Entry function. Signature

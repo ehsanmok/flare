@@ -449,6 +449,9 @@ from test_scheduler import (
     test_scheduler_multiple_start_cycles as test_scheduler__test_scheduler_multiple_start_cycles,
 )
 from test_scheduler import (
+    test_workers_past_the_pool_capacity_run_on_os_threads as test_scheduler__test_workers_past_the_pool_capacity_run_on_os_threads,
+)
+from test_scheduler import (
     test_scheduler_pin_cores_flag_default_no_crash as test_scheduler__test_scheduler_pin_cores_flag_default_no_crash,
 )
 from test_scheduler import (
@@ -538,35 +541,44 @@ from test_syscall_ffi import (
 from test_syscall_ffi import (
     test_set_nonblocking_toggle_does_not_raise as test_syscall_ffi__test_set_nonblocking_toggle_does_not_raise,
 )
-from test_thread_asyncrt import (
-    test_engine_matches_build as test_thread_asyncrt__test_engine_matches_build,
+from test_thread_engine import (
+    test_pinned_worker_gets_its_mask_back as test_thread_engine__test_pinned_worker_gets_its_mask_back,
 )
-from test_thread_asyncrt import (
-    test_spawn_os_is_always_pthread as test_thread_asyncrt__test_spawn_os_is_always_pthread,
+from test_thread_engine import (
+    test_spawn_is_asyncrt_task as test_thread_engine__test_spawn_is_asyncrt_task,
 )
-from test_thread_asyncrt import (
-    test_spawn_join_runs_off_caller_thread as test_thread_asyncrt__test_spawn_join_runs_off_caller_thread,
+from test_thread_engine import (
+    test_spawn_os_is_always_os_thread as test_thread_engine__test_spawn_os_is_always_os_thread,
 )
-from test_thread_asyncrt import (
-    test_many_short_tasks as test_thread_asyncrt__test_many_short_tasks,
+from test_thread_engine import (
+    test_spawn_join_round_trip as test_thread_engine__test_spawn_join_round_trip,
 )
-from test_thread_asyncrt import (
-    test_detach_before_completion as test_thread_asyncrt__test_detach_before_completion,
+from test_thread_engine import (
+    test_many_short_tasks as test_thread_engine__test_many_short_tasks,
 )
-from test_thread_asyncrt import (
-    test_detach_after_completion as test_thread_asyncrt__test_detach_after_completion,
+from test_thread_engine import (
+    test_detach_before_completion as test_thread_engine__test_detach_before_completion,
 )
-from test_thread_asyncrt import (
-    test_join_from_inside_task as test_thread_asyncrt__test_join_from_inside_task,
+from test_thread_engine import (
+    test_detach_after_completion as test_thread_engine__test_detach_after_completion,
 )
-from test_thread_asyncrt import (
-    test_nested_join_under_load as test_thread_asyncrt__test_nested_join_under_load,
+from test_thread_engine import (
+    test_join_from_inside_task as test_thread_engine__test_join_from_inside_task,
 )
-from test_thread_asyncrt import (
-    test_capacity_check as test_thread_asyncrt__test_capacity_check,
+from test_thread_engine import (
+    test_nested_join_under_load as test_thread_engine__test_nested_join_under_load,
 )
-from test_thread_asyncrt import (
-    test_spawn_join_in_forked_child as test_thread_asyncrt__test_spawn_join_in_forked_child,
+from test_thread_engine import (
+    test_leases_stop_at_capacity as test_thread_engine__test_leases_stop_at_capacity,
+)
+from test_thread_engine import (
+    test_spawn_serving_overflows_to_os_thread as test_thread_engine__test_spawn_serving_overflows_to_os_thread,
+)
+from test_thread_engine import (
+    test_spawn_serving_returns_its_lease as test_thread_engine__test_spawn_serving_returns_its_lease,
+)
+from test_thread_engine import (
+    test_spawn_join_in_forked_child as test_thread_engine__test_spawn_join_in_forked_child,
 )
 from test_thread_ffi import (
     test_num_cpus_at_least_one as test_thread_ffi__test_num_cpus_at_least_one,
@@ -596,7 +608,10 @@ from test_thread_ffi import (
     test_many_spawn_join_cycles as test_thread_ffi__test_many_spawn_join_cycles,
 )
 from test_thread_ffi import (
-    test_thread_id_unique_across_workers as test_thread_ffi__test_thread_id_unique_across_workers,
+    test_thread_id_unique_across_os_threads as test_thread_ffi__test_thread_id_unique_across_os_threads,
+)
+from test_thread_ffi import (
+    test_tasks_see_a_thread_id as test_thread_ffi__test_tasks_see_a_thread_id,
 )
 from test_timer_wheel import (
     test_schedule_returns_unique_ids as test_timer_wheel__test_schedule_returns_unique_ids,
@@ -982,6 +997,9 @@ def main() raises:
     suite.test[test_scheduler__test_scheduler_drain_zero_timeout_is_hard_stop]()
     suite.test[test_scheduler__test_scheduler_shutdown_idempotent]()
     suite.test[test_scheduler__test_scheduler_multiple_start_cycles]()
+    suite.test[
+        test_scheduler__test_workers_past_the_pool_capacity_run_on_os_threads
+    ]()
     suite.test[test_scheduler__test_scheduler_pin_cores_flag_default_no_crash]()
     suite.test[
         test_scheduler__test_shutdown_closes_the_shared_listener_after_the_workers_join
@@ -1029,17 +1047,20 @@ def main() raises:
     ]()
     suite.test[test_syscall_ffi__test_kevent_on_invalid_fd_returns_negative]()
     suite.test[test_syscall_ffi__test_set_nonblocking_toggle_does_not_raise]()
-    # tests/runtime/test_thread_asyncrt.mojo
-    suite.test[test_thread_asyncrt__test_engine_matches_build]()
-    suite.test[test_thread_asyncrt__test_spawn_os_is_always_pthread]()
-    suite.test[test_thread_asyncrt__test_spawn_join_runs_off_caller_thread]()
-    suite.test[test_thread_asyncrt__test_many_short_tasks]()
-    suite.test[test_thread_asyncrt__test_detach_before_completion]()
-    suite.test[test_thread_asyncrt__test_detach_after_completion]()
-    suite.test[test_thread_asyncrt__test_join_from_inside_task]()
-    suite.test[test_thread_asyncrt__test_nested_join_under_load]()
-    suite.test[test_thread_asyncrt__test_capacity_check]()
-    suite.test[test_thread_asyncrt__test_spawn_join_in_forked_child]()
+    # tests/runtime/test_thread_engine.mojo
+    suite.test[test_thread_engine__test_pinned_worker_gets_its_mask_back]()
+    suite.test[test_thread_engine__test_spawn_is_asyncrt_task]()
+    suite.test[test_thread_engine__test_spawn_os_is_always_os_thread]()
+    suite.test[test_thread_engine__test_spawn_join_round_trip]()
+    suite.test[test_thread_engine__test_many_short_tasks]()
+    suite.test[test_thread_engine__test_detach_before_completion]()
+    suite.test[test_thread_engine__test_detach_after_completion]()
+    suite.test[test_thread_engine__test_join_from_inside_task]()
+    suite.test[test_thread_engine__test_nested_join_under_load]()
+    suite.test[test_thread_engine__test_leases_stop_at_capacity]()
+    suite.test[test_thread_engine__test_spawn_serving_overflows_to_os_thread]()
+    suite.test[test_thread_engine__test_spawn_serving_returns_its_lease]()
+    suite.test[test_thread_engine__test_spawn_join_in_forked_child]()
     # tests/runtime/test_thread_ffi.mojo
     suite.test[test_thread_ffi__test_num_cpus_at_least_one]()
     suite.test[test_thread_ffi__test_num_cpus_reasonable]()
@@ -1050,7 +1071,8 @@ def main() raises:
     suite.test[test_thread_ffi__test_pin_to_cpu0_after_spawn]()
     suite.test[test_thread_ffi__test_pin_to_cpu_min_of_available]()
     suite.test[test_thread_ffi__test_many_spawn_join_cycles]()
-    suite.test[test_thread_ffi__test_thread_id_unique_across_workers]()
+    suite.test[test_thread_ffi__test_thread_id_unique_across_os_threads]()
+    suite.test[test_thread_ffi__test_tasks_see_a_thread_id]()
     # tests/runtime/test_timer_wheel.mojo
     suite.test[test_timer_wheel__test_schedule_returns_unique_ids]()
     suite.test[test_timer_wheel__test_empty_wheel_active_count_zero]()

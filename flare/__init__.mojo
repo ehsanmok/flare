@@ -35,8 +35,8 @@ Linux, opt-in ``io_uring`` on Linux >= 6.0 via
 or compiled-down structs, an RFC 7230 parser under continuous fuzzing (62
 fuzz harnesses across the tree, 9M+ runs combined, zero known crashes), and a ``Cancel`` token plumbed to handlers via
 ``CancelHandler``. ``num_workers=1`` is a single-threaded
-reactor; ``num_workers=N`` with ``N >= 2`` runs N pthread
-workers behind per-worker ``SO_REUSEPORT`` listeners by default
+reactor; ``num_workers=N`` with ``N >= 2`` runs N
+workers (on Mojo's AsyncRT pool) behind per-worker ``SO_REUSEPORT`` listeners by default
 (matches actix_web's listener strategy and gives the highest
 steady-state throughput). Set ``FLARE_REUSEPORT_WORKERS=0`` to
 opt into the single shared listener with ``EPOLLEXCLUSIVE`` --
@@ -329,7 +329,7 @@ def main() raises:
 
 Every server example above takes an optional ``num_workers``. At
 ``1`` (the default) it's the single-threaded reactor. Set it to
-``default_worker_count()`` and flare runs N pthread workers,
+``default_worker_count()`` and flare runs N workers,
 each with its own reactor + timer wheel, with per-core pinning
 on Linux. The handler type is unchanged.
 

@@ -102,7 +102,7 @@ struct _WorkerCtx[F: Frontend](Movable):
 
 
 def _worker_entry[F: Frontend](arg: _OpaquePtr) -> _OpaquePtr:
-    """Pthread start routine for one reactor worker.
+    """Start routine for one reactor worker.
 
     Casts ``arg`` back to a ``_WorkerCtx[F]`` pointer, optionally
     pins to a CPU, then delegates to :meth:`Frontend.run_worker`
@@ -124,10 +124,10 @@ def _worker_entry[F: Frontend](arg: _OpaquePtr) -> _OpaquePtr:
     # Linux an overly-ambitious CPU index might raise. Pinning
     # happens from the worker itself via pthread_self, so we
     # re-wrap the current thread id into a ThreadHandle just to
-    # reuse the ``pin_to_cpu`` helper. Under ``-D FLARE_ASYNCRT`` this
-    # thread is a shared AsyncRT pool worker; the serving loop holds it
-    # until shutdown, so pinning it is safe as long as the original
-    # mask is put back before the task returns.
+    # reuse the ``pin_to_cpu`` helper. This thread is usually a shared
+    # AsyncRT pool worker; the serving loop holds it until shutdown,
+    # so pinning it is safe as long as the original mask is put back
+    # before the task returns.
     var saved_mask = 0
     if ctx_ptr[].pin_cores:
         saved_mask = save_thread_affinity()

@@ -1,37 +1,37 @@
-"""Tests for the thread-engine switch in ``flare.runtime._thread``.
+"""Tests for flare's thread engine in ``flare.runtime._thread``.
 
-Runs under both engines. Built plainly, ``spawn`` makes pthreads;
-built with ``-D FLARE_ASYNCRT`` it enqueues AsyncRT tasks
-(``flare.runtime._asyncrt``). ``pixi run test-thread-asyncrt`` runs the
-file both ways.
+``spawn`` enqueues AsyncRT tasks (``flare.runtime._asyncrt``);
+``spawn_os`` makes a dedicated OS thread.
 
 Covers:
 
-- ``spawn`` picks the engine the build asked for; ``spawn_os`` is
-  always a pthread.
-- spawn + join round-trips, off the calling thread.
+- ``spawn`` makes an AsyncRT task; ``spawn_os`` is always an OS thread.
+- spawn + join round-trips.
 - 1000 short tasks all run and all join.
 - ``detach`` both before and after the task finishes (the cell must be
   freed exactly once either way).
 - join from inside a spawned task, including one that spawns its own
   child (the path where an AsyncRT chain wait would donate).
-- The pool-capacity check for long-lived workers.
+- Serving leases: capped at the pool capacity process-wide, returned
+  when the loop exits, and ``spawn_serving`` falling back to an OS
+  thread when none is free.
 - Pinning a worker the way a serving loop does, then restoring its mask.
 - A forked child, which inherits AsyncRT's queue but none of its
   workers, still gets working threads (``spawn`` falls back to
-  pthreads there).
+  OS threads there).
 """
 
 from std.atomic import Atomic, Ordering
 from std.ffi import c_int, external_call
 from std.memory import Layout, Pointer, alloc
 from std.time import perf_counter_ns
-from std.testing import assert_equal, assert_false, assert_true, TestSuite
+from std.testing import assert_equal, assert_true, TestSuite
 
 from flare.runtime._asyncrt import (
-    FLARE_USE_ASYNCRT,
+    asyncrt_leases_held,
+    asyncrt_release_lease,
+    asyncrt_try_lease,
     asyncrt_worker_capacity,
-    check_asyncrt_capacity,
 )
 from flare.runtime._thread import (
     ThreadHandle,
@@ -43,7 +43,6 @@ from flare.runtime._thread import (
     restore_thread_affinity,
     save_thread_affinity,
 )
-from flare.runtime.scheduler import default_worker_count
 from flare.utils import SIGKILL, exit, fork, kill
 
 
@@ -178,7 +177,7 @@ def _pin_then_restore(arg: _OpaquePtr) -> _OpaquePtr:
     restore_thread_affinity(pinned)
     restore_thread_affinity(after)
     restore_thread_affinity(before)
-    _store(a, 0, 1 if ok else 2)
+    _store(a, 0, Int64(1 if ok else 2))
     return _null_ptr()
 
 
@@ -195,20 +194,17 @@ def test_pinned_worker_gets_its_mask_back() raises:
     _free_cells(cells)
 
 
-def test_engine_matches_build() raises:
+def test_spawn_is_asyncrt_task() raises:
     var cells = _new_cells(2)
     var h = ThreadHandle.spawn[_record_thread](
         _OpaquePtr(unsafe_from_address=cells)
     )
-    comptime if FLARE_USE_ASYNCRT:
-        assert_equal(Int(h._kind), Int(_KIND_ASYNCRT))
-    else:
-        assert_equal(Int(h._kind), Int(_KIND_OS))
+    assert_equal(Int(h._kind), Int(_KIND_ASYNCRT))
     h.join()
     _free_cells(cells)
 
 
-def test_spawn_os_is_always_pthread() raises:
+def test_spawn_os_is_always_os_thread() raises:
     var cells = _new_cells(2)
     var h = ThreadHandle.spawn_os[_record_thread](
         _OpaquePtr(unsafe_from_address=cells)
@@ -219,14 +215,16 @@ def test_spawn_os_is_always_pthread() raises:
     _free_cells(cells)
 
 
-def test_spawn_join_runs_off_caller_thread() raises:
+def test_spawn_join_round_trip() raises:
+    # Not "off the caller's thread": under ``mojo run`` main is itself a
+    # pool worker, and its join may donate and run the task inline.
     var cells = _new_cells(2)
     var h = ThreadHandle.spawn[_record_thread](
         _OpaquePtr(unsafe_from_address=cells)
     )
     h.join()
     assert_equal(Int(_load(cells, 0)), 42)
-    assert_true(_load(cells, 1) != Int64(Int(current_thread_id())))
+    assert_true(_load(cells, 1) != 0)
     # A second join on the same handle is a no-op.
     h.join()
     _free_cells(cells)
@@ -309,20 +307,47 @@ def test_nested_join_under_load() raises:
     _free_cells(cells)
 
 
-def test_capacity_check() raises:
+def test_leases_stop_at_capacity() raises:
     var cap = asyncrt_worker_capacity()
     assert_true(cap >= 1)
-    check_asyncrt_capacity("test", cap)
-    var raised = False
-    try:
-        check_asyncrt_capacity("test", cap + 1)
-    except:
-        raised = True
-    comptime if FLARE_USE_ASYNCRT:
-        assert_true(raised)
-        assert_true(default_worker_count() <= cap)
-    else:
-        assert_false(raised)
+    var base = asyncrt_leases_held()
+    var taken = 0
+    while asyncrt_try_lease():
+        taken += 1
+    assert_equal(base + taken, cap)
+    for _ in range(taken):
+        asyncrt_release_lease()
+    assert_equal(asyncrt_leases_held(), base)
+
+
+def test_spawn_serving_overflows_to_os_thread() raises:
+    var taken = 0
+    while asyncrt_try_lease():
+        taken += 1
+    var cells = _new_cells(2)
+    var h = ThreadHandle.spawn_serving[_record_thread](
+        _OpaquePtr(unsafe_from_address=cells)
+    )
+    assert_equal(Int(h._kind), Int(_KIND_OS))
+    h.join()
+    assert_equal(Int(_load(cells, 0)), 42)
+    for _ in range(taken):
+        asyncrt_release_lease()
+    _free_cells(cells)
+
+
+def test_spawn_serving_returns_its_lease() raises:
+    var base = asyncrt_leases_held()
+    var cells = _new_cells(2)
+    var h = ThreadHandle.spawn_serving[_record_thread](
+        _OpaquePtr(unsafe_from_address=cells)
+    )
+    assert_equal(Int(h._kind), Int(_KIND_ASYNCRT))
+    h.wait_started()
+    h.join()
+    assert_equal(Int(_load(cells, 0)), 42)
+    assert_equal(asyncrt_leases_held(), base)
+    _free_cells(cells)
 
 
 def test_spawn_join_in_forked_child() raises:
@@ -377,10 +402,7 @@ def test_spawn_join_in_forked_child() raises:
 
 def main() raises:
     print("=" * 60)
-    comptime if FLARE_USE_ASYNCRT:
-        print("test_thread_asyncrt.mojo — engine: AsyncRT")
-    else:
-        print("test_thread_asyncrt.mojo — engine: pthread")
+    print("test_thread_engine.mojo — AsyncRT tasks + OS threads")
     print("=" * 60)
     print()
     TestSuite.discover_tests[__functions_in_module()]().run()

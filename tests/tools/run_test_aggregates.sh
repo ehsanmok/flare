@@ -30,9 +30,8 @@ _ncpu="$( (nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null) || echo 2 )"
 JOBS="${AGG_JOBS:-$_ncpu}"
 BUILD_DIR="${BUILD_DIR:-build/agg}"
 # Extra `-D` flags for every mojo build/run below, word-split on purpose
-# (e.g. MOJO_DEFINES="-D FLARE_ASYNCRT" for the AsyncRT thread engine).
-# Point BUILD_DIR elsewhere too, so the two builds don't overwrite each
-# other.
+# (e.g. MOJO_DEFINES="-D ASSERT=all"). Point BUILD_DIR elsewhere too, so
+# the two builds don't overwrite each other.
 MOJO_DEFINES="${MOJO_DEFINES:-}"
 [ -n "$MOJO_DEFINES" ] && echo "── MOJO_DEFINES: $MOJO_DEFINES ──"
 

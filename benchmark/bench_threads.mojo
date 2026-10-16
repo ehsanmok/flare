@@ -1,13 +1,8 @@
-"""Benchmark: flare's thread engine, pthread vs AsyncRT.
+"""Benchmark: flare's thread engine, AsyncRT tasks vs dedicated OS threads.
 
-The same source, built twice:
-
-    mojo build -D ASSERT=none -I . benchmark/bench_threads.mojo -o bt_pthread
-    mojo build -D ASSERT=none -D FLARE_ASYNCRT -I . benchmark/bench_threads.mojo -o bt_asyncrt
-
-``pixi run bench-threads`` does both builds and runs them back to back.
-Each line is ``engine,workload,param,ns_per_op`` so the two outputs
-paste into one table.
+``ThreadHandle.spawn`` (an AsyncRT task) and ``ThreadHandle.spawn_os``
+(a pthread) side by side in one binary; ``pixi run bench-threads``
+builds and runs it. Each line is ``engine,workload,param,ns_per_op``.
 
 Workloads (each the median of ``BENCH_REPS`` runs, default 5):
 
@@ -18,8 +13,8 @@ Workloads (each the median of ``BENCH_REPS`` runs, default 5):
   arithmetic, then join them all. The time is reported per task.
 - ``block_in_pool``: ``block_in_pool`` round trips of a trivial
   closure, the path a reactor handler takes to offload blocking work.
-  ``block_in_pool`` also takes a named semaphore per call, so this row
-  is not a pure spawn measurement on either engine.
+  It always runs on the engine (``spawn``), and also takes a named
+  semaphore per call, so it is not a pure spawn measurement.
 """
 
 from std.atomic import Atomic
@@ -29,15 +24,17 @@ from std.time import perf_counter_ns
 
 from flare.http import Cancel
 from flare.runtime import block_in_pool
-from flare.runtime._asyncrt import FLARE_USE_ASYNCRT
 from flare.runtime._thread import ThreadHandle, _OpaquePtr, _null_ptr
 
 
-def _engine() -> String:
-    comptime if FLARE_USE_ASYNCRT:
-        return "asyncrt"
+@always_inline
+def _spawn[
+    os: Bool, start: def(_OpaquePtr) thin -> _OpaquePtr
+](arg: _OpaquePtr) raises -> ThreadHandle:
+    comptime if os:
+        return ThreadHandle.spawn_os[start](arg)
     else:
-        return "pthread"
+        return ThreadHandle.spawn[start](arg)
 
 
 def _env_int(name: String, default: Int) -> Int:
@@ -75,22 +72,22 @@ def _trivial() raises -> Int:
     return 1
 
 
-def bench_spawn_join(n: Int) raises -> Int:
+def bench_spawn_join[os: Bool](n: Int) raises -> Int:
     var t0 = perf_counter_ns()
     for _ in range(n):
-        var h = ThreadHandle.spawn[_nop](_null_ptr())
+        var h = _spawn[os, _nop](_null_ptr())
         h.join()
     return Int(perf_counter_ns() - t0) // n
 
 
-def bench_fanout(m: Int) raises -> Int:
+def bench_fanout[os: Bool](m: Int) raises -> Int:
     var sink = alloc(Layout[Int64](count=1)).unsafe_leak()
     sink.unsafe_write(0)
     var handles = alloc(Layout[ThreadHandle](count=m)).unsafe_leak()
     var t0 = perf_counter_ns()
     for i in range(m):
         handles.unsafe_offset(i).unsafe_write(
-            ThreadHandle.spawn[_work](_OpaquePtr(unsafe_from_address=Int(sink)))
+            _spawn[os, _work](_OpaquePtr(unsafe_from_address=Int(sink)))
         )
     for i in range(m):
         handles.unsafe_offset(i)[].join()
@@ -118,22 +115,30 @@ def main() raises:
     var n = _env_int("BENCH_SPAWN_N", 2000)
     var m = _env_int("BENCH_FANOUT_M", 1000)
     var b = _env_int("BENCH_BLOCK_N", 500)
-    var engine = _engine()
 
     # One untimed pass so first-touch costs (pool warm-up, page faults,
     # the semaphore's first open) stay out of the medians.
-    _ = bench_spawn_join(16)
-    _ = bench_fanout(16)
+    _ = bench_spawn_join[False](16)
+    _ = bench_spawn_join[True](16)
+    _ = bench_fanout[False](16)
+    _ = bench_fanout[True](16)
     _ = bench_block_in_pool(16)
 
     var sj = List[Int]()
+    var sj_os = List[Int]()
     var fo = List[Int]()
+    var fo_os = List[Int]()
     var bp = List[Int]()
     for _ in range(reps):
-        sj.append(bench_spawn_join(n))
-        fo.append(bench_fanout(m))
+        sj.append(bench_spawn_join[False](n))
+        sj_os.append(bench_spawn_join[True](n))
+        fo.append(bench_fanout[False](m))
+        fo_os.append(bench_fanout[True](m))
         bp.append(bench_block_in_pool(b))
 
-    print(engine + ",spawn_join,n=" + String(n) + "," + String(_median(sj)))
-    print(engine + ",fanout,m=" + String(m) + "," + String(_median(fo)))
-    print(engine + ",block_in_pool,n=" + String(b) + "," + String(_median(bp)))
+    print("engine,workload,param,ns_per_op")
+    print("asyncrt,spawn_join,n=" + String(n) + "," + String(_median(sj)))
+    print("os,spawn_join,n=" + String(n) + "," + String(_median(sj_os)))
+    print("asyncrt,fanout,m=" + String(m) + "," + String(_median(fo)))
+    print("os,fanout,m=" + String(m) + "," + String(_median(fo_os)))
+    print("asyncrt,block_in_pool,n=" + String(b) + "," + String(_median(bp)))

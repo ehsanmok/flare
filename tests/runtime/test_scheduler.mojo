@@ -8,6 +8,8 @@ Covers:
 - ``shutdown()`` is idempotent.
 - ``is_running`` goes False after shutdown.
 - Multiple start/shutdown cycles do not leak.
+- Workers past the AsyncRT pool's serving leases run on OS threads,
+  and shutdown gives every lease back.
 
 Runtime-behaviour tests (actual HTTP round-trips across N workers)
 live in ``test_server_multicore.mojo`` (Step 10). The tests here are
@@ -29,7 +31,9 @@ from std.testing import assert_true, assert_equal, TestSuite
 from flare.net import SocketAddr
 from flare.runtime import Frontend, Scheduler, default_worker_count
 from flare.tcp import TcpListener
+from flare.runtime._asyncrt import asyncrt_leases_held, asyncrt_worker_capacity
 from flare.runtime._libc_time import libc_nanosleep_ms
+from flare.runtime._thread import _KIND_OS
 from flare.runtime.scheduler import (
     load_stop_flag,
     store_worker_stat,
@@ -162,6 +166,28 @@ def test_scheduler_multiple_start_cycles() raises:
             pin_cores=False,
         )
         s.shutdown()
+
+
+def test_workers_past_the_pool_capacity_run_on_os_threads() raises:
+    """Two more workers than there are free serving leases: start neither
+    raises nor hangs, exactly the two extra workers are OS threads, and
+    shutdown returns every lease."""
+    var base = asyncrt_leases_held()
+    var cap = asyncrt_worker_capacity()
+    var s = Scheduler[_NopFrontend].start(
+        addr=SocketAddr.localhost(0),
+        frontend=_NopFrontend(0),
+        num_workers=cap - base + 2,
+        pin_cores=False,
+    )
+    var os_threads = 0
+    for i in range(s._workers_len):
+        if s._workers_ptr.unsafe_offset(i)[]._kind == _KIND_OS:
+            os_threads += 1
+    assert_equal(os_threads, 2)
+    assert_equal(asyncrt_leases_held(), cap)
+    s.shutdown()
+    assert_equal(asyncrt_leases_held(), base)
 
 
 def test_scheduler_pin_cores_flag_default_no_crash() raises:

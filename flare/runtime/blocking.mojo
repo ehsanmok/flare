@@ -3,8 +3,8 @@
 The reactor's hot path is single-threaded per worker; any
 blocking syscall (synchronous DB query, libc ``getaddrinfo``,
 file I/O on a slow disk, CPU-heavy compute) freezes the worker
-for the duration. The fix is to offload the blocking work to a
-fresh kernel thread:
+for the duration. The fix is to offload the blocking work to
+another thread:
 
     var rows = block_in_pool[List[Row]](
         lambda: db.query("SELECT ..."),
@@ -14,26 +14,25 @@ fresh kernel thread:
 The handler stays in straight-line code; ``cancel`` short-
 circuits if the request is cancelled mid-blocking-call.
 
-Implementation: per-call detached pthread.
+Implementation: one AsyncRT task per call.
 
-Each ``block_in_pool[T]`` call spawns a fresh kernel thread via
-``pthread_create``, runs ``work()`` on it, and surfaces the
-result back through a heap-allocated task struct. The submitter
-(the reactor-thread handler) polls a ``done_flag`` in a 1 ms
-sleep loop, also polling ``cancel`` so a flip surfaces
-immediately.
+Each ``block_in_pool[T]`` call runs ``work()`` as a task on the
+AsyncRT pool (``ThreadHandle.spawn``), surfaces the result back
+through a heap-allocated task struct, and joins the task. A
+reactor worker is itself a pool task, so its join donates: while
+it waits it runs queued pool tasks, its own ``work()`` included
+if no other worker has taken it. In a forked child, which has no
+pool, the task is a fresh OS thread instead.
 
-Why per-call rather than a singleton pool:
+Notes on the design:
 
-1. Mojo does not allow module-level mutable ``var``s
-   (``error: global variables are not supported``). Without
-   that, a process-global pool needs either a libc mmap-backed
-   flag-byte indirection or an
-   API change that threads pool-state through every call site.
-2. Per-call ``pthread_create`` overhead is ~30-50 µs on Linux
-   x86_64. The API targets millisecond-scale blocking work
-   (DB queries, disk I/O); the overhead is < 5 % of any
-   workload that needs ``block_in_pool`` in the first place.
+1. The pool is shared with the stdlib, so there is no flare-side
+   pool to size or keep alive, and a task costs an enqueue rather
+   than a ``pthread_create`` (~30-50 µs on Linux x86_64).
+2. A ``work()`` that blocks holds its pool worker for as long as
+   it blocks. A reactor that donates while joining can also pick
+   up someone else's queued ``work()`` before it returns to its
+   own connections.
 3. The MAX_POOL_SIZE cap (32) is enforced process-wide via a
    kernel-backed POSIX named semaphore shared by ``block_in_pool``
    and ``resolve_async``: a call that would exceed the cap raises
@@ -44,20 +43,15 @@ Why per-call rather than a singleton pool:
    running uncapped) and per-process (keyed by pid, since Mojo has no
    module-level mutable globals).
 
-What the kernel-thread split actually buys:
+What the split actually buys:
 
-- Blocking syscalls inside ``work()`` only block the work's
-  pthread, not the reactor's pthread structure. The kernel can
-  schedule other reactor workers onto the freed CPU while the
-  syscall is waiting.
-- A crash in ``work()`` (segfault, abort) kills its own pthread,
-  not the reactor's; the submitter sees ``pthread_join`` return
-  non-zero or ``done_flag`` never flipping (caught by an outer
-  timeout if the user wires one in).
+- Blocking syscalls inside ``work()`` run on another pool worker
+  when one is free, so the kernel can schedule other reactor
+  workers onto the freed CPU while the syscall is waiting.
 - Multi-worker parallelism: N concurrent connections on N
-  reactor workers each calling ``block_in_pool`` get N parallel
-  ``work()`` executions on N pthreads, instead of being
-  serialised inside each reactor worker's thread.
+  reactor workers each calling ``block_in_pool`` get up to N
+  parallel ``work()`` executions, instead of being serialised
+  inside each reactor worker.
 
 What it does NOT buy (and why):
 
@@ -75,17 +69,17 @@ Cancel contract (unchanged from the in-thread fallback):
   raise immediately without spawning anything.
 - **In-flight:** the user's ``work()`` is responsible for
   polling ``cancel`` if it wants to short-circuit mid-call
-  (the work runs on a kernel thread that can read the cancel
+  (the work runs on another thread that can read the cancel
   cell directly). The library cannot preempt — Mojo doesn't
-  expose preemption and pthread cancellation is unsafe under
+  expose preemption and thread cancellation is unsafe under
   the borrow checker.
-- **Post-flight:** the submitter blocks on ``pthread_join``
-  until ``work()`` returns; on join it checks the cancel cell
+- **Post-flight:** the submitter joins the task until
+  ``work()`` returns; on join it checks the cancel cell
   one more time. If the cell flipped while ``work()`` ran,
   raise with a "cancelled mid-flight (<reason>)" message
   instead of returning a now-stale result.
 
-Why pthread_join rather than poll-on-done-flag:
+Why join rather than poll-on-done-flag:
 
 A previous iteration of this implementation polled a heap
 ``done_flag`` byte with a 1 ms ``libc_usleep`` between checks
@@ -93,11 +87,10 @@ to surface mid-flight cancel without waiting for ``work()``
 to complete. ``libc_usleep`` hits the documented 1000-1500x
 multiplier when the calling thread
 participates in multi-threaded contexts (and a ``block_in_pool``
-caller is, by construction, multi-threaded — the worker pthread
-exists). That made the 1 ms poll behave like a 1 second poll
-and dragged the per-call latency from ~50 µs to ~1.1 s. Joining
-on the worker thread sidesteps the libc-time path entirely and
-restores per-call latency to the pthread create + work + join
+caller is, by construction, multi-threaded). That made the 1 ms
+poll behave like a 1 second poll and dragged the per-call
+latency from ~50 µs to ~1.1 s. Joining sidesteps the libc-time
+path entirely, so per-call latency is the spawn + work + join
 cost.
 
 The trade-off is that mid-flight cancel no longer raises
@@ -272,7 +265,7 @@ comptime _ERR_BUF_CAP: Int = 256
 
 @fieldwise_init
 struct _Task[T: Deinitable & Movable](Movable):
-    """Heap-allocated task delivered to the worker pthread.
+    """Heap-allocated task delivered to the worker.
 
     Address fields are stored as ``Int`` rather than typed
     pointers because ``Pointer[T, MutUntrackedOrigin]``
@@ -285,7 +278,7 @@ struct _Task[T: Deinitable & Movable](Movable):
     """
 
     var work: def() raises thin -> Self.T
-    """User-supplied work function. Runs on the worker pthread."""
+    """User-supplied work function. Runs on the worker."""
 
     var result_addr: Int
     """Address of the heap slot the worker writes the success
@@ -314,7 +307,7 @@ def _block_thunk[
 ](arg: Pointer[UInt8, MutUntrackedOrigin]) -> Pointer[
     UInt8, MutUntrackedOrigin
 ]:
-    """pthread start routine. Per-T monomorphisation.
+    """Task start routine. Per-T monomorphisation.
 
     1. Reconstruct ``_Task[T]`` from the opaque arg pointer.
     2. Call ``task.work()``; capture result OR error.
@@ -362,7 +355,7 @@ def _block_thunk[
         success_ptr[unsafe_offset=0] = UInt8(0)
 
     # The submitter owns the result / err / success buffers; it
-    # frees them after pthread_join returns. We only own the
+    # frees them after the join returns. We only own the
     # _Task allocation itself.
     task_ptr.unsafe_free()
 
@@ -394,12 +387,12 @@ def _raise_cancel(prefix: String, reason: Int) raises:
 def block_in_pool[
     T: Deinitable & Movable
 ](work: def() raises thin -> T, cancel: Cancel) raises -> T:
-    """Run ``work()`` on a fresh kernel thread; wait for its
-    result on the calling thread.
+    """Run ``work()`` as an AsyncRT task; wait for its result on the
+    calling thread.
 
-    Built with ``-D FLARE_ASYNCRT`` the "thread" is a task on the
-    AsyncRT pool instead (see ``flare.runtime._asyncrt``): cheaper to
-    start, but it holds a pool worker for as long as ``work()`` blocks.
+    The task holds a pool worker for as long as ``work()`` blocks
+    (see ``flare.runtime._asyncrt``). In a forked child it runs on a
+    fresh OS thread.
 
     Pre-flight: if ``cancel`` is already flipped at entry, raise
     without spawning anything.
@@ -471,8 +464,8 @@ def block_in_pool[
         )
     )
 
-    # ── Spawn worker pthread + block on join ────────────────────────────────
-    # pthread_join is the right primitive here: the user-visible API
+    # ── Spawn worker task + block on join ───────────────────────────────────
+    # Joining is the right primitive here: the user-visible API
     # is synchronous, so the submitter needs to wait until the worker
     # has finished writing the result/error buffers anyway. Polling
     # would mean either burning CPU (busy-wait) or going through

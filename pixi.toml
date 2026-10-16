@@ -158,7 +158,6 @@ bench-build-quinn-h3      = "cargo build --release --locked --manifest-path benc
 bench-build-quiche-h3     = "cargo build --release --locked --manifest-path benchmark/baselines/quiche/Cargo.toml" # quiche HTTP/3 baseline
 bench-streaming           = "bash benchmark/scripts/bench_vs_baseline.sh --only=flare_mc --configs=sse_stream,buffered_4kb"  # v0.10 P4: chunked streaming vs buffered at equal payload
 bench-ab                  = "bash benchmark/scripts/ab_interleaved.sh"  # interleaved A/B of two prebuilt binaries (A_BIN / B_BIN); for shared boxes
-bench-ab-threads          = "bash benchmark/scripts/ab_threads.sh"      # interleaved A/B of flare_mc on pthread (A) vs AsyncRT (B) workers; Linux + wrk2
 bench-integrity-only      = "bash benchmark/scripts/_integrity_check.sh"
 bench-collect-env         = "bash benchmark/scripts/_collect_env.sh"
 
@@ -503,9 +502,9 @@ test-router          = "mojo -I . tests/http/test_router.mojo"             # v0.
 test-router-copy     = "mojo -I . tests/http/test_router_copy.mojo"        # v0.7 — Router-Copyable refcount-shared boxed handlers (~5 tests)
 test-server-handler  = "mojo -I . tests/http/test_server_handler.mojo"     # v0.4.0 Track 1 — HttpServer.serve[H: Handler & Copyable] single-worker (~6 tests)
 test-server-config-check = "mojo -I . tests/http/test_server_config_check.mojo" # ServerConfig.check comptime invariants (~6 tests)
-test-thread-ffi      = "mojo -I . tests/runtime/test_thread_ffi.mojo"         # v0.4.0 Track 3 — pthread + CPU pinning FFI (~10 tests)
-test-thread-asyncrt  = "mojo -I . tests/runtime/test_thread_asyncrt.mojo && mojo -D FLARE_ASYNCRT -I . tests/runtime/test_thread_asyncrt.mojo"  # thread-engine switch, run on pthreads then on AsyncRT (~10 tests each)
-bench-threads        = "bash benchmark/scripts/bench_threads.sh"             # spawn/join, fan-out and block_in_pool cost on pthread vs AsyncRT
+test-thread-ffi      = "mojo -I . tests/runtime/test_thread_ffi.mojo"         # v0.4.0 Track 3 — thread handles + CPU pinning FFI (~11 tests)
+test-thread-engine   = "mojo -I . tests/runtime/test_thread_engine.mojo"      # AsyncRT thread engine: tasks, joins, serving leases, fork fallback (~13 tests)
+bench-threads        = "bash benchmark/scripts/bench_threads.sh"             # spawn/join, fan-out and block_in_pool cost: AsyncRT tasks vs OS threads
 test-reuseport       = "mojo -I . tests/runtime/test_reuseport.mojo"          # v0.4.0 Track 3 — SO_REUSEPORT helper (~6 tests)
 test-scheduler       = "mojo -I . tests/runtime/test_scheduler.mojo"          # v0.4.0 Track 3 — multicore Scheduler lifecycle (~6 tests)
 test-server-multicore = "mojo -I . tests/http/test_server_multicore.mojo"  # v0.4.0 Track 3 — HttpServer multicore (~7 tests)
@@ -689,9 +688,6 @@ stress-scheduler = "mojo -I . tests/runtime/stress_scheduler.mojo"
 # `pixi run mojo -I . tests/<area>/<file>.mojo`.
 tests     = "bash tests/tools/run_test_aggregates.sh"
 tests-gen = "python3 tests/tools/gen_test_aggregates.py"   # regenerate tests/_agg after adding a test file
-# Same suite on the experimental AsyncRT thread engine (-D FLARE_ASYNCRT,
-# see docs/asyncrt.md). Separate build dir so it doesn't clobber `tests`.
-tests-asyncrt = { cmd = "bash tests/tools/run_test_aggregates.sh", env = { MOJO_DEFINES = "-D FLARE_ASYNCRT", BUILD_DIR = "build/agg-asyncrt" } }
 
 # `tests-per-file` used to live here: a hand-maintained `&&` chain of
 # ~300 `mojo -I .` invocations covering tests and examples together.

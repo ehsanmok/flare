@@ -1,8 +1,4 @@
-"""Experimental AsyncRT task backend for ``ThreadHandle``.
-
-Compiled in only when the program is built with ``-D FLARE_ASYNCRT``
-(see ``FLARE_USE_ASYNCRT``). Without the flag nothing here is reached
-and the binary has no AsyncRT calls in it.
+"""AsyncRT task backend for ``ThreadHandle``: flare's thread engine.
 
 AsyncRT is the work-queue runtime the Mojo stdlib and the rest of the
 Modular stack run on. Every Mojo binary links it
@@ -35,6 +31,14 @@ workers) are started with ``wait_started``: the spawner waits until
 every loop is running, so none is ever sitting in the queue where a
 waiter could take it.
 
+A serving loop also holds its worker until shutdown, and the pool does
+not grow. Loops therefore take a lease first (``asyncrt_try_lease``):
+at most ``parallelism_level() - 1`` across the process, so one worker
+is always left for short tasks. A loop that finds no lease free runs on
+a dedicated OS thread, the way every worker did before AsyncRT, so
+asking for more workers than the pool holds (or starting several
+servers) neither fails nor hangs.
+
 A forked child has no pool. ``fork`` copies only the calling thread,
 so the child inherits AsyncRT's queue but none of its workers: a task
 enqueued there never runs, and on macOS enqueueing can crash outright
@@ -42,9 +46,9 @@ enqueued there never runs, and on macOS enqueueing can crash outright
 after ``fork``). So the child must not call into AsyncRT at all.
 ``asyncrt_pool_alive`` tells the two apart without doing so: a live
 pool has its ``parallelism_level()`` worker threads, while a child
-starts with one thread. ``ThreadHandle.spawn`` falls back to a pthread
-when the pool is dead (a pre-fork server, or the fork-based server
-tests).
+starts with one thread. ``ThreadHandle.spawn`` falls back to a dedicated
+OS thread when the pool is dead (a pre-fork server, or the fork-based
+server tests).
 
 Things that must not run here, and use ``ThreadHandle.spawn_os``
 instead:
@@ -70,14 +74,9 @@ from std.ffi import _get_global, c_int, external_call
 from std.memory import Layout, OptionalPointer, Pointer, alloc
 from std.runtime import parallelism_level
 from std.sys import stderr
-from std.sys.defines import is_defined
 from std.sys.info import CompilationTarget
 from std.time import perf_counter_ns
 
-
-comptime FLARE_USE_ASYNCRT: Bool = is_defined["FLARE_ASYNCRT"]()
-"""True when built with ``-D FLARE_ASYNCRT``: ``ThreadHandle.spawn``
-enqueues onto the AsyncRT pool instead of calling ``pthread_create``."""
 
 comptime _OpaquePtr = Pointer[UInt8, MutUntrackedOrigin]
 
@@ -137,12 +136,14 @@ def _destroy_cell(cell: Int):
 
 
 def _asyncrt_trampoline[
-    start: def(_OpaquePtr) thin -> _OpaquePtr
+    start: def(_OpaquePtr) thin -> _OpaquePtr, leased: Bool
 ](cell_ptr: _OpaquePtr):
     """AsyncRT work item: run ``start(arg)``, then publish completion.
 
     Must not raise: it runs on an AsyncRT worker with no error channel,
-    the same contract as a pthread start routine.
+    the same contract as a pthread start routine. A ``leased`` task
+    (a serving loop, see ``asyncrt_try_lease``) gives its lease back as
+    soon as ``start`` returns.
 
     The state CAS comes before the chain completes. After
     ``RUNNING -> DONE`` the joiner owns the cell and may free it as soon
@@ -158,6 +159,8 @@ def _asyncrt_trampoline[
     )
     var arg_addr = Int(_load(cell, _CELL_ARG))
     _ = start(_OpaquePtr(unsafe_from_address=arg_addr))
+    comptime if leased:
+        asyncrt_release_lease()
     if _cas_state(cell, _STATE_RUNNING, _STATE_DONE):
         _chain_complete(cell)
     else:
@@ -169,13 +172,16 @@ def _asyncrt_trampoline[
 
 
 def asyncrt_spawn[
-    start: def(_OpaquePtr) thin -> _OpaquePtr
+    start: def(_OpaquePtr) thin -> _OpaquePtr, leased: Bool = False
 ](arg: _OpaquePtr) -> UInt64:
     """Enqueue ``start(arg)`` on the AsyncRT pool.
 
     Returns the task cell's address, which the ``ThreadHandle`` stores
     in place of a ``pthread_t``. Never fails: the work queue is
-    unbounded, and the task runs once a pool worker is free.
+    unbounded, and the task runs once a pool worker is free. With
+    ``leased`` the caller already holds a lease from
+    ``asyncrt_try_lease``, and the task releases it when ``start``
+    returns.
     """
     var raw = alloc(Layout[Int64](count=_CELL_SLOTS)).unsafe_leak()
     for i in range(_CELL_SLOTS):
@@ -193,7 +199,7 @@ def asyncrt_spawn[
         _OpaquePtr,
         Int,
     ](
-        _asyncrt_trampoline[start],
+        _asyncrt_trampoline[start, leased],
         _OpaquePtr(unsafe_from_address=cell),
         -1,
     )
@@ -204,7 +210,8 @@ def asyncrt_join(cell_id: UInt64):
     """Wait for the task at ``cell_id`` to finish, then free its cell.
 
     From a pool worker the wait donates the worker to other queued
-    tasks; from any other thread (``main`` included) it just blocks.
+    tasks; from any other thread (``main`` of a built binary included)
+    it just blocks. Under ``mojo run`` main is itself a pool worker.
     """
     var cell = Int(cell_id)
     _chain_wait(cell)
@@ -365,14 +372,15 @@ def asyncrt_pool_alive() -> Bool:
         print(
             "flare: AsyncRT pool has no worker threads in pid",
             pid,
-            "(forked child?); using pthreads in this process",
+            "(forked child?); using OS threads in this process",
             file=stderr,
         )
     return alive
 
 
 def asyncrt_worker_capacity() -> Int:
-    """Pool workers flare may hold with long-lived tasks (serving loops).
+    """Pool workers flare may hold with long-lived tasks (serving loops),
+    across the whole process.
 
     One below the pool size, so at least one worker stays free for
     short tasks (``block_in_pool``, DNS, the H3/H2 race) and for
@@ -382,25 +390,45 @@ def asyncrt_worker_capacity() -> Int:
     return n if n >= 1 else 1
 
 
-def check_asyncrt_capacity(who: String, num_workers: Int) raises:
-    """Raise if ``num_workers`` long-lived tasks would exhaust the pool.
+# ── Serving-loop leases ─────────────────────────────────────────────────────
+# One process-global Int64: pool workers currently held by serving loops.
+# Process-wide, so two servers side by side can't exhaust the pool together.
 
-    No-op unless built with ``-D FLARE_ASYNCRT``. The check is per call,
-    not process-wide: two servers started side by side can still
-    oversubscribe the pool together.
+
+def _lease_cell_init() -> OptionalPointer[NoneType, UntrackedOrigin[mut=True]]:
+    var raw = alloc(Layout[Int64](count=1)).unsafe_leak()
+    raw.unsafe_write(Int64(0))
+    return Pointer[NoneType, UntrackedOrigin[mut=True]](
+        unsafe_from_address=Int(raw)
+    )
+
+
+def _lease_cell() -> Int:
+    var p = _get_global[
+        "flare_asyncrt_leases", _lease_cell_init, _pool_cell_destroy
+    ]()
+    return Int(p.value())
+
+
+def asyncrt_try_lease() -> Bool:
+    """Claim one of the ``asyncrt_worker_capacity()`` pool workers for a
+    serving loop. False when they are all held; the caller then runs the
+    loop on a dedicated OS thread instead.
     """
-    comptime if FLARE_USE_ASYNCRT:
-        if not asyncrt_pool_alive():
-            return  # workers will be pthreads, see ThreadHandle.spawn
-        var cap = asyncrt_worker_capacity()
-        if num_workers > cap:
-            raise Error(
-                who
-                + ": num_workers="
-                + String(num_workers)
-                + " exceeds the AsyncRT pool capacity "
-                + String(cap)
-                + " (parallelism_level() - 1). Each worker holds a pool"
-                " thread for the server's lifetime; lower num_workers or"
-                " build without -D FLARE_ASYNCRT."
-            )
+    var cell = _lease_cell()
+    var cap = Int64(asyncrt_worker_capacity())
+    var held = _load(cell, 0)
+    while held < cap:
+        if Atomic[Int64].compare_exchange(_slot(cell, 0), held, held + 1):
+            return True
+    return False
+
+
+def asyncrt_release_lease():
+    """Give back a lease taken by ``asyncrt_try_lease``."""
+    _ = Atomic[Int64].fetch_add(_slot(_lease_cell(), 0), -1)
+
+
+def asyncrt_leases_held() -> Int:
+    """Pool workers currently held by serving loops."""
+    return Int(_load(_lease_cell(), 0))

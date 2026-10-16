@@ -670,7 +670,7 @@ struct HttpServer(Movable):
         - ``num_workers == 1`` (default): single-threaded reactor
           (kqueue on macOS, epoll on Linux). Same hot path as the
           ``serve``.
-        - ``num_workers >= 2``: multicore — N ``pthread`` workers
+        - ``num_workers >= 2``: multicore — N workers
           via ``flare.runtime.scheduler.Scheduler``. By default
           each worker binds its own ``SO_REUSEPORT`` listener
           (the kernel hashes new 4-tuples to one of N listeners;
@@ -699,7 +699,7 @@ struct HttpServer(Movable):
         Raises:
             NetworkError: On fatal listener errors; per-connection errors
                 close the offending connection silently.
-            Error: On ``pthread_create`` failure when
+            Error: If a worker fails to spawn when
                 ``num_workers >= 2``.
         """
         from ._server_reactor_impl import run_uring_bufring_reactor_loop
@@ -999,7 +999,7 @@ struct HttpServer(Movable):
         max_in_flight: Int = 0,
         retry_after_s: Int = 1,
     ) raises:
-        """Multi-worker streaming reactor (N pthreads over the scheduler).
+        """Multi-worker streaming reactor (N workers over the scheduler).
 
         The :trait:`StreamHandler` twin of ``serve(handler, num_workers)``:
         each worker runs its own copy of ``handler`` on its own reactor +
@@ -1082,7 +1082,7 @@ struct HttpServer(Movable):
           overload; this overload's ``Copyable`` constraint is
           stricter than necessary but the dispatch is still
           correct.
-        - ``num_workers >= 2``: multicore — N ``pthread`` workers
+        - ``num_workers >= 2``: multicore — N workers
           sharing a single listener fd via
           ``flare.runtime.scheduler.Scheduler``.
 
@@ -1096,7 +1096,7 @@ struct HttpServer(Movable):
         Raises:
             NetworkError: On fatal listener errors; per-connection errors
                 close the offending connection silently.
-            Error: On ``pthread_create`` failure when
+            Error: If a worker fails to spawn when
                 ``num_workers >= 2``.
         """
         from ._server_reactor_impl import run_uring_bufring_reactor_loop
@@ -1401,7 +1401,7 @@ struct HttpServer(Movable):
     ) raises:
         """Multi-worker twin of :meth:`serve_static`.
 
-        Spawns ``num_workers`` pthread workers via
+        Spawns ``num_workers`` workers via
         :class:`flare.runtime.Scheduler` parameterized over
         :class:`flare.http.StaticHttpFrontend`, each running
         ``run_reactor_loop_static_shared``. Per-request work in
@@ -1436,7 +1436,7 @@ struct HttpServer(Movable):
 
         Raises:
             NetworkError: On fatal listener errors.
-            Error: On ``pthread_create`` failure (rare); partially-
+            Error: If a worker fails to spawn (rare); partially-
                 started workers are best-effort joined before raise.
         """
         from ..runtime import Scheduler
