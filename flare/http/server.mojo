@@ -681,7 +681,10 @@ struct HttpServer(Movable):
           ``EPOLLEXCLUSIVE`` (Linux >= 4.5), which trades
           7-22 % req/s (handler vs static fast path) for a
           uniformly tighter p99.99 σ under sustained load; see
-          ``docs/benchmark.md``.
+          ``docs/benchmark.md``. The exclusive wakeup goes to one
+          waiting worker per event, so connections are not spread
+          evenly: a lightly loaded server may keep landing them on the
+          same worker (see ``Reactor.register_exclusive``).
 
         For Router / middleware / stateful-struct handlers, use the
         Handler-typed overload ``serve[H: Handler & Copyable]``.

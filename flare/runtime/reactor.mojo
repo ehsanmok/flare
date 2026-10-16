@@ -334,6 +334,13 @@ struct Reactor(Movable):
         so the practical behaviour is similar minus the kernel-level
         fairness guarantee.
 
+        Registration uses ``EPOLLIN | EPOLLEXCLUSIVE`` and deliberately
+        omits the ``EPOLLRDHUP`` that ``register`` adds for read interest:
+        ``epoll_ctl(2)`` rejects that combination with ``EINVAL``. Wakeups
+        are exclusive, not balanced: the kernel wakes one waiting worker
+        per event, so a lightly loaded server may keep landing new
+        connections on the same worker.
+
         ``EPOLLEXCLUSIVE`` is only valid on the initial ``EPOLL_CTL_ADD``
         — modifying an existing registration to add it is rejected by
         the kernel. The shared-listener path therefore registers once
@@ -362,15 +369,23 @@ struct Reactor(Movable):
             var ev = stack_allocation[EPOLL_EVENT_SIZE, UInt8]()
             for i in range(EPOLL_EVENT_SIZE):
                 ev.unsafe_offset(i).unsafe_write(UInt8(0))
-            var bits = _interest_to_epoll(interest) | EPOLLEXCLUSIVE
+            # epoll_ctl(2): EPOLLEXCLUSIVE may only be combined with EPOLLIN,
+            # EPOLLOUT, EPOLLWAKEUP and EPOLLET. _interest_to_epoll adds
+            # EPOLLRDHUP for read interest, which makes the kernel answer
+            # EINVAL, so strip it. A listener never needs RDHUP.
+            var bits = (
+                _interest_to_epoll(interest) & ~EPOLLRDHUP
+            ) | EPOLLEXCLUSIVE
             _epoll_event_set(ev, bits, token)
             var rc = _epoll_ctl(self._fd, EPOLL_CTL_ADD, fd, ev)
             if rc < c_int(0):
-                # Some older kernels (<4.5) don't support EPOLLEXCLUSIVE
-                # and return EINVAL. Fall back to a plain register so
-                # the multi-worker scheduler still works (with
-                # thundering-herd accepts) instead of crashing on a
-                # registration error. Newer kernels accept it.
+                # Kernels before 4.5 don't know EPOLLEXCLUSIVE and return
+                # EINVAL. Fall back to a plain register so the multi-worker
+                # scheduler still works (with thundering-herd accepts)
+                # instead of crashing on a registration error. Any kernel
+                # that supports the flag accepts the mask built above, so
+                # reaching this on a modern kernel is a bug (it was, while
+                # the mask still carried EPOLLRDHUP).
                 var ev2 = stack_allocation[EPOLL_EVENT_SIZE, UInt8]()
                 for i in range(EPOLL_EVENT_SIZE):
                     ev2.unsafe_offset(i).unsafe_write(UInt8(0))

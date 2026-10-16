@@ -355,6 +355,12 @@ from test_reactor import (
 from test_reactor import (
     test_register_of_a_bad_fd_raises as test_reactor__test_register_of_a_bad_fd_raises,
 )
+from test_reactor import (
+    test_register_exclusive_really_sets_epollexclusive as test_reactor__test_register_exclusive_really_sets_epollexclusive,
+)
+from test_reactor import (
+    test_plain_register_keeps_rdhup as test_reactor__test_plain_register_keeps_rdhup,
+)
 from test_reactor_shutdown import (
     test_server_config_shutdown_timeout_default as test_reactor_shutdown__test_server_config_shutdown_timeout_default,
 )
@@ -912,6 +918,10 @@ def main() raises:
     suite.test[test_reactor__test_event_flag_helpers]()
     suite.test[test_reactor__test_many_wakeups_never_block]()
     suite.test[test_reactor__test_register_of_a_bad_fd_raises]()
+    suite.test[
+        test_reactor__test_register_exclusive_really_sets_epollexclusive
+    ]()
+    suite.test[test_reactor__test_plain_register_keeps_rdhup]()
     # tests/runtime/test_reactor_shutdown.mojo
     suite.test[
         test_reactor_shutdown__test_server_config_shutdown_timeout_default

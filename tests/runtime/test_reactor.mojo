@@ -18,8 +18,10 @@ from std.testing import (
     TestSuite,
 )
 from std.ffi import c_int, c_size_t
+from std.sys.info import CompilationTarget
 
 from flare.net import SocketAddr
+from flare.net._libc_event import EPOLLEXCLUSIVE, EPOLLIN, EPOLLRDHUP
 from flare.tcp import TcpStream, TcpListener
 from flare.runtime import (
     Reactor,
@@ -510,6 +512,68 @@ def test_register_of_a_bad_fd_raises() raises:
     except:
         raised = True
     assert_true(raised, "registered an fd that is not open")
+
+
+# ── register_exclusive (Linux EPOLLEXCLUSIVE) ────────────────────────────────
+
+
+def _epoll_events_of(epfd: c_int, fd: c_int) raises -> Int:
+    """The event mask the kernel stored for ``fd`` in epoll instance
+    ``epfd`` (``events:`` in ``/proc/self/fdinfo/<epfd>``), or -1 if ``fd``
+    is not in the set. Reading it back shows what the kernel really
+    accepted, not what we asked for."""
+    var text: String
+    with open("/proc/self/fdinfo/" + String(Int(epfd)), "r") as f:
+        text = f.read()
+    for line in text.split("\n"):
+        var tok = line.split()
+        if len(tok) >= 4 and tok[0] == "tfd:" and Int(tok[1]) == Int(fd):
+            return atol(String(tok[3]), base=16)
+    return -1
+
+
+def test_register_exclusive_really_sets_epollexclusive() raises:
+    """EPOLLEXCLUSIVE and EPOLLRDHUP cannot be combined: ``epoll_ctl`` fails
+    with EINVAL, and ``register_exclusive`` then silently fell back to a
+    plain registration, so shared-listener workers all woke on every
+    connection. The stored mask must carry EPOLLEXCLUSIVE and not
+    EPOLLRDHUP."""
+    comptime if not CompilationTarget.is_linux():
+        return
+    var r = Reactor()
+    var listener = TcpListener.bind(SocketAddr.localhost(0))
+    r.register_exclusive(listener._socket.fd, UInt64(1), INTEREST_READ)
+    assert_true(r.is_registered(listener._socket.fd))
+
+    var mask = _epoll_events_of(r._fd, listener._socket.fd)
+    assert_true(mask >= 0, "listener missing from the epoll set")
+    assert_true(
+        (mask & Int(EPOLLEXCLUSIVE)) != 0,
+        "registration fell back to a plain one: no EPOLLEXCLUSIVE",
+    )
+    assert_true(
+        (mask & Int(EPOLLRDHUP)) == 0,
+        "EPOLLRDHUP is invalid together with EPOLLEXCLUSIVE",
+    )
+    assert_true((mask & Int(EPOLLIN)) != 0, "listener must watch EPOLLIN")
+
+    r.unregister(listener._socket.fd)
+    listener.close()
+
+
+def test_plain_register_keeps_rdhup() raises:
+    """Dropping EPOLLRDHUP is specific to the exclusive listener path:
+    ordinary registrations keep it (it feeds EVENT_HUP)."""
+    comptime if not CompilationTarget.is_linux():
+        return
+    var r = Reactor()
+    var listener = TcpListener.bind(SocketAddr.localhost(0))
+    r.register(listener._socket.fd, UInt64(1), INTEREST_READ)
+    var mask = _epoll_events_of(r._fd, listener._socket.fd)
+    assert_true((mask & Int(EPOLLRDHUP)) != 0)
+    assert_true((mask & Int(EPOLLEXCLUSIVE)) == 0)
+    r.unregister(listener._socket.fd)
+    listener.close()
 
 
 def main() raises:
