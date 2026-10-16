@@ -1,0 +1,1 @@
+04000000010c0107008284874101610800000400000001000901050000000000  # sec 6.9.1: padded DATA (pad 0, body 4) on a half-closed stream; the stream window is charged the whole 5-byte payload, so 1=r/65535/65535 (charging the body alone leaves 65536)

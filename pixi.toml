@@ -330,6 +330,12 @@ lean4 = ">=4.33.0,<4.34"
 formal-build = { cmd = "lake build", cwd = "formal" }
 formal-check = "bash formal/scripts/check.sh"
 formal-anchors = "python3 formal/scripts/anchors.py check"   # every stale anchor, by tier
+# Differential testing: Lean impl/spec models vs the Mojo code (formal/difftest/).
+# The runner builds the oracle here and the Mojo drivers in the default env.
+formal-oracle-build = { cmd = "lake build flare-oracle", cwd = "formal" }
+difftest       = "python3 formal/difftest/run.py"                    # every target, 3000 cases each
+difftest-quick = "python3 formal/difftest/run.py --quick --affected"  # targets touched since HEAD, 1000 cases
+difftest-soak  = "python3 formal/difftest/run.py --soak 600"         # fresh seeds for 10 minutes
 
 [environments]
 # Lean default env — only flare's runtime deps. Ships tests, examples,

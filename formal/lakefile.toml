@@ -8,3 +8,13 @@ relaxedAutoImplicit = false
 
 [[lean_lib]]
 name = "Flare"
+
+# Differential-testing oracle: executable impl/spec models (formal/difftest/).
+[[lean_lib]]
+name = "Oracle"
+roots = ["Oracle.Main"]
+globs = ["Oracle.+"]
+
+[[lean_exe]]
+name = "flare-oracle"
+root = "Oracle.Main"

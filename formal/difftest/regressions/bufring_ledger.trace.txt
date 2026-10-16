@@ -1,0 +1,1 @@
+0000b3  # issue #37: one-buffer ring, kernel fill, stale completion with the buffer; pre-fix answered OK:FD;0,0,0 (buffer lost), fixed OK:FDr;1,0,0
