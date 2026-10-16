@@ -40,6 +40,7 @@ from flare.runtime.uring_reactor import (
     _pbuf_ring_set_tail,
 )
 from ._reactor import ConnHandle, StepResult, STATE_READING, STATE_WRITING
+from ._server_uring_setup import _probe_bufring_setup_flags
 
 # Shared connection-lifecycle helpers live in ``_server_reactor_epoll``
 # (the epoll loops own them); imported here for the io_uring teardown path.
@@ -439,79 +440,6 @@ def _br_unpack_fd(conn_id: UInt64) -> Int:
     return Int(conn_id & _URING_BR_FD_MASK)
 
 
-def _probe_bufring_setup_flags(entries: Int = 64) -> UInt32:
-    """Probe the host kernel for the best ``IORING_SETUP_*``
-    flag mask the bufring dispatch can use.
-
-    The bufring dispatch's throughput is sensitive to how the
-    kernel runs task work relative to the dispatch loop's
-    CQE-drain rhythm. The kernel scheduler hints introduced in
-    5.19 (COOP_TASKRUN + TASKRUN_FLAG + SUBMIT_ALL) and 6.0/6.1
-    (SINGLE_ISSUER + DEFER_TASKRUN) batch task work to enter
-    boundaries instead of running it IPI-style mid-syscall.
-
-    Probes from highest-impact-first to default:
-    1. SINGLE_ISSUER | DEFER_TASKRUN | COOP_TASKRUN |
-       TASKRUN_FLAG | SUBMIT_ALL  (>= 6.1, the optimal mix)
-    2. COOP_TASKRUN | TASKRUN_FLAG | SUBMIT_ALL  (>= 5.19)
-    3. SUBMIT_ALL  (>= 5.18)
-    4. 0 (default; works on any 5.1+ kernel)
-
-    Returns the first mask the kernel accepts via a no-op
-    ``IoUringRing(entries)`` setup; closes the probe ring
-    immediately. Called once per worker at bufring loop init.
-
-    Args:
-        entries: SQE count for the probe ring; tiny so the
-            probe is cheap. Defaults to 64.
-
-    Returns:
-        Best-fit setup_flags mask, or 0 if no flag combination
-        is accepted (kernel < 5.18 or io_uring unavailable).
-    """
-    from flare.runtime.io_uring import IoUringRing
-    from flare.runtime.io_uring_sqe import (
-        IORING_SETUP_COOP_TASKRUN,
-        IORING_SETUP_TASKRUN_FLAG,
-        IORING_SETUP_SUBMIT_ALL,
-        IORING_SETUP_SINGLE_ISSUER,
-        IORING_SETUP_DEFER_TASKRUN,
-    )
-
-    # Probe order: COOP_TASKRUN + TASKRUN_FLAG + SUBMIT_ALL
-    # FIRST (5.19+ reliable). DEFER_TASKRUN + SINGLE_ISSUER
-    # (6.1+) are tried LAST because they require GETEVENTS-on-
-    # every-enter (which we honour in submit_and_wait), but
-    # under load the kernel still throttles multishot recv CQE
-    # delivery in unpredictable ways with DEFER_TASKRUN. Empirical
-    # observation on dev-box (kernel 6.8): bufring throughput is
-    # ~60 Hz with DEFER_TASKRUN and significantly higher without.
-    # If a future kernel version fixes this, swap the order.
-    var t1 = (
-        IORING_SETUP_COOP_TASKRUN
-        | IORING_SETUP_TASKRUN_FLAG
-        | IORING_SETUP_SUBMIT_ALL
-    )
-    var t2 = IORING_SETUP_SUBMIT_ALL
-    var t3 = (
-        IORING_SETUP_SINGLE_ISSUER
-        | IORING_SETUP_DEFER_TASKRUN
-        | IORING_SETUP_COOP_TASKRUN
-        | IORING_SETUP_TASKRUN_FLAG
-        | IORING_SETUP_SUBMIT_ALL
-    )
-
-    var candidates = [t1, t2, t3]
-    for i in range(len(candidates)):
-        try:
-            var probe = IoUringRing(entries, setup_flags=candidates[i])
-            _ = probe^
-            return candidates[i]
-        except:
-            pass
-    return UInt32(0)
-
-
 def _alloc_recv_buffer_pool() raises -> Int:
     """Allocate the worker-local recv buffer pool: ``_URING_BR_NBUFS``
     contiguous buffers of ``_URING_BR_BUF_SIZE`` bytes.
@@ -538,6 +466,23 @@ def _free_recv_buffer_pool(addr: Int):
         return
     var p = Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=addr)
     p.unsafe_free()
+
+
+def _br_return_buf(ring_addr: Int, pool_addr: Int, bid: Int):
+    """Give provided buffer ``bid`` back to the ring (shared-memory tail
+    bump, PBUF_RING). Call exactly once for every receive completion that
+    carries ``IORING_CQE_F_BUFFER``, including ones the loop drops."""
+    var cur_tail = _pbuf_ring_get_tail(ring_addr)
+    _pbuf_ring_add(
+        ring_addr,
+        _URING_BR_NBUFS,
+        UInt64(pool_addr + bid * _URING_BR_BUF_SIZE),
+        UInt32(_URING_BR_BUF_SIZE),
+        UInt16(bid),
+        0,
+        cur_tail,
+    )
+    _pbuf_ring_set_tail(ring_addr, cur_tail + UInt16(1))
 
 
 def _cleanup_conn_uring_br(
@@ -909,17 +854,22 @@ def run_uring_bufring_reactor_loop_shared[
                 continue
 
             var conn_id = comp.conn_id
+            var has_buf = (comp.flags & IORING_CQE_F_BUFFER) != UInt32(0)
+            var bid = Int(comp.flags >> UInt32(16))
+            # A completion carrying IORING_CQE_F_BUFFER has already taken
+            # buffer ``bid`` out of the ring, whatever happens to it next.
+            # With nothing to stage (connection already gone, or an error /
+            # EOF completion) hand the buffer back before skipping, or each
+            # such completion shrinks the pool for good.
+            if has_buf and (conn_id not in conns or comp.res <= 0):
+                _br_return_buf(ring_addr, pool_addr, bid)
             if conn_id not in conns:
                 continue
-            if comp.res <= 0:
-                _cleanup_conn_uring_br(conn_id, conns, ureactor)
-                continue
-            if (comp.flags & IORING_CQE_F_BUFFER) == UInt32(0):
+            if comp.res <= 0 or not has_buf:
                 _cleanup_conn_uring_br(conn_id, conns, ureactor)
                 continue
 
             var fd = _br_unpack_fd(conn_id)
-            var bid = Int(comp.flags >> UInt32(16))
             var n = Int(comp.res)
             var pool_ptr = Pointer[UInt8, MutUntrackedOrigin](
                 unsafe_from_address=pool_addr
@@ -935,18 +885,7 @@ def run_uring_bufring_reactor_loop_shared[
             for i in range(n):
                 ch_ptr[].read_buf.append(buf.unsafe_offset(i).unsafe_load())
 
-            # Re-fill via shared-memory tail bump (PBUF_RING).
-            var cur_tail = _pbuf_ring_get_tail(ring_addr)
-            _pbuf_ring_add(
-                ring_addr,
-                _URING_BR_NBUFS,
-                UInt64(Int(buf)),
-                UInt32(_URING_BR_BUF_SIZE),
-                UInt16(bid),
-                0,
-                cur_tail,
-            )
-            _pbuf_ring_set_tail(ring_addr, cur_tail + UInt16(1))
+            _br_return_buf(ring_addr, pool_addr, bid)
 
             var step_done = False
             var empty_buf = stack_allocation[1, UInt8]()

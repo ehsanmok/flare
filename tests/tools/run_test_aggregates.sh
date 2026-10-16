@@ -50,6 +50,7 @@ STANDALONE=(
   tests/runtime/test_reuseport.mojo
   tests/http/test_uring_serve_handler.mojo
   tests/http/test_uring_serve_handler_load.mojo
+  tests/http/test_uring_bufring_buffers.mojo
   tests/runtime/stress_scheduler.mojo
 )
 

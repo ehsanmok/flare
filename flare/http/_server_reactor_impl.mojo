@@ -52,5 +52,5 @@ from ._server_reactor_uring import (
     run_uring_reactor_loop_static,
     run_uring_bufring_reactor_loop,
     run_uring_bufring_reactor_loop_shared,
-    _probe_bufring_setup_flags,
 )
+from ._server_uring_setup import _probe_bufring_setup_flags
