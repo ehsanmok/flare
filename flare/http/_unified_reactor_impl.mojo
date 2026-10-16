@@ -99,6 +99,7 @@ from ._h2_conn_handle import (
     _pending_conn_free_addr,
     _pending_conn_ptr_from_int,
 )
+from ._reactor.lifecycle import _collect_fired_timers, _expired_idle_conns
 from ._server_reactor_impl import (
     ConnHandle,
     StepResult,
@@ -747,27 +748,6 @@ def _accept_loop_unified_fd(
 # + delegates per-event dispatch + drains on shutdown.
 
 
-@always_inline
-def _advance_timer_wheel_unified(
-    now_ms: UInt64,
-    mut wheel: TimerWheel,
-    mut conns: Dict[Int, Int],
-    mut timers: Dict[Int, UInt64],
-    mut reactor: Reactor,
-) raises:
-    """Step the timer wheel and reap any connections whose timeout
-    fired this tick.
-
-    Centralises the three-line pattern (advance + iterate fired +
-    cleanup) that was duplicated in every loop variant.
-    """
-    var fired = List[UInt64]()
-    wheel.advance(now_ms, fired)
-    for i in range(len(fired)):
-        var fd_tok = Int(fired[i])
-        _cleanup_conn_unified(fd_tok, conns, timers, reactor, wheel)
-
-
 def _unified_handle_conn_event[
     H: Handler
 ](
@@ -1128,7 +1108,9 @@ def _run_unified_loop_for_fd[
             break
 
         var now_ms = UInt64(_monotonic_ms())
-        _advance_timer_wheel_unified(now_ms, wheel, conns, timers, reactor)
+        var fired_fds = List[Int]()
+        var fired_ids = List[UInt64]()
+        _collect_fired_timers(now_ms, wheel, timers, fired_fds, fired_ids)
 
         for i in range(len(events)):
             var evt = events[i]
@@ -1176,6 +1158,13 @@ def _run_unified_loop_for_fd[
                 timers,
                 ws_hooks.copy(),
             )
+
+        # Deadlines that passed while this poll's events were pending are
+        # enforced only now: a connection that had a request waiting was
+        # served above and re-armed its timer, so it is spared.
+        var expired = _expired_idle_conns(fired_fds, fired_ids, conns, timers)
+        for i in range(len(expired)):
+            _cleanup_conn_unified(expired[i], conns, timers, reactor, wheel)
 
     store_worker_stat(stats_addr, WORKER_STAT_STATUS, exit_status)
     # Publish what was actually still in flight when the loop stopped,
@@ -1312,7 +1301,9 @@ def run_unified_reactor_loop_multi[
             break
 
         var now_ms = UInt64(_monotonic_ms())
-        _advance_timer_wheel_unified(now_ms, wheel, conns, timers, reactor)
+        var fired_fds = List[Int]()
+        var fired_ids = List[UInt64]()
+        _collect_fired_timers(now_ms, wheel, timers, fired_fds, fired_ids)
 
         for i in range(len(events)):
             var evt = events[i]
@@ -1346,6 +1337,13 @@ def run_unified_reactor_loop_multi[
                 wheel,
                 timers,
             )
+
+        # Deadlines that passed while this poll's events were pending are
+        # enforced only now: a connection that had a request waiting was
+        # served above and re-armed its timer, so it is spared.
+        var expired = _expired_idle_conns(fired_fds, fired_ids, conns, timers)
+        for i in range(len(expired)):
+            _cleanup_conn_unified(expired[i], conns, timers, reactor, wheel)
 
     # Graceful shutdown: flip Cancel.SHUTDOWN, then close all live
     # conns. Listener fds are closed by ``HttpServer.__deinit__`` -- the

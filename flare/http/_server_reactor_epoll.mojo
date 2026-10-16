@@ -96,6 +96,8 @@ from flare.runtime.scheduler import (
 
 from ._reactor.lifecycle import (
     _poll_timeout_ms,
+    _collect_fired_timers,
+    _expired_idle_conns,
     _conn_alloc_addr,
     _conn_free_addr,
     _conn_ptr_from_int,
@@ -173,12 +175,9 @@ def _run_handler_loop_impl[
             break
 
         var now_ms = UInt64(_monotonic_ms())
-        var fired = List[UInt64]()
-        wheel.advance(now_ms, fired)
-        for i in range(len(fired)):
-            var fd_tok = Int(fired[i])
-            if fd_tok in conns:
-                _cleanup_conn(fd_tok, conns, timers, reactor, wheel)
+        var fired_fds = List[Int]()
+        var fired_ids = List[UInt64]()
+        _collect_fired_timers(now_ms, wheel, timers, fired_fds, fired_ids)
 
         for i in range(len(events)):
             var evt = events[i]
@@ -255,6 +254,13 @@ def _run_handler_loop_impl[
                 step_done = True
             if step_done:
                 _cleanup_conn(fd, conns, timers, reactor, wheel)
+
+        # Deadlines that passed while this poll's events were pending are
+        # enforced only now: a connection that had a request waiting was
+        # served above and re-armed its timer, so it is spared.
+        var expired = _expired_idle_conns(fired_fds, fired_ids, conns, timers)
+        for i in range(len(expired)):
+            _cleanup_conn(expired[i], conns, timers, reactor, wheel)
 
     store_worker_stat(stats_addr, WORKER_STAT_STATUS, exit_status)
 
@@ -368,12 +374,9 @@ def _run_static_loop_impl[
             break
 
         var now_ms = UInt64(_monotonic_ms())
-        var fired = List[UInt64]()
-        wheel.advance(now_ms, fired)
-        for i in range(len(fired)):
-            var fd_tok = Int(fired[i])
-            if fd_tok in conns:
-                _cleanup_conn(fd_tok, conns, timers, reactor, wheel)
+        var fired_fds = List[Int]()
+        var fired_ids = List[UInt64]()
+        _collect_fired_timers(now_ms, wheel, timers, fired_fds, fired_ids)
 
         for i in range(len(events)):
             var evt = events[i]
@@ -445,6 +448,13 @@ def _run_static_loop_impl[
                 step_done = True
             if step_done:
                 _cleanup_conn(fd, conns, timers, reactor, wheel)
+
+        # Deadlines that passed while this poll's events were pending are
+        # enforced only now: a connection that had a request waiting was
+        # served above and re-armed its timer, so it is spared.
+        var expired = _expired_idle_conns(fired_fds, fired_ids, conns, timers)
+        for i in range(len(expired)):
+            _cleanup_conn(expired[i], conns, timers, reactor, wheel)
 
     store_worker_stat(stats_addr, WORKER_STAT_STATUS, exit_status)
 
@@ -587,12 +597,9 @@ def run_reactor_loop_cancel[
             break
 
         var now_ms = UInt64(_monotonic_ms())
-        var fired = List[UInt64]()
-        wheel.advance(now_ms, fired)
-        for i in range(len(fired)):
-            var fd_tok = Int(fired[i])
-            if fd_tok in conns:
-                _cleanup_conn(fd_tok, conns, timers, reactor, wheel)
+        var fired_fds = List[Int]()
+        var fired_ids = List[UInt64]()
+        _collect_fired_timers(now_ms, wheel, timers, fired_fds, fired_ids)
 
         for i in range(len(events)):
             var evt = events[i]
@@ -665,6 +672,13 @@ def run_reactor_loop_cancel[
             if step_done:
                 _cleanup_conn(fd, conns, timers, reactor, wheel)
 
+        # Deadlines that passed while this poll's events were pending are
+        # enforced only now: a connection that had a request waiting was
+        # served above and re-armed its timer, so it is spared.
+        var expired = _expired_idle_conns(fired_fds, fired_ids, conns, timers)
+        for i in range(len(expired)):
+            _cleanup_conn(expired[i], conns, timers, reactor, wheel)
+
     store_worker_stat(stats_addr, WORKER_STAT_STATUS, exit_status)
 
     # Graceful shutdown: walk every active conn and flip its
@@ -733,12 +747,9 @@ def run_reactor_loop_view[
             break
 
         var now_ms = UInt64(_monotonic_ms())
-        var fired = List[UInt64]()
-        wheel.advance(now_ms, fired)
-        for i in range(len(fired)):
-            var fd_tok = Int(fired[i])
-            if fd_tok in conns:
-                _cleanup_conn(fd_tok, conns, timers, reactor, wheel)
+        var fired_fds = List[Int]()
+        var fired_ids = List[UInt64]()
+        _collect_fired_timers(now_ms, wheel, timers, fired_fds, fired_ids)
 
         for i in range(len(events)):
             var evt = events[i]
@@ -810,6 +821,13 @@ def run_reactor_loop_view[
                 step_done = True
             if step_done:
                 _cleanup_conn(fd, conns, timers, reactor, wheel)
+
+        # Deadlines that passed while this poll's events were pending are
+        # enforced only now: a connection that had a request waiting was
+        # served above and re-armed its timer, so it is spared.
+        var expired = _expired_idle_conns(fired_fds, fired_ids, conns, timers)
+        for i in range(len(expired)):
+            _cleanup_conn(expired[i], conns, timers, reactor, wheel)
 
     store_worker_stat(stats_addr, WORKER_STAT_STATUS, exit_status)
 

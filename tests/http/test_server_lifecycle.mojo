@@ -84,6 +84,12 @@ def _connect_loopback(port: UInt16) raises -> c_int:
 
 
 def _hello(req: Request) raises -> Response:
+    if req.url == "/slow":
+        # Longer than the gap between a peer's next request and its idle
+        # deadline, so the loop is still inside this handler when that
+        # deadline passes.
+        usleep(300000)
+        return ok("slow")
     if req.url == "/big":
         # Big enough to overflow the socket send buffer, so the write
         # goes partial and completes on later writable edges.
@@ -177,6 +183,89 @@ def test_stale_idle_timer_does_not_kill_the_next_connection() raises:
         pass
     _stop(pid)
     assert_true("hi /b" in got, "B was closed by A's stale timer: " + got)
+
+
+# ── The idle timer must not beat a request that is already waiting ─────────
+
+
+def _spawn_cancellable() raises -> Tuple[Int, UInt16]:
+    """Same as ``_spawn`` but on the HTTP/1.1-only ``serve_cancellable``
+    loop, which has its own copy of the timer handling."""
+    var srv = HttpServer.bind(SocketAddr.localhost(0))
+    var port = UInt16(srv.local_addr().port)
+    var pid = fork()
+    if pid == 0:
+        try:
+            srv.serve_cancellable(WithCancel(FnHandler(_hello)))
+        except:
+            pass
+        exit()
+    usleep(250000)
+    return (Int(pid), port)
+
+
+def _check_waiting_request_is_served(srv: Tuple[Int, UInt16]) raises:
+    """B was idle 350 ms (under the 500 ms limit) when it sent its second
+    request, but the loop was inside A's 300 ms handler, so by the time it
+    polled again B's deadline had passed. The loop expired B before it
+    looked at B's request, closing the connection without an answer."""
+    var first = String("")
+    var second = String("")
+    var slow = String("")
+    try:
+        var b = _connect_loopback(srv[1])
+        _send_str(b, "GET /fast HTTP/1.1\r\nHost: x\r\n\r\n")
+        first = _read_some(b)
+        # B's 500 ms idle timer starts when its response went out.
+        usleep(300000)
+        var a = _connect_loopback(srv[1])
+        _send_str(a, "GET /slow HTTP/1.1\r\nHost: x\r\n\r\n")
+        usleep(50000)
+        # B sends at about 350 ms idle; the loop is busy until ~600 ms.
+        _send_str(b, "GET /fast HTTP/1.1\r\nHost: x\r\n\r\n")
+        second = _read_some(b)
+        slow = _read_some(a)
+        _ = _close(a)
+        _ = _close(b)
+    except:
+        pass
+    _stop(srv[0])
+    assert_true("200 OK" in first, "setup: first request failed: " + first)
+    assert_true("slow" in slow, "setup: the slow handler did not run: " + slow)
+    assert_true(
+        "200 OK" in second,
+        "the waiting request was dropped by the idle timer: [" + second + "]",
+    )
+
+
+def test_waiting_request_is_served_even_if_its_idle_timer_expired_meanwhile() raises:
+    _check_waiting_request_is_served(_spawn(ServerConfig()))
+
+
+def test_waiting_request_is_served_on_the_cancellable_loop() raises:
+    _check_waiting_request_is_served(_spawn_cancellable())
+
+
+def test_idle_keepalive_connection_is_still_closed_after_the_timeout() raises:
+    """Serving waiting requests first must not weaken the timeout: a
+    keep-alive connection that really goes quiet is still closed."""
+    var srv = _spawn(ServerConfig())
+    var answered = False
+    var closed = False
+    try:
+        var c = _connect_loopback(srv[1])
+        _send_str(c, "GET /a HTTP/1.1\r\nHost: x\r\n\r\n")
+        answered = "200 OK" in _read_some(c)
+        # Quiet from here: the 500 ms timer closes it inside the client's
+        # 2 s receive timeout, so recv sees EOF (0), not a timeout (-1).
+        var buf = stack_allocation[64, UInt8]()
+        closed = Int(_recv(c, buf, c_size_t(64), c_int(0))) == 0
+        _ = _close(c)
+    except:
+        pass
+    _stop(srv[0])
+    assert_true(answered, "setup: first request failed")
+    assert_true(closed, "an idle keep-alive connection stayed open")
 
 
 # ── Connections that send nothing, or almost nothing ───────────────────────

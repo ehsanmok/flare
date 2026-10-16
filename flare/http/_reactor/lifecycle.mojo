@@ -47,6 +47,60 @@ def _poll_timeout_ms(imm wheel: TimerWheel, cap_ms: Int = 100) -> Int:
     return delta if delta < cap_ms else cap_ms
 
 
+def _collect_fired_timers(
+    now_ms: UInt64,
+    mut wheel: TimerWheel,
+    timers: Dict[Int, UInt64],
+    mut fired_fds: List[Int],
+    mut fired_ids: List[UInt64],
+) raises:
+    """Advance the wheel to ``now_ms`` and record which connections' timers
+    fired, without closing anything yet.
+
+    The wheel is advanced right after ``poll`` so its clock is current for
+    every ``schedule`` made while the events are handled. Reaping is a
+    separate step (:func:`_expired_idle_conns`) that runs *after* the
+    events: a connection whose request was already waiting when its
+    deadline passed (the loop was busy in another handler) gets that request
+    served and its timer re-armed first, instead of being closed unanswered.
+
+    ``fired_fds[i]`` is the connection; ``fired_ids[i]`` is the timer id
+    ``timers`` held for it when it fired (0 if none), the baseline for
+    "was it re-armed since".
+    """
+    var fired = List[UInt64]()
+    wheel.advance(now_ms, fired)
+    for i in range(len(fired)):
+        var fd = Int(fired[i])
+        fired_fds.append(fd)
+        fired_ids.append(timers[fd] if fd in timers else UInt64(0))
+
+
+def _expired_idle_conns(
+    fired_fds: List[Int],
+    fired_ids: List[UInt64],
+    conns: Dict[Int, Int],
+    timers: Dict[Int, UInt64],
+) raises -> List[Int]:
+    """The fired connections that should now be closed.
+
+    A fired connection is spared if event handling touched it in between:
+    it is gone (closed, or its fd number already belongs to a newer
+    connection with its own timer), or its timer was re-armed or cleared
+    (``timers[fd]`` no longer holds the id recorded when it fired). What is
+    left had no activity since its deadline passed.
+    """
+    var out = List[Int]()
+    for i in range(len(fired_fds)):
+        var fd = fired_fds[i]
+        if fd not in conns:
+            continue
+        var current = timers[fd] if fd in timers else UInt64(0)
+        if current == fired_ids[i]:
+            out.append(fd)
+    return out^
+
+
 def _conn_alloc_addr(var stream: TcpStream) raises -> Int:
     """Heap-allocate a ``ConnHandle`` wrapping ``stream`` and
     return its address.
