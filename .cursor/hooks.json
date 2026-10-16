@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "hooks": {
+    "stop": [
+      {
+        "command": "python3 .cursor/hooks/formal-stop.py",
+        "timeout": 90,
+        "loop_limit": 3
+      }
+    ],
+    "beforeShellExecution": [
+      {
+        "command": "python3 .cursor/hooks/formal-guard-shell.py",
+        "matcher": "spec|FORMAL_SKIP|commit",
+        "timeout": 10
+      }
+    ]
+  }
+}

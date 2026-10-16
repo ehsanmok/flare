@@ -37,7 +37,18 @@ target/
 .idea/
 .vscode/
 *.swp
-.cursor/
+.cursor/*
+# Lean verification factory: shared skills, command and hooks. Rules stay local.
+!.cursor/skills/
+.cursor/skills/*
+!.cursor/skills/formal-*/
+!.cursor/commands/
+.cursor/commands/*
+!.cursor/commands/formal-verify.md
+!.cursor/hooks.json
+!.cursor/hooks/
+.cursor/hooks/*
+!.cursor/hooks/formal-*.py
 .agents/
 *.conda
 
