@@ -42,7 +42,7 @@ def main() raises:
 - **Batteries included:** HTTP/1.1, HTTP/2, and HTTP/3 over QUIC (server + client), WebSocket (RFC 6455 + permessage-deflate), gRPC, TLS 1.2/1.3 + mTLS + in-process HTTPS termination (`bind_tls` + `serve`), streaming responses on every wire (one handler streams byte-identically over h1 / h2 / h3 / https), sessions, gzip + brotli, CORS, static files, SSE, templates, RFC 9111 caching, and an OpenAPI 3.1 emitter. Full inventory in [`docs/features.md`](docs/features.md).
 - **Composable by types, not callbacks:** `Handler` is a trait; `Router`, middleware, and typed extractors (`PathInt`, `JsonAs[T]`, `Cookies`, ...) compose by nesting structs, monomorphised into one direct call sequence per request type with no virtual dispatch.
 - **Hard to misuse under load:** Per-request `Cancel` tokens, graceful drain, sanitized 4xx/5xx, TLS cert reload, structured logging, Prometheus metrics, and an in-process `TestClient[H]`.
-- **Fast, with a tight tail:** Thread-per-core reactor (`kqueue` / `epoll`, opt-in `io_uring`); top-of-pack throughput with a p99 median that ties `actix_web` and beats `hyper` / `axum`, plus [match-or-beat-quiche on HTTP/3](#performance).
+- **Fast, with a tight tail:** Thread-per-core reactor (`kqueue` / `epoll`, opt-in `io_uring`) on Mojo's AsyncRT thread pool. At 4 workers the static path ties `actix_web` and the handler path beats `hyper` / `axum`, all with p99 under 3 ms at the peak; see [Performance](#performance).
 - **Fuzzed:** 63 fuzz harnesses, 9M+ runs, zero known crashes; ASan + assert-mode coverage on every FFI boundary.
 - **Formally modelled:** Lean 4 models of the codecs, protocol state machines and concurrency, proved against the RFCs. The 0.12 audit found 138 issues with them, all fixed. Anchors keep the models in sync with the Mojo code, and differential tests run the two side by side. See [Formal verification](#formal-verification).
 
@@ -277,7 +277,7 @@ Uploads go the other way through `send_chunked`, pulling from a `ChunkSource` wi
 
 ## Performance
 
-TFB plaintext (`GET /plaintext` returning 13 bytes of `Hello, World!`), `wrk2 -t8 -c256 -d30s --latency` (coordinated-omission corrected), Linux x86_64 dev-box. Each row is the highest rate that survives the bench harness's sustainable-peak finder; latency cells are `median ± σ` over five 30 s measurement rounds at that rate. Both flare and the Rust baselines are AOT-built with no debug asserts (`mojo build -D ASSERT=none` / `cargo build --release --locked`). Full methodology in [`docs/benchmark.md`](docs/benchmark.md#methodology).
+TFB plaintext (`GET /plaintext` returning 13 bytes of `Hello, World!`), `wrk2 -t8 -c256 -d30s --latency` (coordinated-omission corrected), on a 48-vCPU AWS Xeon Platinum 8488C running Linux 6.12. Each row is the highest rate that survives the bench harness's sustainable-peak finder; latency cells are `median ± σ` over five 30 s measurement rounds at that rate. Both flare and the Rust baselines are AOT-built with no debug asserts (`mojo build -D ASSERT=none` / `cargo build --release --locked`). Full methodology in [`docs/benchmark.md`](docs/benchmark.md#methodology).
 
 The σ on the tail percentiles is the **honesty meter**: a small σ means all 5 runs landed inside the working envelope; a σ in the tens or hundreds of ms means at least one run brushed the saturation cliff and the headline rate is sitting at the limit, not comfortably inside it.
 
@@ -285,30 +285,31 @@ The σ on the tail percentiles is the **honesty meter**: a small σ means all 5 
 
 | Server | Workers | Req/s | σ%  | p50 (ms) | p99 (ms) | p99.9 (ms) | p99.99 (ms) |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| **flare_mc_static** (fixed-response fast path) [^reuse] | **4** | **242,384** | **0.21** | **1.18 ± 0.02** | **2.67 ± 0.02** | **3.03 ± 0.02** | **3.34 ± 0.16** |
-| actix_web (tokio) | 4 | 239,108 | 0.33 | 1.26 ± 0.00 | 2.73 ± 0.04 | 3.25 ± 11.28 | 5.21 ± 12.05 |
-| **flare_mc** (handler) [^reuse] | **4** | **237,761** | **0.34** | **1.20 ± 0.02** | **2.74 ± 320.65** | **5.99 ± 359.05** | **64.86 ± 350.97** |
-| hyper (tokio multi-thread) | 4 | 217,036 | 0.21 | 1.24 ± 0.01 | 2.83 ± 0.02 | 3.28 ± 0.08 | 3.66 ± 2.72 |
-| axum (tokio multi-thread) | 4 | 201,216 | 0.35 | 1.29 ± 0.00 | 2.82 ± 0.03 | 3.25 ± 2.50 | 3.64 ± 29.52 |
+| actix_web (tokio) | 4 | 639,285 | 0.20 | 0.96 ± 0.01 | 2.85 ± 0.54 | 4.94 ± 7.66 | 6.38 ± 10.20 |
+| **flare_mc_static** (fixed-response fast path) [^reuse] | **4** | **636,513** | **0.20** | **1.04 ± 0.03** | **2.85 ± 0.06** | **3.57 ± 3.99** | **7.22 ± 8.78** |
+| **flare_mc** (handler) [^reuse] | **4** | **494,224** | **0.16** | **1.10 ± 0.01** | **2.87 ± 0.08** | **5.25 ± 3.26** | **7.49 ± 8.84** |
+| axum (tokio multi-thread) | 4 | 479,790 | 0.28 | 1.10 ± 0.01 | 2.72 ± 0.19 | 3.23 ± 9.42 | 3.67 ± 12.66 |
+| hyper (tokio multi-thread) | 4 | 472,351 | 0.33 | 1.14 ± 0.01 | 2.83 ± 0.08 | 3.42 ± 3.58 | 3.82 ± 5.76 |
 
 **Single-worker** (per-core request-processing cost):
 
 | Server | Workers | Req/s | σ%  | p50 (ms) | p99 (ms) | p99.9 (ms) | p99.99 (ms) |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| **flare** (reactor) | **1** | **79,028** | **1.57** | **1.13 ± 0.03** | **3.23 ± 0.12** | **3.84 ± 0.37** | **4.30 ± 0.51** |
-| nginx (`worker_processes 1`) | 1 | 76,883 | 1.27 | 1.12 ± 0.01 | 3.23 ± 0.09 | 3.62 ± 0.15 | 4.05 ± 0.48 |
-| Go `net/http` (`GOMAXPROCS=1`) | 1 | 40,343 | 0.00 | 1.35 ± 0.01 | 3.21 ± 0.01 | 3.60 ± 0.04 | 4.40 ± 0.17 |
+| nginx (`worker_processes 1`) | 1 | 204,634 | 0.34 | 1.14 ± 0.02 | 2.48 ± 2.64 | 2.90 ± 7.09 | 3.30 ± 7.96 |
+| **flare** (reactor) | **1** | **135,104** | **0.16** | **0.88 ± 0.00** | **1.93 ± 0.06** | **2.44 ± 3.61** | **3.47 ± 6.24** |
+| Go `net/http` (`GOMAXPROCS=1`) | 1 | 80,477 | 0.16 | 1.01 ± 0.01 | 2.56 ± 0.33 | 4.73 ± 10.16 | 6.12 ± 13.53 |
 
 What jumps out:
 
-- **flare_mc_static** (fixed-response fast path) leads the 4-worker pack on throughput at `242,384 req/s` and holds a uniformly tight tail (σ `<= 0.16 ms` at every percentile) - all five runs landed inside the working envelope this round.
-- **flare_mc** (the handler path) is third at `237,761 req/s`, within `~2 %` of the leader, and its p99 *median* of `2.74 ms` is essentially tied with actix (`2.73`) and ahead of hyper (`2.83`) and axum (`2.82`). The large `+/- 320-359 ms` σ on its tail is the **honesty meter** firing, not an error rate: every request succeeded, but one of the five 30 s runs tipped over the saturation cliff and its tail spiked into the hundreds of ms while the other four stayed tight, so the median held and the run-to-run tail did not. The handler headline here is the edge of the envelope, not its comfortable interior - back the rate off slightly for a uniformly tight tail.
-- **actix_web** is second at `239,108 req/s` with a near-flat tail (σ `<= 12 ms` at p99.9 / p99.99) - a mild cliff brush rather than a steady-state blowup.
-- **hyper** is the reference baseline at `217,036 req/s` with the tightest tail of the Rust pack (σ `<= 2.72 ms`); the same binary returns the same throughput run-over-run.
-- **axum** is steady by design but the lowest headline of the four at `201,216 req/s`, tight everywhere except a `29.5 ms` σ at p99.99.
-- **flare 1w** is on par with nginx 1w at single-core load: `79.0k` vs `76.9k req/s` in the table run, and `73.7k` vs `77.1k` in the v0.11 Linux re-run on the same box (single-run peak-finder noise is about `+/- 5 %`), with p99 medians within `0.2 ms`. Against Go `net/http` at the same worker count flare does `1.8-2.0x` the throughput with comparable tail medians.
+- **flare_mc_static** (fixed-response fast path) ties actix at the sustainable peak, `636,513` against `639,285 req/s` (`-0.4 %`), with a tighter p99 (σ `0.06` against `0.54 ms`). Without a latency bound it has the most raw capacity of any server: `863k` against actix's `775k req/s`.
+- **flare_mc** (the handler path) beats hyper by `4.6 %` and axum by `3.0 %` at the same p99 (`2.87` against `2.83` / `2.72 ms`), and trails actix: `0.77x` at the sustainable peak, `0.92x` on raw capacity (`712k` against `775k`).
+- **Every 4-worker row is stable:** all five runs of every server stayed inside the envelope, σ `<= 0.33 %` on throughput.
+- **flare 1w** has the lowest p50 and p99 of the single-worker servers and does `1.7x` Go `net/http`, but nginx does `1.5x` flare at 256 connections. At 64 connections (one wrk2 thread) flare leads nginx by `11 %` (`187k` against `167k req/s`), so the single reactor loses ground as the connection count grows.
+- **Threads:** AsyncRT matched the old pthread engine within `±1 %` in paired runs at 1-48 workers, and spawns a task in `6.3 µs` against `57 µs` for an OS thread.
 
-**HTTP/3 throughput (match-or-beat-quiche gate met):** The full flare HTTP/3 wire path landed in v0.8 - codec, AEAD, rustls QUIC binding, state machine, HTTP/3 dispatch, and the live UDP reactor I/O loop. On the 1-client × 100-stream gate workload (5×30 s runs), **flare HTTP/3 leads at `74,653 req/s`** (median, σ `0.50 %`, p99 `1.45 ms`, p99.9 `2.45 ms`), `+2.9 %` over `quiche 0.22`'s `72,571 req/s` at a tighter σ; `quinn 0.11 + h3 0.0.8` errors at the 100-stream workload and needs calibration. In the v0.11 Linux re-run flare sustains `74-76k req/s` with h2load's per-request `--log-file` off; with it on (the harness default) the client slows and flare read `61.9k` against quiche `73.2k`, so the margin depends on that setting. The win came from the reactor rewrite - eliminating per-packet whole-connection deep copies (in-place `ref` mutation), a cached-table QPACK decode path, and coalesced 1-RTT egress with capacity-reserved packet builders - not from egress syscall batching (ingress `recvmmsg` is built and default-on; egress `sendmmsg`/GSO are built in `flare.udp.batch` but not yet wired into QUIC egress - the gate closed without them). `quinn 0.11 + h3 0.0.8` is not a valid comparison at this workload shape (98% errored streams) and is excluded pending recalibration. Full table, baselines, and h2load+H3 build recipe in [`docs/benchmark.md#http3-throughput`](docs/benchmark.md#http3-throughput).
+**HTTP/3 throughput:** The full flare HTTP/3 wire path landed in v0.8 - codec, AEAD, rustls QUIC binding, state machine, HTTP/3 dispatch, and the live UDP reactor I/O loop. On the 1-client × 100-stream workload (5×30 s runs, h2load with `--log-file`), flare does `129,635 req/s` (σ `0.61 %`, p99 `1.03 ms`, p99.99 `1.40 ms`) against quiche's `153,494 req/s` (σ `2.95 %`, p99 `0.86 ms`, p99.99 `3.28 ms`): `0.84x` the throughput with the tighter extreme tail. On the older EPYC box flare led quiche by `2.9 %` with `--log-file` off and read the same `0.85x` with it on. The HTTP/3 path got fast through the reactor rewrite - eliminating per-packet whole-connection deep copies (in-place `ref` mutation), a cached-table QPACK decode path, and coalesced 1-RTT egress with capacity-reserved packet builders - not from egress syscall batching (ingress `recvmmsg` is built and default-on; egress `sendmmsg`/GSO are built in `flare.udp.batch` but not yet wired into QUIC egress, which leaves room against quiche). `quinn 0.11 + h3 0.0.8` is not a valid comparison at this workload shape (98% errored streams) and is excluded pending recalibration. Full table, baselines, and h2load+H3 build recipe in [`docs/benchmark.md#http3-throughput`](docs/benchmark.md#http3-throughput).
+
+All of these numbers, the single-load-thread configs, the pthread-against-AsyncRT paired runs and the setup notes for a fresh box are in [`docs/benchmark.md`](docs/benchmark.md#xeon-8488c-re-baseline-asyncrt-thread-engine).
 
 The matching nginx / hyper / actix_web / axum baselines built from source by the harness live under [`benchmark/baselines/`](benchmark/baselines/).
 

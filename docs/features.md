@@ -412,9 +412,11 @@ live, the rustls FFI wrapper surfaces the per-level
 `QuicConnection.install_handshake_keys` /
 `install_1rtt_keys`, and the Handler dispatch chain carries
 requests end-to-end over the wire. The bench gate
-(`flare_h3 >= 72,571 req/s vs quiche`) closed: flare HTTP/3 leads
-at `74,653 req/s` (median, `+2.9 %` over `quiche 0.22`) on the
-1-client x 100-stream workload. The win came from the reactor
+(`flare_h3 >= 72,571 req/s vs quiche`) closed on the EPYC box:
+flare HTTP/3 led at `74,653 req/s` (median, `+2.9 %` over
+`quiche 0.22`) on the 1-client x 100-stream workload. On the
+48-vCPU Xeon re-baseline it reads `129,635` against quiche's
+`153,494 req/s` (`0.84x`). The speed came from the reactor
 rewrite -- eliminating per-packet whole-connection deep copies
 (in-place `ref` mutation), a cached-table QPACK decode path,
 and coalesced 1-RTT egress with capacity-reserved packet
