@@ -87,7 +87,7 @@ def _bench_scalar_32(mut b: Bencher):
     var dst = output.unsafe_ptr()
 
     @always_inline
-    def call_fn():
+    def call_fn() {var key, var src, var dst}:
         for i in range(32):
             dst.unsafe_offset(i).unsafe_store(src[unsafe_offset=i] ^ key[i & 3])
         keep(dst[0])
@@ -110,7 +110,7 @@ def _bench_simd_32(mut b: Bencher):
         tiled[i] = key[i & 3]
 
     @always_inline
-    def call_fn():
+    def call_fn() {var src, var dst, var tiled}:
         var chunk = src.unsafe_load[width=SIMD_WIDTH]()
         dst.unsafe_store[width=SIMD_WIDTH](chunk ^ tiled)
         keep(dst[0])
@@ -127,7 +127,7 @@ def _bench_scalar_128(mut b: Bencher):
     var dst = output.unsafe_ptr()
 
     @always_inline
-    def call_fn():
+    def call_fn() {var key, var src, var dst}:
         for i in range(128):
             dst.unsafe_offset(i).unsafe_store(src[unsafe_offset=i] ^ key[i & 3])
         keep(dst[0])
@@ -148,7 +148,7 @@ def _bench_simd_128(mut b: Bencher):
         tiled[i] = key[i & 3]
 
     @always_inline
-    def call_fn():
+    def call_fn() {var src, var dst, var tiled}:
         var i = 0
         while i + SIMD_WIDTH <= 128:
             var chunk = src.unsafe_offset(i).unsafe_load[width=SIMD_WIDTH]()
@@ -168,7 +168,7 @@ def _bench_scalar_1k(mut b: Bencher):
     var dst = output.unsafe_ptr()
 
     @always_inline
-    def call_fn():
+    def call_fn() {var key, var src, var dst}:
         for i in range(1024):
             dst.unsafe_offset(i).unsafe_store(src[unsafe_offset=i] ^ key[i & 3])
         keep(dst[0])
@@ -189,7 +189,7 @@ def _bench_simd_1k(mut b: Bencher):
         tiled[i] = key[i & 3]
 
     @always_inline
-    def call_fn():
+    def call_fn() {var src, var dst, var tiled}:
         var i = 0
         while i + SIMD_WIDTH <= 1024:
             var chunk = src.unsafe_offset(i).unsafe_load[width=SIMD_WIDTH]()
@@ -209,7 +209,7 @@ def _bench_scalar_64k(mut b: Bencher):
     var dst = output.unsafe_ptr()
 
     @always_inline
-    def call_fn():
+    def call_fn() {var key, var src, var dst}:
         for i in range(65536):
             dst.unsafe_offset(i).unsafe_store(src[unsafe_offset=i] ^ key[i & 3])
         keep(dst[0])
@@ -230,7 +230,7 @@ def _bench_simd_64k(mut b: Bencher):
         tiled[i] = key[i & 3]
 
     @always_inline
-    def call_fn():
+    def call_fn() {var src, var dst, var tiled}:
         var i = 0
         while i + SIMD_WIDTH <= 65536:
             var chunk = src.unsafe_offset(i).unsafe_load[width=SIMD_WIDTH]()
@@ -250,7 +250,7 @@ def _bench_scalar_1m(mut b: Bencher):
     var dst = output.unsafe_ptr()
 
     @always_inline
-    def call_fn():
+    def call_fn() {var key, var src, var dst}:
         for i in range(1048576):
             dst.unsafe_offset(i).unsafe_store(src[unsafe_offset=i] ^ key[i & 3])
         keep(dst[0])
@@ -271,7 +271,7 @@ def _bench_simd_1m(mut b: Bencher):
         tiled[i] = key[i & 3]
 
     @always_inline
-    def call_fn():
+    def call_fn() {var src, var dst, var tiled}:
         var i = 0
         while i + SIMD_WIDTH <= 1048576:
             var chunk = src.unsafe_offset(i).unsafe_load[width=SIMD_WIDTH]()

@@ -53,7 +53,7 @@ def _bench_scalar_16(mut b: Bencher):
     var raw = _alloc_pattern(16)
     var enc = _encode(raw)
 
-    def call_fn():
+    def call_fn() {imm enc}:
         var out = List[UInt8]()
         try:
             huffman_decode(Span[UInt8, _](enc), out)
@@ -68,7 +68,7 @@ def _bench_simd_16(mut b: Bencher):
     var raw = _alloc_pattern(16)
     var enc = _encode(raw)
 
-    def call_fn():
+    def call_fn() {imm enc}:
         var out = List[UInt8]()
         try:
             huffman_decode_simd(Span[UInt8, _](enc), out)
@@ -83,7 +83,7 @@ def _bench_scalar_256(mut b: Bencher):
     var raw = _alloc_pattern(256)
     var enc = _encode(raw)
 
-    def call_fn():
+    def call_fn() {imm enc}:
         var out = List[UInt8]()
         try:
             huffman_decode(Span[UInt8, _](enc), out)
@@ -98,7 +98,7 @@ def _bench_simd_256(mut b: Bencher):
     var raw = _alloc_pattern(256)
     var enc = _encode(raw)
 
-    def call_fn():
+    def call_fn() {imm enc}:
         var out = List[UInt8]()
         try:
             huffman_decode_simd(Span[UInt8, _](enc), out)
@@ -113,7 +113,7 @@ def _bench_scalar_4k(mut b: Bencher):
     var raw = _alloc_pattern(4096)
     var enc = _encode(raw)
 
-    def call_fn():
+    def call_fn() {imm enc}:
         var out = List[UInt8]()
         try:
             huffman_decode(Span[UInt8, _](enc), out)
@@ -128,7 +128,7 @@ def _bench_simd_4k(mut b: Bencher):
     var raw = _alloc_pattern(4096)
     var enc = _encode(raw)
 
-    def call_fn():
+    def call_fn() {imm enc}:
         var out = List[UInt8]()
         try:
             huffman_decode_simd(Span[UInt8, _](enc), out)
@@ -143,7 +143,7 @@ def _bench_scalar_64k(mut b: Bencher):
     var raw = _alloc_pattern(65536)
     var enc = _encode(raw)
 
-    def call_fn():
+    def call_fn() {imm enc}:
         var out = List[UInt8]()
         try:
             huffman_decode(Span[UInt8, _](enc), out)
@@ -158,7 +158,7 @@ def _bench_simd_64k(mut b: Bencher):
     var raw = _alloc_pattern(65536)
     var enc = _encode(raw)
 
-    def call_fn():
+    def call_fn() {imm enc}:
         var out = List[UInt8]()
         try:
             huffman_decode_simd(Span[UInt8, _](enc), out)
