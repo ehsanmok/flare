@@ -58,6 +58,7 @@ SANS_IO_FILES=(
     "flare/http3/response_writer.mojo"
     "flare/qpack/static_table.mojo"
     "flare/qpack/codec.mojo"
+    "flare/http/_bufring_ledger.mojo"
 )
 
 # Forbidden import patterns. Each matches both ``from flare.<X>`` /

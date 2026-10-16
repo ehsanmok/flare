@@ -39,6 +39,7 @@ from flare.runtime.uring_reactor import (
     _pbuf_ring_get_tail,
     _pbuf_ring_set_tail,
 )
+from ._bufring_ledger import RECV_CLOSE, RECV_STAGE, classify_recv
 from ._reactor import ConnHandle, StepResult, STATE_READING, STATE_WRITING
 from ._server_uring_setup import _probe_bufring_setup_flags
 
@@ -855,15 +856,14 @@ def run_uring_bufring_reactor_loop_shared[
             var bid = Int(comp.flags >> UInt32(16))
             # A completion carrying IORING_CQE_F_BUFFER has already taken
             # buffer ``bid`` out of the ring, whatever happens to it next.
-            # With nothing to stage (connection already gone, or an error /
-            # EOF completion) hand the buffer back before skipping, or each
-            # such completion shrinks the pool for good.
-            if has_buf and (conn_id not in conns or comp.res <= 0):
-                _br_return_buf(ring_addr, pool_addr, bid)
-            if conn_id not in conns:
-                continue
-            if comp.res <= 0 or not has_buf:
-                _cleanup_conn_uring_br(conn_id, conns, ureactor)
+            # Every path must follow ``decision.return_buf`` or the pool
+            # shrinks for good (issue #37; proved in Kernels/BufLedger).
+            var decision = classify_recv(conn_id in conns, comp.res, has_buf)
+            if decision.action != RECV_STAGE:
+                if decision.return_buf:
+                    _br_return_buf(ring_addr, pool_addr, bid)
+                if decision.action == RECV_CLOSE:
+                    _cleanup_conn_uring_br(conn_id, conns, ureactor)
                 continue
 
             var fd = _br_unpack_fd(conn_id)
@@ -882,7 +882,8 @@ def run_uring_bufring_reactor_loop_shared[
             for i in range(n):
                 ch_ptr[].read_buf.append(buf.unsafe_offset(i).unsafe_load())
 
-            _br_return_buf(ring_addr, pool_addr, bid)
+            if decision.return_buf:
+                _br_return_buf(ring_addr, pool_addr, bid)
 
             var step_done = False
             var empty_buf = stack_allocation[1, UInt8]()
