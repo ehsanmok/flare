@@ -4,7 +4,7 @@
 
 flare uses a thread-per-core reactor with **synchronous** handlers.
 Mojo doesn't have async / await yet, so `def serve(req) raises ->
-Response` runs on a pthread worker and *blocks that worker until it
+Response` runs on a worker thread and *blocks that worker until it
 returns*. This is the nginx model, not the async-tokio model.
 
 Three practical implications you need to design around:
@@ -26,15 +26,14 @@ Three practical implications you need to design around:
 3. **Use `block_in_pool` for genuinely-blocking C calls.** When
    you have to call a synchronous C library (an old database
    driver, a compute-heavy native function), wrap the call in
-   `flare.runtime.block_in_pool(...)` so it runs on a fresh
-   kernel thread (per-call `pthread_create`). The handler frame
-   that called `block_in_pool` still blocks until the work
+   `flare.runtime.block_in_pool(...)` so it runs as a task on the
+   AsyncRT pool (see [`threading.md`](threading.md)). The handler
+   frame that called `block_in_pool` still blocks until the work
    returns — the synchronous signature requires it — but the
-   *other* reactor workers stay free, and a crash inside `work()`
-   only kills its own pthread instead of the reactor's. The
-   submitter polls `cancel` and joins via `pthread_join`. See
+   *other* reactor workers stay free. The submitter checks
+   `cancel` and joins the task. See
    [`flare/runtime/blocking.mojo`](../flare/runtime/blocking.mojo)
-   for the full cancel + crash-isolation contract.
+   for the full cancel contract.
 
 If you're coming from axum/tokio, fastapi, asyncio, or any other
 async-first framework, the mental shift is: "one in-flight request
@@ -68,7 +67,7 @@ The pinned Mojo release distinguishes three function-type annotations:
 
 | Annotation | Meaning | What flare uses it for |
 |---|---|---|
-| `thin` | No captures. Function-pointer-shaped. Materialises as a runtime value. | Every public `def(Request) raises thin -> Response` in [`flare/http/handler.mojo`](../flare/http/handler.mojo) — `FnHandler`, `FnHandlerCT[F]`. The work argument to [`block_in_pool`](../flare/runtime/blocking.mojo) (`work: def() raises thin -> T`). The pthread `start_routine` thunk shape in [`flare/runtime/_thread.mojo`](../flare/runtime/_thread.mojo). |
+| `thin` | No captures. Function-pointer-shaped. Materialises as a runtime value. | Every public `def(Request) raises thin -> Response` in [`flare/http/handler.mojo`](../flare/http/handler.mojo) — `FnHandler`, `FnHandlerCT[F]`. The work argument to [`block_in_pool`](../flare/runtime/blocking.mojo) (`work: def() raises thin -> T`). The thread `start` routine shape in [`flare/runtime/_thread.mojo`](../flare/runtime/_thread.mojo). |
 | `capturing` | Captures local state. **Cannot be materialised as a runtime value on the pinned release** (the compiler emits `"TODO: capturing closures cannot be materialized as runtime values"` if you try). Usable only as a comptime parameter (`[F: def(...) capturing -> ...]`), and even then a method body that calls `F(...)` is silently promoted to `capturing`, which can't satisfy a `Handler` trait method declared without that annotation. | Not used by the public surface. |
 | `unified` | Universal closure type (per [Mojo Closures 2026 forum thread](https://forum.modular.com/t/mojo-closures-2026/3013)). The keyword is accepted in function-type position (`def(Int) raises unified -> Int`), but the conversion machinery is incomplete — `def f(...) raises unified -> Int:` on a declaration site fails with `"use of unknown declaration 'unified'"`. | Not used by the public surface. |
 
@@ -120,11 +119,11 @@ The cross-thread surfaces are an explicit, narrow list:
 
 3. **`block_in_pool[T]`** — see
    [`flare/runtime/blocking.mojo`](../flare/runtime/blocking.mojo).
-   Runs `work: def() raises thin -> T` on a fresh pthread; the
-   submitter polls `Cancel` then joins. This is the only public
-   API that crosses pthread boundaries with a user-supplied callable.
+   Runs `work: def() raises thin -> T` as an AsyncRT task; the
+   submitter joins, then checks `Cancel`. This is the only public
+   API that crosses thread boundaries with a user-supplied callable.
 
-## The Send-discipline obligation (pthread-bound work)
+## The Send-discipline obligation (thread-bound work)
 
 The pinned Mojo release has no compiler-checked notion of state
 that is safe to share across threads (no `Send` / `Sync` traits).
@@ -145,9 +144,9 @@ state shared with the worker thread must travel through:
 
 - **Heap-allocated `_Task[T]` struct** with `Int`-typed addresses
   (the [`flare/runtime/blocking.mojo`](../flare/runtime/blocking.mojo)
-  pattern). Addresses cross the pthread boundary as integer values;
+  pattern). Addresses cross the thread boundary as integer values;
   ownership of the underlying allocation passes from submitter to
-  worker on `pthread_create` and back on `pthread_join`.
+  worker on spawn and back on join.
 - **Module-level `comptime` constants** (read-only, no mutation
   hazard).
 - **Atomic byte cells** (the `Cancel` cell shape — single-byte loads

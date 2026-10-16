@@ -15,7 +15,7 @@ directory carry the detail.
 | [`threat-model.md`](threat-model.md) | Adversary classes (anonymous attacker, authenticated abuser, malicious peer), per-attack mitigations, non-goals, disclosure process, verification cadence. |
 | [`operations.md`](operations.md) | Production runbook -- topology choices, TLS posture, health endpoints, graceful shutdown, observability, resource limits, common failure modes, container deployment, soak harness. |
 | [`concurrency.md`](concurrency.md) | The Mojo closure-binding rules flare relies on, the cross-thread primitive surface (`Cancel`, `HandoffQueue`, `block_in_pool`), and the owned-by-one-thread invariant. |
-| [`asyncrt.md`](asyncrt.md) | The experimental AsyncRT thread engine (`-D FLARE_ASYNCRT`): what moves off pthreads, the pool-capacity rule, join semantics, known limits, and how to benchmark it against pthreads. |
+| [`threading.md`](threading.md) | The AsyncRT thread engine: where each thread runs, serving leases, join semantics, forked children, known limits, and how to measure it. |
 | [`cookbook.md`](cookbook.md) | Index of files under `examples/{basic,intermediate,advanced}/` mapped to use cases. |
 | [`../formal/README.md`](../formal/README.md) | Lean 4 models of flare and the proofs about them: the design (anchors, spec lock, differential tests, verified kernels) with diagrams, and the 0.12 audit report in [`../formal/REPORT.md`](../formal/REPORT.md). |
 

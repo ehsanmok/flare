@@ -206,8 +206,8 @@ flare.dns      getaddrinfo (dual-stack)
 flare.net      IpAddr, SocketAddr, RawSocket
 flare.runtime  Reactor (kqueue/epoll + EPOLLEXCLUSIVE), TimerWheel,
                Scheduler, HandoffQueue + WorkerHandoffPool,
-               num_cpus / default_worker_count, pthread + pinning,
-               block_in_pool (per-call pthread escape hatch)
+               num_cpus / default_worker_count, AsyncRT thread
+               engine + pinning, block_in_pool (blocking escape hatch)
 flare.testing  fork-and-serve helpers (`fork_server` /
                `kill_forked_server`) for cookbook examples and
                integration tests that need a real bound port
@@ -316,7 +316,8 @@ Cooperation is the contract.
 ## Multicore: thread-per-core, two listener modes
 
 `HttpServer.serve(handler, num_workers=N)` with `N >= 2` runs N
-pthread workers via `Scheduler`. Each worker owns its own reactor,
+workers via `Scheduler`, on the AsyncRT pool (see
+[`threading.md`](threading.md)). Each worker owns its own reactor,
 its own timer wheel, its own per-connection state.
 **Shared-nothing.** Two listener strategies are supported:
 
@@ -344,7 +345,8 @@ its own timer wheel, its own per-connection state.
   for the head-to-head numbers.
 
 `pin_cores=True` (default) pins worker `i` to core `i % num_cpus()`
-on Linux via `pthread_setaffinity_np`. macOS does not expose CPU
+on Linux via `pthread_setaffinity_np`, and restores the thread's mask
+when the worker exits. macOS does not expose CPU
 affinity to userspace, so pinning is a no-op there. The upper
 bound on `num_workers` is 256, enforced by `Scheduler.start`.
 
