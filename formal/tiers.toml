@@ -1,0 +1,36 @@
+# Model tiers for the drift gate (formal/scripts/anchors.py).
+#
+#   pinned    a commit that changes a Mojo symbol mirrored here, without
+#             refreshing the model, is blocked by the pre-commit hook. These
+#             are the parsers of untrusted input, the protocol state machines
+#             with an RFC spec, and resource accounting. Pinned models with
+#             an executable impl are also differentially tested
+#             (formal/difftest/).
+#   tracked   drift is reported but never blocks; refresh in batches, e.g.
+#             before a release. Every model not listed below is tracked.
+#   archived  never drift-checked. Empty: models mirror the shipped code
+#             only, and the 0.12 audit's pre-fix counterexamples are at the
+#             git tag formal-audit-0.12.
+#
+# Paths are relative to formal/ and may use shell globs (`*` stays inside
+# one directory, `**` crosses directories). Only flat string arrays are
+# supported; anchors.py parses this file without a TOML library.
+
+[pinned]
+models = [
+    "Flare/L1_Encoding/HpackInt.lean",
+    "Flare/L1_Encoding/Huffman.lean",
+    "Flare/L1_Encoding/HuffmanTable.lean",
+    "Flare/L1_Encoding/QuicVarint.lean",
+    "Flare/L1_Encoding/ProtoVarint.lean",
+    "Flare/L1_Encoding/Utf8.lean",
+    "Flare/L3_Protocol/H1/*.lean",
+    "Flare/L3_Protocol/H2/Conn.lean",
+    "Flare/L3_Protocol/H2/StreamTable.lean",
+    "Flare/L3_Protocol/H2/Hpack.lean",
+    "Flare/L2_Machine/IoUring.lean",
+    "Flare/Kernels/**",
+]
+
+[archived]
+models = []

@@ -329,6 +329,7 @@ lean4 = ">=4.33.0,<4.34"
 [feature.formal.tasks]
 formal-build = { cmd = "lake build", cwd = "formal" }
 formal-check = "bash formal/scripts/check.sh"
+formal-anchors = "python3 formal/scripts/anchors.py check"   # every stale anchor, by tier
 
 [environments]
 # Lean default env — only flare's runtime deps. Ships tests, examples,
