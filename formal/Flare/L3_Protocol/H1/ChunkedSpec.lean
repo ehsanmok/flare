@@ -19,51 +19,51 @@ theorem drop_append_le {l : Bytes} {n : Nat} (m : Bytes) (h : n ≤ l.length) :
 
 /-! ## Segmentation independence (H1-01) -/
 
-theorem scanEnd_done_stable (P : Policy) (p q : Bytes) (start mb e : Nat)
-    (h : scanEnd P p start mb = .done e) : scanEnd P (p ++ q) start mb = .done e := by
+theorem scanEnd_done_stable (p q : Bytes) (start mb e : Nat)
+    (h : scanEnd p start mb = .done e) : scanEnd (p ++ q) start mb = .done e := by
   unfold scanEnd scanResume at *
-  rcases hr : scanL P mb (p.drop start) 0 with ⟨r, adv, t⟩
+  rcases hr : scanL mb (p.drop start) 0 with ⟨r, adv, t⟩
   rw [hr] at h
   obtain ⟨e', rfl, rfl⟩ := SRes.shift_eq_done.mp h
   have hst : start ≤ p.length := by
     rcases Nat.lt_or_ge p.length start with hc | hc
     · rw [List.drop_eq_nil_of_le (by omega), scanL_none (by rfl)] at hr; simp at hr
     · exact hc
-  rw [drop_append_le q hst, scanL_done_append P mb q _ 0 e' adv t hr]; rfl
+  rw [drop_append_le q hst, scanL_done_append mb q _ 0 e' adv t hr]; rfl
 
-theorem scanEnd_malformed_stable (P : Policy) (hs : 1 ≤ P.slack) (hc : P.capTrailer = true)
+theorem scanEnd_malformed_stable
     (p q : Bytes) (start mb : Nat)
-    (h : scanEnd P p start mb = .malformed) : scanEnd P (p ++ q) start mb = .malformed := by
+    (h : scanEnd p start mb = .malformed) : scanEnd (p ++ q) start mb = .malformed := by
   unfold scanEnd scanResume at *
-  rcases hr : scanL P mb (p.drop start) 0 with ⟨r, adv, t⟩
+  rcases hr : scanL mb (p.drop start) 0 with ⟨r, adv, t⟩
   rw [hr] at h
   have h' := SRes.shift_eq_malformed.mp h; subst h'
   have hst : start ≤ p.length := by
     rcases Nat.lt_or_ge p.length start with hc | hc
     · rw [List.drop_eq_nil_of_le (by omega), scanL_none (by rfl)] at hr; simp [CAP] at hr
     · exact hc
-  rw [drop_append_le q hst, scanL_malformed_append P hs hc mb q _ 0 adv t hr]; rfl
+  rw [drop_append_le q hst, scanL_malformed_append mb q _ 0 adv t hr]; rfl
 
 /-- **Prefix stability** under the H1-01 fix: once a prefix of the stream
 gets a definite verdict, every extension gets the same verdict. -/
-theorem scanEnd_segmentation_independent (P : Policy) (hs : 1 ≤ P.slack)
-    (hc : P.capTrailer = true) (p q : Bytes) (start mb : Nat)
-    (h : scanEnd P p start mb ≠ .incomplete) :
-    scanEnd P (p ++ q) start mb = scanEnd P p start mb := by
-  cases hv : scanEnd P p start mb with
+theorem scanEnd_segmentation_independent
+    (p q : Bytes) (start mb : Nat)
+    (h : scanEnd p start mb ≠ .incomplete) :
+    scanEnd (p ++ q) start mb = scanEnd p start mb := by
+  cases hv : scanEnd p start mb with
   | incomplete => exact absurd hv h
-  | malformed => exact scanEnd_malformed_stable P hs hc p q start mb hv
-  | done e => exact scanEnd_done_stable P p q start mb e hv
+  | malformed => exact scanEnd_malformed_stable p q start mb hv
+  | done e => exact scanEnd_done_stable p q start mb e hv
 
 /-- Resuming from the saved `(cursor, decoded_total)` on an extended buffer
-equals re-scanning from the original cursor (any policy). -/
-theorem scanResume_resume (P : Policy) (b m : Bytes) (c0 t0 mb : Nat)
-    (h : (scanResume P b c0 t0 mb).1 = .incomplete) :
-    scanResume P (b ++ m) (scanResume P b c0 t0 mb).2.1 (scanResume P b c0 t0 mb).2.2 mb
-      = scanResume P (b ++ m) c0 t0 mb := by
+equals re-scanning from the original cursor. -/
+theorem scanResume_resume (b m : Bytes) (c0 t0 mb : Nat)
+    (h : (scanResume b c0 t0 mb).1 = .incomplete) :
+    scanResume (b ++ m) (scanResume b c0 t0 mb).2.1 (scanResume b c0 t0 mb).2.2 mb
+      = scanResume (b ++ m) c0 t0 mb := by
   unfold scanResume at *
   dsimp only at h ⊢
-  rcases hr : scanL P mb (b.drop c0) t0 with ⟨r, adv, t⟩
+  rcases hr : scanL mb (b.drop c0) t0 with ⟨r, adv, t⟩
   rw [hr] at h
   dsimp only at h ⊢
   have h' := SRes.shift_eq_incomplete.mp h; subst h'
@@ -71,7 +71,7 @@ theorem scanResume_resume (P : Policy) (b m : Bytes) (c0 t0 mb : Nat)
   · rw [List.drop_eq_nil_of_le (by omega), scanL_none (by rfl)] at hr
     simp only [Prod.mk.injEq] at hr; obtain ⟨-, rfl, rfl⟩ := hr
     simp
-  · obtain ⟨_, hres⟩ := scanL_resume P mb m _ t0 adv t hr
+  · obtain ⟨_, hres⟩ := scanL_resume mb m _ t0 adv t hr
     rw [drop_append_le m hge, hres]
     have : (b ++ m).drop (c0 + adv) = (b.drop c0 ++ m).drop adv := by
       rw [← drop_append_le m hge, List.drop_drop]
@@ -81,17 +81,17 @@ theorem scanResume_resume (P : Policy) (b m : Bytes) (c0 t0 mb : Nat)
 
 /-- The reactor's polling loop: scan the buffer from the saved state; while
 the verdict is INCOMPLETE and another segment arrives, append it and resume.
-mirrors flare/http/_reactor/conn_handle.mojo:661-678 @59bda50 -/
-def poll (P : Policy) (mb : Nat) : Bytes → Nat → Nat → List Bytes → SRes
-  | buf, c, t, [] => (scanResume P buf c t mb).1
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._check_request_complete sha=e491b536478f at=ea1b9282 -/
+def poll (mb : Nat) : Bytes → Nat → Nat → List Bytes → SRes
+  | buf, c, t, [] => (scanResume buf c t mb).1
   | buf, c, t, seg :: segs =>
-    let r := scanResume P buf c t mb
-    if r.1 = .incomplete then poll P mb (buf ++ seg) r.2.1 r.2.2 segs else r.1
+    let r := scanResume buf c t mb
+    if r.1 = .incomplete then poll mb (buf ++ seg) r.2.1 r.2.2 segs else r.1
 
-theorem poll_inv (P : Policy) (hs : 1 ≤ P.slack) (hc : P.capTrailer = true) (mb h : Nat) :
+theorem poll_inv (mb h : Nat) :
     ∀ (segs : List Bytes) (buf : Bytes) (c t : Nat),
-    (∀ ext, scanResume P (buf ++ ext) c t mb = scanResume P (buf ++ ext) h 0 mb) →
-    poll P mb buf c t segs = scanEnd P (buf ++ segs.flatten) h mb
+    (∀ ext, scanResume (buf ++ ext) c t mb = scanResume (buf ++ ext) h 0 mb) →
+    poll mb buf c t segs = scanEnd (buf ++ segs.flatten) h mb
   | [], buf, c, t, hinv => by
     have := hinv []; simp only [List.append_nil] at this
     simp [poll, scanEnd, this]
@@ -99,37 +99,36 @@ theorem poll_inv (P : Policy) (hs : 1 ≤ P.slack) (hc : P.capTrailer = true) (m
     simp only [poll]
     split
     · rename_i hinc
-      rw [poll_inv P hs hc mb h segs (buf ++ seg) _ _ ?_]
+      rw [poll_inv mb h segs (buf ++ seg) _ _ ?_]
       · simp [List.append_assoc]
       · intro ext
-        have h1 := scanResume_resume P buf (seg ++ ext) c t mb hinc
+        have h1 := scanResume_resume buf (seg ++ ext) c t mb hinc
         rw [List.append_assoc, h1, hinv]
     · rename_i hni
       have h0 := hinv []; simp only [List.append_nil] at h0
-      have hv : scanEnd P buf h mb ≠ .incomplete := by
+      have hv : scanEnd buf h mb ≠ .incomplete := by
         unfold scanEnd; rw [← h0]; exact hni
       unfold scanEnd at hv ⊢
       rw [h0]
-      exact (scanEnd_segmentation_independent P hs hc buf _ h mb hv).symm
+      exact (scanEnd_segmentation_independent buf _ h mb hv).symm
 
 /-- **Chunking independence of the reactor** (H1-01 fix): however the
 request body is split into reads, the reactor's verdict equals a one-shot
 scan of all the bytes it has received. -/
-theorem poll_eq_oneShot (P : Policy) (hs : 1 ≤ P.slack) (hc : P.capTrailer = true)
+theorem poll_eq_oneShot
     (mb h : Nat) (b0 : Bytes) (segs : List Bytes) :
-    poll P mb b0 h 0 segs = scanEnd P (b0 ++ segs.flatten) h mb :=
-  poll_inv P hs hc mb h segs b0 h 0 (fun _ => rfl)
+    poll mb b0 h 0 segs = scanEnd (b0 ++ segs.flatten) h mb :=
+  poll_inv mb h segs b0 h 0 (fun _ => rfl)
 
-/-- The shipped scanner (`implP`) has slack 1 and caps trailers, so the
-reactor's verdict is independent of the segmentation (H1-01 fixed). -/
+/-- The reactor's verdict is independent of the segmentation (H1-01). -/
 theorem impl_poll_eq_oneShot (mb h : Nat) (b0 : Bytes) (segs : List Bytes) :
-    poll implP mb b0 h 0 segs = scanImpl (b0 ++ segs.flatten) h mb :=
-  poll_eq_oneShot implP (by decide) rfl mb h b0 segs
+    poll mb b0 h 0 segs = scanImpl (b0 ++ segs.flatten) h mb :=
+  poll_eq_oneShot mb h b0 segs
 
 /-- A shipped-scanner acceptance is never revoked by more bytes. -/
 theorem impl_done_stable (p q : Bytes) (start mb e : Nat)
     (h : scanImpl p start mb = .done e) : scanImpl (p ++ q) start mb = .done e :=
-  scanEnd_done_stable implP p q start mb e h
+  scanEnd_done_stable p q start mb e h
 
 /-! ## LF-tolerant recipient (H1-02) -/
 
@@ -248,10 +247,10 @@ theorem parseSize_lfSize (mb : Nat) : ∀ (xs : Bytes) (s d size dg : Nat),
 
 theorem stripCR_crlf : stripCR [13] = [] := by decide
 
-theorem lfTr_of_scanTr (P : Policy) (hP : P.rejectLF = true) :
-    ∀ (l : Bytes) (e : Nat), scanTr P l = .done e → lfTr l = some e := by
+theorem lfTr_of_scanTr :
+    ∀ (l : Bytes) (e : Nat), scanTr l = .done e → lfTr l = some e := by
   intro l
-  fun_induction scanTr P l <;> intro e h
+  fun_induction scanTr l <;> intro e h
   case case3 a b t hab =>
     simp at h; subst h
     obtain ⟨rfl, rfl⟩ := hab
@@ -261,7 +260,7 @@ theorem lfTr_of_scanTr (P : Policy) (hP : P.rejectLF = true) :
       simp [findLF] at hk; subst hk; simp [stripCR]
   case case8 a b t hab k hk hcap hlf ih =>
     obtain ⟨e', h1, rfl⟩ := SRes.shift_eq_done.mp h
-    have hlf' : 10 ∉ (a :: b :: t).take k := by simpa [hP] using hlf
+    have hlf' : 10 ∉ (a :: b :: t).take k := by simpa using hlf
     obtain ⟨hf, hst⟩ := findLF_of_crlf hk hlf'
     have hk0 : k ≠ 0 := by
       rintro rfl; simp [findCRLF] at hk; exact hab hk
@@ -278,32 +277,32 @@ theorem lfTr_of_scanTr (P : Policy) (hP : P.rejectLF = true) :
 /-- **H1-02 fix meets the spec**: with bare LF rejected inside chunk lines,
 every body flare's scanner accepts is framed by an LF-tolerant recipient at
 the same end offset, with the same decoded bytes. -/
-theorem lfScan_of_scanL (P : Policy) (hP : P.rejectLF = true) (mb : Nat) :
-    ∀ (l : Bytes) (tot e adv t : Nat), scanL P mb l tot = (.done e, adv, t) →
+theorem lfScan_of_scanL (mb : Nat) :
+    ∀ (l : Bytes) (tot e adv t : Nat), scanL mb l tot = (.done e, adv, t) →
     ∃ out, decL l = .ok (out, e) ∧ lfScan l = some (out, e) := by
   intro l tot
-  fun_induction scanL P mb l tot <;> intro e adv t h <;> simp only [Prod.mk.injEq] at h
+  fun_induction scanL mb l tot <;> intro e adv t h <;> simp only [Prod.mk.injEq] at h
   case case6 l tot k hk hcap hlf digits hd hps =>
     obtain ⟨h1, -, -⟩ := h
     obtain ⟨e', h1', rfl⟩ := SRes.shift_eq_done.mp h1
-    have hlf' : 10 ∉ l.take k := by simpa [hP] using hlf
+    have hlf' : 10 ∉ l.take k := by simpa using hlf
     obtain ⟨hf, hst⟩ := findLF_of_crlf hk hlf'
     refine ⟨[], ?_, ?_⟩
     · rw [decL_some hk, parseSize_hexD mb _ 0 0 0 digits hps]
       simp only [if_true]
-      rw [decTr_of_scanTr P _ e' h1']; rfl
+      rw [decTr_of_scanTr _ e' h1']; rfl
     · rw [lfScan]; split
       · simp_all
       · rename_i k2 hk2; rw [hf] at hk2; cases hk2
         rw [hst, parseSize_lfSize mb _ 0 0 0 digits hps hd]
         simp only [if_true]
         have hd2 : l.drop (k + 1 + 1) = l.drop (k + 2) := rfl
-        rw [hd2, lfTr_of_scanTr P hP _ e' h1']; simp only [Option.map_some]
+        rw [hd2, lfTr_of_scanTr _ e' h1']; simp only [Option.map_some]
   case case10 l tot k hk hcap hlf size digits hps hd hs hmb hl hcrlf r ih =>
     obtain ⟨h1, -, -⟩ := h
     obtain ⟨e', h1', rfl⟩ := SRes.shift_eq_done.mp h1
     obtain ⟨out, hout, hlfs⟩ := ih e' r.2.1 r.2.2 (by rw [← h1'])
-    have hlf' : 10 ∉ l.take k := by simpa [hP] using hlf
+    have hlf' : 10 ∉ l.take k := by simpa using hlf
     obtain ⟨hf, hst⟩ := findLF_of_crlf hk hlf'
     refine ⟨(l.drop (k + 2)).take size ++ out, ?_, ?_⟩
     · rw [decL_some hk, parseSize_hexD mb _ 0 0 size digits hps]
@@ -324,36 +323,35 @@ theorem lfScan_of_scanL (P : Policy) (hP : P.rejectLF = true) (mb : Nat) :
         simp only [Option.map_some]
   all_goals (try split at h) <;> (rcases h with ⟨h1, -, -⟩; simp at h1)
 
-theorem scanEnd_lfSafe (P : Policy) (hP : P.rejectLF = true) (buf : Bytes) (start mb e : Nat)
-    (h : scanEnd P buf start mb = .done e) :
+theorem scanEnd_lfSafe (buf : Bytes) (start mb e : Nat)
+    (h : scanEnd buf start mb = .done e) :
     ∃ out, decodeBody buf start = .ok (out, e) ∧
       (lfScan (buf.drop start)).map (fun r => (r.1, r.2 + start)) = some (out, e) := by
   unfold scanEnd scanResume at h
-  rcases hr : scanL P mb (buf.drop start) 0 with ⟨r, adv, t⟩
+  rcases hr : scanL mb (buf.drop start) 0 with ⟨r, adv, t⟩
   rw [hr] at h
   obtain ⟨e', rfl, rfl⟩ := SRes.shift_eq_done.mp h
-  obtain ⟨out, hd, hl⟩ := lfScan_of_scanL P hP mb _ 0 e' adv t hr
+  obtain ⟨out, hd, hl⟩ := lfScan_of_scanL mb _ 0 e' adv t hr
   exact ⟨out, by rw [decodeBody, hd]; rfl, by simp [hl]⟩
 
 theorem impl_agrees_lfTolerant (buf : Bytes) (start mb e : Nat)
     (h : scanImpl buf start mb = .done e) :
     ∃ out, decodeBody buf start = .ok (out, e) ∧
       (lfScan (buf.drop start)).map (fun r => (r.1, r.2 + start)) = some (out, e) :=
-  scanEnd_lfSafe implP rfl buf start mb e h
+  scanEnd_lfSafe buf start mb e h
 
-/-- **Scan acceptance implies decode agreement** (any policy, including the
-shipped one): when the reactor's scanner says the body ends at `e`,
+/-- **Scan acceptance implies decode agreement**: when the reactor's scanner says the body ends at `e`,
 `decode_chunked_body` succeeds on the same buffer, ends at the same `e`, and
 decodes at most `max_body` bytes. -/
-theorem scanEnd_decode (P : Policy) (buf : Bytes) (start mb e : Nat)
-    (h : scanEnd P buf start mb = .done e) :
+theorem scanEnd_decode (buf : Bytes) (start mb e : Nat)
+    (h : scanEnd buf start mb = .done e) :
     ∃ out, decodeBody buf start = .ok (out, e) ∧ out.length ≤ mb := by
   unfold scanEnd scanResume at h
-  rcases hr : scanL P mb (buf.drop start) 0 with ⟨r, adv, t⟩
+  rcases hr : scanL mb (buf.drop start) 0 with ⟨r, adv, t⟩
   rw [hr] at h
   obtain ⟨e', rfl, rfl⟩ := SRes.shift_eq_done.mp h
-  obtain ⟨out, hd, hl⟩ := decL_of_scanL P mb _ 0 e' adv t hr
-  have := scanL_total_le P mb _ 0 e' adv t (Nat.zero_le _) hr
+  obtain ⟨out, hd, hl⟩ := decL_of_scanL mb _ 0 e' adv t hr
+  have := scanL_total_le mb _ 0 e' adv t (Nat.zero_le _) hr
   exact ⟨out, by rw [decodeBody, hd]; rfl, by omega⟩
 
 end Flare.L3.H1.Chunked

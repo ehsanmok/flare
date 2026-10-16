@@ -42,23 +42,23 @@ def ieq (a b : String) : Bool := a.toLower == b.toLower
 theorem ieq_self (a : String) : ieq a a = true := by simp [ieq]
 
 /-- `HeaderMap.set`.
-mirrors flare/http/headers.mojo:139-156 @59bda50 -/
+mirrors flare/http/headers.mojo#HeaderMap.set sha=4ecb11fbe00d at=59bda50f -/
 def setH : Hdrs → String → String → Hdrs
   | [], k, v => [(k, v)]
   | (k', v') :: t, k, v => if ieq k' k then (k, v) :: t else (k', v') :: setH t k v
 
 /-- `HeaderMap.append`.
-mirrors flare/http/headers.mojo:158-170 @59bda50 -/
+mirrors flare/http/headers.mojo#HeaderMap.append sha=c17eeb6886b3 at=59bda50f -/
 def appendH (h : Hdrs) (k v : String) : Hdrs := h ++ [(k, v)]
 
 /-- `HeaderMap.get`.
-mirrors flare/http/headers.mojo:172-184 @59bda50 -/
+mirrors flare/http/headers.mojo#HeaderMap.get sha=a3f57b6f78ba at=59bda50f -/
 def getH : Hdrs → String → String
   | [], _ => ""
   | (k', v') :: t, k => if ieq k' k then v' else getH t k
 
 /-- `HeaderMap.contains`.
-mirrors flare/http/headers.mojo:201-213 @59bda50 -/
+mirrors flare/http/headers.mojo#HeaderMap.contains sha=d6a0c21a2f41 at=59bda50f -/
 def hasH (h : Hdrs) (k : String) : Bool := h.any (fun p => ieq p.1 k)
 
 theorem getH_setH_self (h : Hdrs) (k v : String) : getH (setH h k v) k = v := by
@@ -109,7 +109,7 @@ abbrev Handler := Req → Except String Resp
 
 /-- `Logger.serve`: log and pass through; on `raise`, log and re-raise the
 same message.
-mirrors flare/http/middleware.mojo:61-86 @59bda50 -/
+mirrors flare/http/middleware.mojo#Logger.serve sha=f0c1dc422d8b at=59bda50f -/
 def logger (h : Handler) : Handler := fun r =>
   match h r with
   | .ok x => .ok x
@@ -120,7 +120,7 @@ def panic500 (body : List UInt8) : Resp :=
   ⟨500, [("Content-Type", "text/plain; charset=utf-8")], body⟩
 
 /-- `CatchPanic.serve`.
-mirrors flare/http/middleware.mojo:397-404 @59bda50 -/
+mirrors flare/http/middleware.mojo#CatchPanic.serve sha=9ada3b7b5325 at=59bda50f -/
 def catchPanic (body : List UInt8) (h : Handler) : Handler := fun r =>
   match h r with
   | .ok x => .ok x
@@ -132,7 +132,7 @@ def ridOf (gen : String) (r : Req) : String :=
   if (getH r.hdrs "x-request-id").isEmpty then gen else getH r.hdrs "x-request-id"
 
 /-- `RequestId.serve`.
-mirrors flare/http/middleware.mojo:105-111 @59bda50 -/
+mirrors flare/http/middleware.mojo#RequestId.serve sha=5bd119a1d6d1 at=59bda50f -/
 def requestId (gen : String) (h : Handler) : Handler := fun r =>
   match h r with
   | .ok x => .ok { x with hdrs := setH x.hdrs "X-Request-Id" (ridOf gen r) }
@@ -214,7 +214,7 @@ structure CCfg where
 
 /-- The encoding branch: replace the body, set Content-Encoding and
 Content-Length, append `Vary: Accept-Encoding`.
-mirrors flare/http/middleware.mojo:360-376 @59bda50 -/
+mirrors flare/http/middleware.mojo#Compress.serve sha=23cf21612267 at=59bda50f -/
 def encodeAs (c : CCfg) (e : Enc) (x : Resp) : Resp :=
   let b := c.encode e x.body
   { x with body := b,
@@ -225,20 +225,9 @@ def encodeAs (c : CCfg) (e : Enc) (x : Resp) : Resp :=
 relative to the identity bytes. -/
 def isPartial (x : Resp) : Bool := x.status == 206 || hasH x.hdrs "content-range"
 
-/-- `Compress.serve` before the APP-26 fix: no check for partial content.
-mirrors flare/http/middleware.mojo:345-376 @59bda50 -/
-def compressOld (c : CCfg) (x : Resp) : Resp :=
-  if c.pick.q == 0 then x
-  else if x.body.length < c.minSize then x
-  else if hasH x.hdrs "content-encoding" then x
-  else match c.pick.enc with
-    | .br => if c.brotliOk then encodeAs c .br x else x
-    | .gzip => encodeAs c .gzip x
-    | .identity => x
-
 /-- `Compress.serve` after the APP-26 fix but before the APP-27 one: partial
 responses pass through, the identity branches still lack `Vary`.
-mirrors flare/http/middleware.mojo:345-382 (APP-26 fixed, APP-27 not) -/
+mirrors flare/http/middleware.mojo#Compress+Compress.__init__+Compress.serve sha=396792540924 at=461c23ee (APP-26 fixed, APP-27 not) -/
 def compressNoVary (c : CCfg) (x : Resp) : Resp :=
   if c.pick.q == 0 then x
   else if x.body.length < c.minSize then x
@@ -256,7 +245,7 @@ too small, already encoded or partial pass through untouched; every other
 response carries `Vary: Accept-Encoding`, whether it is encoded or left as
 identity (no usable `Accept-Encoding`, identity preferred, every coding
 refused, brotli unavailable).
-mirrors flare/http/middleware.mojo:345-390 (fixed, APP-26, APP-27) -/
+mirrors flare/http/middleware.mojo#Compress+Compress.__init__+Compress.serve sha=396792540924 at=461c23ee (fixed, APP-26, APP-27) -/
 def compress (c : CCfg) (x : Resp) : Resp :=
   if x.body.length < c.minSize then x
   else if hasH x.hdrs "content-encoding" then x

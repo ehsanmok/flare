@@ -4,7 +4,7 @@ import Flare.L3_Protocol.H1.HeaderText
 /-!
 # The client's chunked decoder `_decode_chunked`
 
-`flare/http/_client/parse.mojo:497-578` decodes a chunked response body in
+`flare/http/_client/parse.mojo#_decode_chunked sha=5500b5c1999b at=193ddcec` decodes a chunked response body in
 two places:
 
 * the pooled framed reader (`_read_http_response_framed`, parse.mojo:853-869)
@@ -19,8 +19,7 @@ two places:
 `cDec` mirrors the decoder. `cDec_agree` proves the first path right: on any
 buffer the scanner accepts, `_decode_chunked` either raises or yields exactly
 the bytes of `decode_chunked_body` (`decL`), reading nothing past the
-scanner's end. The second path was finding H1-06 (`Bugs/H1_06.lean`): `cReadOld` decoded
-without the scan; `cRead_complete` proves the shipped path only returns a
+scanner's end. `cRead_complete` proves the second path only returns a
 complete body.
 
 Mojo's `String.strip()` on the byte-per-`chr` string removes the bytes
@@ -47,12 +46,12 @@ def hexAcc : Bytes → Nat → Option Nat
     | some v => hexAcc cs (a * 16 + v)
 
 /-- `_parse_hex`: empty or more than 15 digits raises.
-mirrors flare/http/_client/parse.mojo:609-642 @59bda50 -/
+mirrors flare/http/_client/parse.mojo#_parse_hex sha=46af467b28ee at=59bda50f -/
 def cHex (s : Bytes) : Option Nat :=
   if s = [] then none else if s.length > 15 then none else hexAcc s 0
 
 /-- The trailer names `_is_forbidden_trailer` refuses.
-mirrors flare/http/_client/parse.mojo:461-494 @59bda50 -/
+mirrors flare/http/_client/parse.mojo#_is_forbidden_trailer sha=6fa76f5b35c0 at=59bda50f -/
 def forbiddenNames : List Bytes :=
   ["transfer-encoding", "content-length", "host", "trailer", "authorization",
     "set-cookie", "cookie"].map Bytes.ofString
@@ -61,7 +60,7 @@ def lowerB (l : Bytes) : Bytes := l.map Flare.L3.H1.Text.lower
 
 /-- One trailer line: a colon is required, a forbidden name raises, and
 `HeaderMap.append` raises on CR/LF in the name or value.
-mirrors flare/http/_client/parse.mojo:546-570 @59bda50 -/
+mirrors flare/http/_client/parse.mojo#_decode_chunked sha=5500b5c1999b at=59bda50f -/
 def trailerOk (line : Bytes) : Bool :=
   match line.findIdx? (· == 58) with
   | none => false
@@ -72,7 +71,7 @@ def trailerOk (line : Bytes) : Bool :=
       v.contains 13 || v.contains 10)
 
 /-- The trailer loop after the zero chunk.
-mirrors flare/http/_client/parse.mojo:540-571 @59bda50 -/
+mirrors flare/http/_client/parse.mojo#_decode_chunked sha=5500b5c1999b at=59bda50f -/
 def cTr (l : Bytes) : Except String Unit :=
   match l with
   | [] => .ok ()
@@ -90,7 +89,7 @@ theorem findCRLF_pos {l : Bytes} {k : Nat} (h : findCRLF l = some k) : 0 < l.len
   have := findCRLF_lt h; omega
 
 /-- `_decode_chunked(raw, pos)` over the suffix `l = raw[pos:]`.
-mirrors flare/http/_client/parse.mojo:497-578 @59bda50 -/
+mirrors flare/http/_client/parse.mojo#_decode_chunked sha=5500b5c1999b at=59bda50f -/
 def cDec (l : Bytes) : Except String Bytes :=
   match l with
   | [] => .ok []
@@ -244,17 +243,17 @@ theorem cDec_cons_eq {a : UInt8} {t : Bytes} {k : Nat} (hf : findCRLF (a :: t) =
 first `e` bytes (in particular `l` itself, or `l` truncated at `e` as the
 framed reader does) either raises or returns exactly the bytes
 `decode_chunked_body` returns. -/
-theorem cDec_agree (P : Policy) (mb : Nat) : ∀ (l : Bytes) (tot e adv t : Nat),
-    scanL P mb l tot = (.done e, adv, t) →
+theorem cDec_agree (mb : Nat) : ∀ (l : Bytes) (tot e adv t : Nat),
+    scanL mb l tot = (.done e, adv, t) →
     ∀ (l' out : Bytes), l'.take e = l.take e → e ≤ l'.length → cDec l' = .ok out →
     decL l = .ok (out, e) := by
   intro l tot
-  fun_induction scanL P mb l tot <;> intro e adv t h <;> simp only [Prod.mk.injEq] at h
+  fun_induction scanL mb l tot <;> intro e adv t h <;> simp only [Prod.mk.injEq] at h
   case case6 l tot k hk hcap hlf digits hd hps =>
     intro l' out hag hle hc
     obtain ⟨h1, -, -⟩ := h
     obtain ⟨e', h1', rfl⟩ := SRes.shift_eq_done.mp h1
-    obtain ⟨out0, hdec, -⟩ := decL_of_scanL P mb l tot (e' + (k + 2)) 0 tot
+    obtain ⟨out0, hdec, -⟩ := decL_of_scanL mb l tot (e' + (k + 2)) 0 tot
       (by rw [scanL_some hk]; simp only [if_neg hcap, if_neg hlf, hps, if_neg hd, if_true]; rw [h1']; rfl)
     have hk' := findCRLF_prefix hk (take_agree hag (by omega))
     cases l' with
@@ -309,37 +308,33 @@ theorem cDec_agree (P : Policy) (mb : Nat) : ∀ (l : Bytes) (tot e adv t : Nat)
 
 /-- The framed reader: scan from `body_start`, truncate at the scanner's end,
 decode. The decoded body is `decode_chunked_body`'s. -/
-theorem framed_chunked_agrees (P : Policy) (mb : Nat) (l : Bytes) (e adv t : Nat)
-    (h : scanL P mb l 0 = (.done e, adv, t)) (out : Bytes) (hc : cDec (l.take e) = .ok out) :
+theorem framed_chunked_agrees (mb : Nat) (l : Bytes) (e adv t : Nat)
+    (h : scanL mb l 0 = (.done e, adv, t)) (out : Bytes) (hc : cDec (l.take e) = .ok out) :
     decL l = .ok (out, e) := by
-  have hle := scanL_done_le P mb l 0 e adv t h
-  exact cDec_agree P mb l 0 e adv t h (l.take e) out (by rw [List.take_take, Nat.min_self])
+  have hle := scanL_done_le mb l 0 e adv t h
+  exact cDec_agree mb l 0 e adv t h (l.take e) out (by rw [List.take_take, Nat.min_self])
     (by simp; omega) hc
-
-/-- The read-to-EOF path before the H1-06 fix: `_parse_http_response` decoded
-whatever arrived, with no completeness check. Kept for the counterexample. -/
-def cReadOld (l : Bytes) : Except String Bytes := cDec l
 
 /-- The shipped read-to-EOF path: `_require_complete_chunked` (the scanner
 must report `done`) and then `_decode_chunked`.
-mirrors flare/http/_client/parse.mojo:174-194 (fixed, H1-06) -/
+mirrors flare/http/_client/parse.mojo#_require_complete_chunked sha=23d26ea987f6 at=82262573 (fixed, H1-06) -/
 def cRead (mb : Nat) (l : Bytes) : Except String Bytes :=
-  match scanL implP mb l 0 with
+  match scanL mb l 0 with
   | (.done _, _, _) => cDec l
   | _ => .error "HTTP response: incomplete chunked body"
 
 theorem cRead_complete (mb : Nat) (l out : Bytes) (h : cRead mb l = .ok out) :
-    ∃ e, scanEnd implP l 0 mb = .done e ∧ decodeBody l 0 = .ok (out, e) := by
+    ∃ e, scanEnd l 0 mb = .done e ∧ decodeBody l 0 = .ok (out, e) := by
   unfold cRead at h
-  rcases hs : scanL implP mb l 0 with ⟨r, adv, t⟩
+  rcases hs : scanL mb l 0 with ⟨r, adv, t⟩
   rw [hs] at h
   cases r with
   | done e =>
     simp only at h
-    have hle := scanL_done_le implP mb l 0 e adv t hs
+    have hle := scanL_done_le mb l 0 e adv t hs
     refine ⟨e, ?_, ?_⟩
     · simp [scanEnd, scanResume, hs, SRes.shift]
-    · have := cDec_agree implP mb l 0 e adv t hs l out rfl hle h
+    · have := cDec_agree mb l 0 e adv t hs l out rfl hle h
       unfold decodeBody; rw [List.drop_zero, this]; rfl
   | _ => cases h
 

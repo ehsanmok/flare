@@ -18,16 +18,15 @@ open Flare
 
 /-! ## Impl -/
 
-/-- mirrors flare/http/form.mojo:28-47 @59bda50 -/
+/-- mirrors flare/http/form.mojo#_hex_nibble sha=75539c50b97a at=59bda50f -/
 def hexNibble (c : UInt8) : Option Nat :=
   if 48 ≤ c.toNat ∧ c.toNat ≤ 57 then some (c.toNat - 48)
   else if 97 ≤ c.toNat ∧ c.toNat ≤ 102 then some (c.toNat - 87)
   else if 65 ≤ c.toNat ∧ c.toNat ≤ 70 then some (c.toNat - 55)
   else none
 
-/-- mirrors flare/http/form.mojo:50-87 @59bda50
-(the byte loop; the pre-fix `String(unsafe_from_utf8=...)` wrap was the
-identity on bytes, and is exactly where validity was lost). The Mojo guard
+/-- mirrors flare/http/form.mojo#urldecode sha=7b1fe9cc0d65 at=59bda50f
+(the byte loop). The Mojo guard
 `if i + 2 >= n: raise` is the "fewer than two bytes after `%`" case. -/
 def urldecodeBytes : Bytes → Option Bytes
   | [] => some []
@@ -89,61 +88,57 @@ def utf8ValidAux : Nat → Bytes → Bool
 /-- RFC 3629 `UTF8-octets = *( UTF8-char )`. -/
 def Utf8Valid (bs : Bytes) : Bool := utf8ValidAux bs.length bs
 
-/-- mirrors flare/http/form.mojo:50-95 (fixed, APP-24): the byte loop followed
+/-- mirrors flare/http/form.mojo#urldecode sha=a62961a5db5c at=fe97b5fc (fixed, APP-24): the byte loop followed
 by `String(from_utf8=...)`, which raises on ill-formed UTF-8. -/
 def urldecode (s : Bytes) : Option Bytes :=
   match urldecodeBytes s with
   | some out => if Utf8Valid out then some out else none
   | none => none
 
-/-- The pre-fix `urldecode` (form.mojo:50-87 @59bda50): the decoded bytes were
-wrapped with `String(unsafe_from_utf8=...)` unchecked. -/
-abbrev urldecodeOld : Bytes → Option Bytes := urldecodeBytes
-
 /-- The unreserved set of flare's encoder (A-Z a-z 0-9 - . _ ~).
-mirrors flare/http/form.mojo:112-120 @59bda50 -/
+mirrors flare/http/form.mojo#urlencode sha=46051f3d5053 at=59bda50f -/
 def unreserved (c : UInt8) : Bool :=
   (48 ≤ c.toNat && c.toNat ≤ 57) || (65 ≤ c.toNat && c.toNat ≤ 90) ||
   (97 ≤ c.toNat && c.toNat ≤ 122) || c.toNat == 45 || c.toNat == 46 ||
   c.toNat == 95 || c.toNat == 126
 
 /-- `HEX[n]` for `HEX = "0123456789ABCDEF"`.
-mirrors flare/http/form.mojo:104 @59bda50 -/
+mirrors flare/http/form.mojo#urlencode sha=46051f3d5053 at=59bda50f -/
 def hexDigit (n : Nat) : UInt8 :=
   if n < 10 then UInt8.ofNat (48 + n) else UInt8.ofNat (55 + n)
 
-/-- One byte of `urlencode`. mirrors flare/http/form.mojo:110-128 @59bda50 -/
+/-- One byte of `urlencode`. mirrors flare/http/form.mojo#urlencode sha=46051f3d5053 at=59bda50f -/
 def encByte (c : UInt8) : Bytes :=
   if unreserved c then [c]
   else if c = 32 then [43]
   else [37, hexDigit (c.toNat / 16), hexDigit (c.toNat % 16)]
 
-/-- mirrors flare/http/form.mojo:90-129 @59bda50 -/
+/-- mirrors flare/http/form.mojo#urlencode sha=46051f3d5053 at=59bda50f -/
 def urlencode (s : Bytes) : Bytes := s.flatMap encByte
 
 def isSep (c : UInt8) : Bool := c = 38 || c = 59
 
 /-- Split off the first pair: bytes before the first `&`/`;`, and the bytes
 after it (`[]` when there is no separator: `pos = n + 1` ends the loop).
-mirrors flare/http/form.mojo:242-247,263 @59bda50 -/
+mirrors flare/http/form.mojo#parse_form_urlencoded sha=ec7b9d9e3545 at=59bda50f -/
 def breakSep : Bytes → Bytes × Bytes
   | [] => ([], [])
   | c :: r => if isSep c then ([], r) else ((c :: (breakSep r).1), (breakSep r).2)
 
 /-- Split a pair at the first `=`; `none` = no `=` (value `""`).
-mirrors flare/http/form.mojo:249-261 @59bda50 -/
+mirrors flare/http/form.mojo#parse_form_urlencoded sha=ec7b9d9e3545 at=59bda50f -/
 def breakEq : Bytes → Bytes × Option Bytes
   | [] => ([], none)
   | c :: r => if c = 61 then ([], some r) else ((c :: (breakEq r).1), (breakEq r).2)
 
 /-- One `name=value` pair, decoded with `dec`.
-mirrors flare/http/form.mojo:249-262 @59bda50 -/
+mirrors flare/http/form.mojo#parse_form_urlencoded sha=ec7b9d9e3545 at=59bda50f -/
 def parsePairWith (dec : Bytes → Option Bytes) (f : Bytes) : Option (Bytes × Bytes) := do
   let a ← dec (breakEq f).1
   let b ← dec ((breakEq f).2.getD [])
   pure (a, b)
 
-/-- mirrors flare/http/form.mojo:249-262 (fixed, APP-24): decode with the
+/-- mirrors flare/http/form.mojo#parse_form_urlencoded sha=ec7b9d9e3545 at=fe97b5fc (fixed, APP-24): decode with the
 validating `urldecode`. -/
 def parsePair : Bytes → Option (Bytes × Bytes) := parsePairWith urldecode
 
@@ -158,7 +153,7 @@ theorem breakSep_snd_length (c : UInt8) (r : Bytes) :
   · simp
   · exact breakSep_snd_le r
 
-/-- mirrors flare/http/form.mojo:216-264 @59bda50 (the `while pos < n` loop;
+/-- mirrors flare/http/form.mojo#parse_form_urlencoded sha=ec7b9d9e3545 at=59bda50f (the `while pos < n` loop;
 an empty pair is skipped), with the decoder as a parameter. -/
 def parseFormWith (dec : Bytes → Option Bytes) (b : Bytes) : Option (List (Bytes × Bytes)) :=
   match b with
@@ -174,16 +169,13 @@ def parseFormWith (dec : Bytes → Option Bytes) (b : Bytes) : Option (List (Byt
 termination_by b.length
 decreasing_by all_goals (have := breakSep_snd_length c r; simp_all; omega)
 
-/-- mirrors flare/http/form.mojo:216-270 (fixed, APP-24): `parse_form_urlencoded`
+/-- mirrors flare/http/form.mojo#FormData.to_urlencoded+parse_form_urlencoded sha=b4b44882bbe1 at=fe97b5fc (fixed, APP-24): `parse_form_urlencoded`
 as shipped (validating `urldecode`). -/
 def parseForm : Bytes → Option (List (Bytes × Bytes)) := parseFormWith urldecode
 
-/-- `parse_form_urlencoded` before the APP-24 fix (unchecked decode). -/
-def parseFormOld : Bytes → Option (List (Bytes × Bytes)) := parseFormWith urldecodeOld
-
 def serPair (p : Bytes × Bytes) : Bytes := urlencode p.1 ++ 61 :: urlencode p.2
 
-/-- mirrors flare/http/form.mojo:199-213 @59bda50 -/
+/-- mirrors flare/http/form.mojo#FormData.to_urlencoded sha=d0d20a5e57da at=59bda50f -/
 def toUrlencoded : List (Bytes × Bytes) → Bytes
   | [] => []
   | [p] => serPair p
@@ -347,13 +339,6 @@ theorem parseFormWith_toUrlencoded (dec : Bytes → Option Bytes) (ps : List (By
       rw [parseFormWith_cons_sep _ _ _ (serPair_noSep p) (serPair_ne_nil p),
         parsePairWith_serPair dec p hp.1 hp.2, ih']
       rfl
-
-/-- The pre-fix parser round-trips every list of byte-string pairs (names and
-values arbitrary, empty allowed) — including ill-formed UTF-8, which is the
-APP-24 defect. -/
-theorem parseFormOld_toUrlencoded (ps : List (Bytes × Bytes)) :
-    parseFormOld (toUrlencoded ps) = some ps :=
-  parseFormWith_toUrlencoded _ ps (fun _ _ => ⟨urldecodeBytes_urlencode _, urldecodeBytes_urlencode _⟩)
 
 theorem urldecode_valid (s out : Bytes) (h : urldecode s = some out) :
     Utf8Valid out = true := by

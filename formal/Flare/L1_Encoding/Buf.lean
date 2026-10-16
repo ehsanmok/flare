@@ -15,12 +15,12 @@ mirror the shift-and-mask expressions used throughout flare.
 namespace Flare.L1.Buf
 open Flare.Bytes (getD)
 
-/-- Per-byte `unsafe_write` loop. mirrors flare/runtime/io_uring_abi.mojo:407-408,425-428,445-446 @59bda50 -/
+/-- Per-byte `unsafe_write` loop. mirrors flare/runtime/io_uring_abi.mojo#_store_u16_le+_store_u32_le+_store_u64_le sha=a6feddae820b at=59bda50f -/
 def writeBytes : Bytes → Nat → Bytes → Bytes
   | buf, _, [] => buf
   | buf, off, x :: xs => writeBytes (buf.set off x) (off + 1) xs
 
-/-- Per-byte load loop. mirrors flare/runtime/io_uring_abi.mojo:462-463,477-479,495-496 @59bda50 -/
+/-- Per-byte load loop. mirrors flare/runtime/io_uring_abi.mojo#_load_u32_le+_load_u16_le+_load_u64_le sha=a43ff0f57e29 at=59bda50f -/
 def readBytes (buf : Bytes) (off n : Nat) : Bytes := (List.range n).map fun i => getD buf (off + i)
 
 theorem writeBytes_length (buf : Bytes) (off : Nat) (bs : Bytes) :
@@ -73,19 +73,19 @@ theorem readBytes_writeBytes_disjoint (buf : Bytes) (off : Nat) (bs : Bytes) (of
 
 /-! ## Little-endian word codecs -/
 
-/-- mirrors flare/runtime/io_uring_abi.mojo:394-408 @59bda50 -/
+/-- mirrors flare/runtime/io_uring_abi.mojo#_store_u16_le sha=79929bb577d1 at=59bda50f -/
 def le16 (x : UInt16) : Bytes := [(x &&& 0xFF).toUInt8, ((x >>> 8) &&& 0xFF).toUInt8]
-/-- mirrors flare/runtime/io_uring_abi.mojo:412-428 @59bda50 -/
+/-- mirrors flare/runtime/io_uring_abi.mojo#_store_u32_le sha=0ef15f8106e8 at=59bda50f -/
 def le32 (x : UInt32) : Bytes := (List.range 4).map fun i => ((x >>> (8 * i).toUInt32) &&& 0xFF).toUInt8
-/-- mirrors flare/runtime/io_uring_abi.mojo:432-446 @59bda50 -/
+/-- mirrors flare/runtime/io_uring_abi.mojo#_store_u64_le sha=731bb7fe5d93 at=59bda50f -/
 def le64 (x : UInt64) : Bytes := (List.range 8).map fun i => ((x >>> (8 * i).toUInt64) &&& 0xFF).toUInt8
 
-/-- mirrors flare/runtime/io_uring_abi.mojo:467-479 @59bda50 -/
+/-- mirrors flare/runtime/io_uring_abi.mojo#_load_u16_le sha=8b8009c00199 at=59bda50f -/
 def fromLE16 (bs : Bytes) : UInt16 := (getD bs 0).toUInt16 ||| ((getD bs 1).toUInt16 <<< 8)
-/-- mirrors flare/runtime/io_uring_abi.mojo:450-463 @59bda50 -/
+/-- mirrors flare/runtime/io_uring_abi.mojo#_load_u32_le sha=659a2d2dd714 at=59bda50f -/
 def fromLE32 (bs : Bytes) : UInt32 :=
   (List.range 4).foldl (fun v i => v ||| ((getD bs i).toUInt32 <<< (8 * i).toUInt32)) 0
-/-- mirrors flare/runtime/io_uring_abi.mojo:483-496 @59bda50 -/
+/-- mirrors flare/runtime/io_uring_abi.mojo#_load_u64_le sha=68f4afbf115b at=59bda50f -/
 def fromLE64 (bs : Bytes) : UInt64 :=
   (List.range 8).foldl (fun v i => v ||| ((getD bs i).toUInt64 <<< (8 * i).toUInt64)) 0
 

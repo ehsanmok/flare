@@ -26,7 +26,7 @@ structure St where
 def view (s : St) : List UInt8 := (s.buf.drop s.pos).take s.len ++ s.src.flatten
 
 /-- `_consume_byte`, with `_fill` inlined.
-mirrors flare/io/buf_reader.mojo:139-178 @59bda50 -/
+mirrors flare/io/buf_reader.mojo#BufReader._peek_byte+BufReader._consume_byte+BufReader.readline sha=751f92d904c1 at=59bda50f -/
 def consume (s : St) : Option UInt8 × St :=
   if s.len = 0 then
     match s.src with
@@ -103,7 +103,7 @@ theorem consume_view (cap : Nat) (s : St) (h : Inv cap s) :
     rw [hd, List.take_succ_cons, List.cons_append, hg, Nat.add_sub_cancel]
 
 /-- `read_exact(n)`: `n` calls to `_consume_byte`, raising (here `none`) on EOF.
-mirrors flare/io/buf_reader.mojo:241-266 @59bda50 -/
+mirrors flare/io/buf_reader.mojo#BufReader.read_exact sha=4aaf4bfaf425 at=59bda50f -/
 def readExact : Nat → St → Option (List UInt8 × St)
   | 0, s => some ([], s)
   | n + 1, s =>
@@ -148,7 +148,7 @@ theorem readExact_correct (cap : Nat) :
 /-- `_fill` + bookkeeping on Mojo `Int`s: a read returning `n` sets
 `_pos = 0, _len = n`; `_consume_byte` without a refill does
 `_pos += 1, _len -= 1` and refills only when `_len == 0`.
-mirrors flare/io/buf_reader.mojo:117-178 @59bda50 -/
+mirrors flare/io/buf_reader.mojo#BufReader._fill+BufReader._peek_byte+BufReader._consume_byte+BufReader.readline sha=ccf5856bfb39 at=59bda50f -/
 def fillInt (n : Int) : Int × Int := (0, n)
 def stepInt (p : Int × Int) : Int × Int := (p.1 + 1, p.2 - 1)
 

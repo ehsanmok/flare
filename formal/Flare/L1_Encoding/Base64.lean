@@ -33,13 +33,13 @@ namespace Flare.L1.Base64
 
 set_option linter.unusedSimpArgs false
 
-/-- mirrors flare/crypto/base64.mojo:35-37 @59bda50 -/
+/-- mirrors flare/crypto/base64.mojo#_BASE64_TABLE sha=4dbea55e24f9 at=59bda50f -/
 def TABLE : Bytes :=
   (List.range 26).map (fun i => UInt8.ofNat (65 + i)) ++
   (List.range 26).map (fun i => UInt8.ofNat (97 + i)) ++
   (List.range 10).map (fun i => UInt8.ofNat (48 + i)) ++ [43, 47]
 
-/-- mirrors flare/crypto/hmac.mojo:146-147 @59bda50 -/
+/-- mirrors flare/crypto/hmac.mojo#_b64_alphabet sha=b34d27ca8c02 at=59bda50f -/
 def URL_TABLE : Bytes :=
   (List.range 26).map (fun i => UInt8.ofNat (65 + i)) ++
   (List.range 26).map (fun i => UInt8.ofNat (97 + i)) ++
@@ -68,7 +68,7 @@ def padLen : Bytes → Nat
 
 /-! ## Implementation -/
 
-/-- mirrors flare/crypto/base64.mojo:41-79 @59bda50 -/
+/-- mirrors flare/crypto/base64.mojo#base64_encode sha=ae16a0ee8636 at=59bda50f -/
 def encodeStd : Bytes → Bytes
   | a :: b :: c :: rest =>
     [tbl TABLE (a.toUInt32 >>> 2), tbl TABLE (((a.toUInt32 &&& 3) <<< 4) ||| (b.toUInt32 >>> 4)),
@@ -80,7 +80,7 @@ def encodeStd : Bytes → Bytes
   | [a] => [tbl TABLE (a.toUInt32 >>> 2), tbl TABLE ((a.toUInt32 &&& 3) <<< 4), 61, 61]
   | [] => []
 
-/-- mirrors flare/crypto/hmac.mojo:150-183 @59bda50 -/
+/-- mirrors flare/crypto/hmac.mojo#base64url_encode sha=9fe143ea12ec at=59bda50f -/
 def encodeUrl : Bytes → Bytes
   | a :: b :: c :: rest =>
     [tbl URL_TABLE ((a.toUInt32 >>> 2) &&& 63),
@@ -94,7 +94,7 @@ def encodeUrl : Bytes → Bytes
   | [a] => [tbl URL_TABLE ((a.toUInt32 >>> 2) &&& 63), tbl URL_TABLE ((a.toUInt32 <<< 4) &&& 63)]
   | [] => []
 
-/-- mirrors flare/crypto/base64.mojo:82-101 and flare/crypto/hmac.mojo:187-205 @59bda50 -/
+/-- mirrors flare/crypto/base64.mojo#_decode_byte sha=1141a843ca8d at=193ddcec and flare/crypto/hmac.mojo#_b64_decode_byte sha=f7613aa1d291 at=59bda50f -/
 def decodeByte (c : UInt8) : Option UInt32 :=
   if 65 ≤ c ∧ c ≤ 90 then some (c.toUInt32 - 65)
   else if 97 ≤ c ∧ c ≤ 122 then some (c.toUInt32 - 97 + 26)
@@ -107,7 +107,7 @@ def o0 (b0 b1 : UInt32) : UInt8 := (((b0 <<< 2) ||| (b1 >>> 4)) &&& 0xFF).toUInt
 def o1 (b1 b2 : UInt32) : UInt8 := (((b1 <<< 4) ||| (b2 >>> 2)) &&& 0xFF).toUInt8
 def o2 (b2 b3 : UInt32) : UInt8 := (((b2 <<< 6) ||| b3) &&& 0xFF).toUInt8
 
-/-- Quantum loop and tail. mirrors flare/crypto/base64.mojo:137-163 @59bda50 -/
+/-- Quantum loop and tail. mirrors flare/crypto/base64.mojo#base64_decode sha=d096aff544dd at=59bda50f -/
 def decodeQuads : Bytes → Option Bytes
   | c0 :: c1 :: c2 :: c3 :: rest =>
     match decodeByte c0, decodeByte c1, decodeByte c2, decodeByte c3, decodeQuads rest with
@@ -133,7 +133,7 @@ def padCount (s : Bytes) : Nat := trailingEq s.reverse
 
 def stripPad (s : Bytes) : Bytes := s.take (s.length - padCount s)
 
-/-- mirrors flare/crypto/base64.mojo:104-136 @59bda50 (padding and length checks) -/
+/-- mirrors flare/crypto/base64.mojo#base64_decode sha=d096aff544dd at=59bda50f (padding and length checks) -/
 def decode (s : Bytes) : Option Bytes :=
   let total := s.length
   let n := total - padCount s

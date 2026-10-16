@@ -27,7 +27,7 @@ abbrev Str := List Char
 /-- Inner loop of `_split_path`. `cur` is the window `path[start:i]`
 (reversed); a `/` flushes it when non-empty (`i > start`), the end of input
 flushes it when non-empty (`start < n`).
-mirrors flare/http/router.mojo:124-133 @59bda50 -/
+mirrors flare/http/router.mojo#_split_path sha=3b8691eb6e5c at=59bda50f -/
 def splitLoop : Str → Str → List Str
   | [], cur => if cur.isEmpty then [] else [cur.reverse]
   | c :: cs, cur =>
@@ -36,7 +36,7 @@ def splitLoop : Str → Str → List Str
     else splitLoop cs (c :: cur)
 
 /-- `_split_path`: a leading `/` is skipped (`start = 1`), then `splitLoop`.
-mirrors flare/http/router.mojo:111-133 @59bda50 -/
+mirrors flare/http/router.mojo#_split_path sha=3b8691eb6e5c at=59bda50f -/
 def splitPath (p : Str) : List Str :=
   match p with
   | '/' :: rest => splitLoop rest []
@@ -246,13 +246,13 @@ theorem splitPath_leading (p : Str) (h : p.head? ≠ some '/') : splitPath ('/' 
 /-! ## Query string -/
 
 /-- `_path_only`: everything before the first `?`.
-mirrors flare/http/router.mojo:921-929 @59bda50 -/
+mirrors flare/http/router.mojo#_path_only sha=066da2973947 at=59bda50f -/
 def pathOnly : Str → Str
   | [] => []
   | c :: cs => if c = '?' then [] else c :: pathOnly cs
 
 /-- `_query_of`: everything after the first `?` (empty if none).
-mirrors flare/http/router.mojo:910-918 @59bda50 -/
+mirrors flare/http/router.mojo#_query_of sha=07a2cce106d7 at=59bda50f -/
 def queryOf : Str → Str
   | [] => []
   | c :: cs => if c = '?' then cs else queryOf cs
@@ -311,7 +311,7 @@ inductive Seg where
 /-- Per-segment classification inside `_compile_segments`: bare `*` is the
 wildcard, `:` followed by at least one byte is a parameter, everything else
 (including a lone `:`) is a literal.
-mirrors flare/http/router.mojo:147-155 @59bda50 -/
+mirrors flare/http/router.mojo#_compile_segments sha=3f2fc055e0bb at=59bda50f -/
 def classify (s : Str) : Seg :=
   match s with
   | ['*'] => .wild
@@ -321,7 +321,7 @@ def classify (s : Str) : Seg :=
 /-- `_compile_segments` over the already-split raw segments. The `sn == 0`
 skip is dead code after `_split_path` but is kept; `rest ≠ []` is
 `i != len(raw) - 1`.
-mirrors flare/http/router.mojo:136-156 @59bda50 -/
+mirrors flare/http/router.mojo#_compile_segments sha=3f2fc055e0bb at=59bda50f -/
 def compileRaw : List Str → Except String (List Seg)
   | [] => .ok []
   | s :: rest =>
@@ -333,7 +333,7 @@ def compileRaw : List Str → Except String (List Seg)
       | .ok l => .ok (classify s :: l)
       | .error e => .error e
 
-/-- mirrors flare/http/router.mojo:136-140 @59bda50 -/
+/-- mirrors flare/http/router.mojo#_compile_segments sha=3f2fc055e0bb at=59bda50f -/
 def compile (p : Str) : Except String (List Seg) := compileRaw (splitPath p)
 
 /-- Well-formed pattern: a wildcard may only be the last segment. -/
@@ -435,14 +435,14 @@ theorem compileRaw_ok_iff (raw : List Str) (hne : ∀ s ∈ raw, s ≠ []) :
 abbrev Binds := List (Str × Str)
 
 /-- Wildcard tail accumulation: `if tail: tail += "/"; tail += seg`.
-mirrors flare/http/router.mojo:853-858 @59bda50 -/
+mirrors flare/http/router.mojo#_match sha=a97a9109b843 at=59bda50f -/
 def joinTail : Str → List Str → Str
   | tail, [] => tail
   | tail, u :: us => joinTail ((if tail.isEmpty then tail else tail ++ ['/']) ++ u) us
 
 /-- `_match`: captured params are listed left to right (the Mojo `Dict`
 keeps insertion order; on a repeated name the later value wins on lookup).
-mirrors flare/http/router.mojo:838-873 @59bda50 -/
+mirrors flare/http/router.mojo#_match sha=a97a9109b843 at=59bda50f -/
 def matchSegs : List Str → List Seg → Option Binds
   | us, [] => if us.isEmpty then some [] else none
   | us, .wild :: _ => if us.isEmpty then none else some [(['*'], joinTail [] us)]
@@ -528,7 +528,7 @@ theorem specMatch_lits (ts us : List Str) :
 /-! ## The router -/
 
 /-- `_Route`: method, compiled segments, handler id.
-mirrors flare/http/router.mojo:175-196 @59bda50 -/
+mirrors flare/http/router.mojo#_Route+_Route.__init__ sha=ed2021c0239c at=59bda50f -/
 structure Route where
   method : Str
   segs : List Seg
@@ -538,11 +538,11 @@ structure Route where
 mutual
 /-- `Router`: routes in registration order, mounts in mount order, optional
 fallback handler id.
-mirrors flare/http/router.mojo:339-394 @59bda50 -/
+mirrors flare/http/router.mojo#Router+Router.__init__ sha=15dcf20833a7 at=59bda50f -/
 inductive Router where
   | mk (routes : List Route) (mounts : Mounts) (fallback : Option Nat)
 /-- `_mounts`: (literal prefix segments, mounted sub-router).
-mirrors flare/http/router.mojo:199-214 @59bda50 -/
+mirrors flare/http/router.mojo#_Mount+_Mount.__init__ sha=2cf9fdec6956 at=59bda50f -/
 inductive Mounts where
   | nil
   | cons (pre : List Str) (sub : Router) (rest : Mounts)
@@ -577,7 +577,7 @@ def Outcome.status : Outcome → Option Nat
 
 /-- `_add_fn` / `_add_struct`: compile the pattern (raising on a bad one) and
 append the route.
-mirrors flare/http/router.mojo:488-498 @59bda50 -/
+mirrors flare/http/router.mojo#Router._add_fn sha=b421d33b04b1 at=59bda50f -/
 def Router.add : Router → Str → Str → Nat → Except String Router
   | .mk routes ms fb, method, pat, hid =>
     match compile pat with
@@ -592,7 +592,7 @@ inductive Scan where
 /-- The direct-route loop of `Router.serve`: first route whose pattern
 matches and whose method equals the request method wins; matching routes
 with another method are appended to `allowed` unless already present.
-mirrors flare/http/router.mojo:684-692 @59bda50 -/
+mirrors flare/http/router.mojo#Router.serve sha=ffeeee57994b at=59bda50f -/
 def scan (segsIn : List Str) (method : Str) : List Route → List Str → Scan
   | [], allowed => .miss allowed
   | r :: rs, allowed =>
@@ -603,7 +603,7 @@ def scan (segsIn : List Str) (method : Str) : List Route → List Str → Scan
       else scan segsIn method rs (if allowed.contains r.method then allowed else allowed ++ [r.method])
 
 /-- `_prefix_match`.
-mirrors flare/http/router.mojo:899-907 @59bda50 -/
+mirrors flare/http/router.mojo#_prefix_match sha=699a3bf35e3d at=59bda50f -/
 def prefixMatch : List Str → List Str → Bool
   | _, [] => true
   | [], _ :: _ => false
@@ -611,7 +611,7 @@ def prefixMatch : List Str → List Str → Bool
 
 /-- `_MountedRouter.serve` URL rebuild: drop the first `k` segments, keep the
 query string.
-mirrors flare/http/router.mojo:800-810 @59bda50 -/
+mirrors flare/http/router.mojo#_MountedRouter.serve sha=8337934cada7 at=59bda50f -/
 def stripUrl (k : Nat) (url : Str) : Str :=
   let segs := splitPath (pathOnly url)
   let rebuilt := '/' :: joinSlash (segs.drop k)
@@ -620,7 +620,7 @@ def stripUrl (k : Nat) (url : Str) : Str :=
 
 mutual
 /-- `Router.serve`.
-mirrors flare/http/router.mojo:675-776 @59bda50 -/
+mirrors flare/http/router.mojo#Router.serve sha=ffeeee57994b at=59bda50f -/
 def serve : Router → Req → Outcome
   | .mk routes ms fb, req =>
     let segsIn := splitPath (pathOnly req.url)
@@ -631,7 +631,7 @@ def serve : Router → Req → Outcome
 /-- Mount delegation and the final 405 / fallback / 404 choice;
 `_MountedRouter.serve` forwards the stripped request (same params) to the
 sub-router.
-mirrors flare/http/router.mojo:740-776, 800-823 @59bda50 -/
+mirrors flare/http/router.mojo#Router.serve+_MountedRouter.serve sha=7a3983e02d97 at=59bda50f -/
 def serveMounts : Mounts → Option Nat → List Str → Req → List Str → Outcome
   | .nil, fb, _, req, allowed =>
     if allowed.isEmpty then

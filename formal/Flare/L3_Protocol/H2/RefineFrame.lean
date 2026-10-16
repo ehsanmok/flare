@@ -9,7 +9,7 @@ the preface or interleave a header block, and frame types §5.1 says
 nothing about read as `other` (any verdict; the frame-level rules are
 checked separately by `FReq`).
 
-`fixed_frame`: for the fixed model `F`, every inbound frame from an
+`fixed_frame`: every inbound frame from an
 `Inv` state with no GOAWAY sent is handled without raising, meets the
 §5.1 obligation `SGood` for `flab c f`, and meets `FReq`: a frame over
 the advertised size draws FRAME_SIZE_ERROR; otherwise a frame that breaks
@@ -72,7 +72,7 @@ theorem get_state_some {c c' : Conn} (h : SameSt c' c) {k : Nat} {s' : Stream} (
 theorem abs_sameSt {c c' : Conn} (h : SameSt c' c) : abs c' = abs c := by
   funext k
   have hg := get_state h k
-  unfold abs idleAbs
+  unfold abs isIdleId
   rw [h.cl, h.lp, h.ml]
   cases h1 : get c' k <;> cases h2 : get c k <;> rw [h1, h2] at hg <;> simp_all
 
@@ -241,13 +241,8 @@ def FReq (c : Conn) (f : Fr) (r : Conn × List Out) : Prop :=
 theorem gaCode_connErr (c : Conn) (e : Nat) (hg : c.goawaySent = false) : gaCode (connErr c e).2 = some e := by
   simp [connErr, hg, gaCode]
 
-theorem handleW_F (dec : Dec) (c : Conn) (f : Fr) : handleW F dec c f = handle F dec c f := by
-  unfold handleW
-  cases h : handle F dec c f with
-  | error e => simp [F]
-  | ok r => simp [F]
 
-theorem idCheck_nonhdr (fx : Fix) (c : Conn) (f : Fr) (h : f.ty ≠ tHEADERS) : idCheck fx c f = .inr c := by
+theorem idCheck_nonhdr (c : Conn) (f : Fr) (h : f.ty ≠ tHEADERS) : idCheck c f = .inr c := by
   unfold idCheck; simp [h]
 
 
@@ -256,71 +251,72 @@ theorem idCheck_nonhdr (fx : Fix) (c : Conn) (f : Fr) (h : f.ty ≠ tHEADERS) : 
 section shapes
 variable (c : Conn) (f : Fr)
 
-theorem sh_ping1 (h : f.ty = tPING) (hs : f.sid ≠ 0) : shapeCheck F c f = some (connErr c ePROTOCOL) := by
+theorem sh_ping1 (h : f.ty = tPING) (hs : f.sid ≠ 0) : shapeCheck c f = some (connErr c ePROTOCOL) := by
   unfold shapeCheck; simp [h, hs]
 theorem sh_ping6 (h : f.ty = tPING) (hs : f.sid = 0) (hp : f.plen ≠ 8) :
-    shapeCheck F c f = some (connErr c eFRAME_SIZE) := by
+    shapeCheck c f = some (connErr c eFRAME_SIZE) := by
   unfold shapeCheck; simp [h, hs, hp]
-theorem sh_ping0 (h : f.ty = tPING) (hs : f.sid = 0) (hp : f.plen = 8) : shapeCheck F c f = none := by
+theorem sh_ping0 (h : f.ty = tPING) (hs : f.sid = 0) (hp : f.plen = 8) : shapeCheck c f = none := by
   unfold shapeCheck; simp [h, hs, hp]
-theorem sh_ga1 (h : f.ty = tGOAWAY) (hs : f.sid ≠ 0) : shapeCheck F c f = some (connErr c ePROTOCOL) := by
+theorem sh_ga1 (h : f.ty = tGOAWAY) (hs : f.sid ≠ 0) : shapeCheck c f = some (connErr c ePROTOCOL) := by
   unfold shapeCheck; simp [h, hs, tHEADERS, tDATA, tRST, tWU, tPRIORITY, tPUSH, tCONT, tPING, tSETTINGS, tGOAWAY]
-theorem sh_ga0 (h : f.ty = tGOAWAY) (hs : f.sid = 0) : shapeCheck F c f = none := by
-  unfold shapeCheck; simp [h, hs, F, tHEADERS, tDATA, tRST, tWU, tPRIORITY, tPUSH, tCONT, tPING, tSETTINGS, tGOAWAY]
-theorem sh_set1 (h : f.ty = tSETTINGS) (hs : f.sid ≠ 0) : shapeCheck F c f = some (connErr c ePROTOCOL) := by
+theorem sh_ga6 (h : f.ty = tGOAWAY) (hs : f.sid = 0) (hp : f.plen < 8) :
+    shapeCheck c f = some (connErr c eFRAME_SIZE) := by
+  unfold shapeCheck; simp [h, hs, hp, tPING, tGOAWAY]
+theorem sh_ga0 (h : f.ty = tGOAWAY) (hs : f.sid = 0) (hp : ¬ f.plen < 8) : shapeCheck c f = none := by
+  unfold shapeCheck; simp [h, hs, hp, tPING, tGOAWAY]
+theorem sh_set1 (h : f.ty = tSETTINGS) (hs : f.sid ≠ 0) : shapeCheck c f = some (connErr c ePROTOCOL) := by
   unfold shapeCheck; simp [h, hs, tHEADERS, tDATA, tRST, tWU, tPRIORITY, tPUSH, tCONT, tPING, tSETTINGS, tGOAWAY]
 theorem sh_set6 (h : f.ty = tSETTINGS) (hs : f.sid = 0) (hb : (f.f1 && f.plen ≠ 0) = true ∨ f.plen % 6 ≠ 0) :
-    shapeCheck F c f = some (connErr c eFRAME_SIZE) := by
+    shapeCheck c f = some (connErr c eFRAME_SIZE) := by
   unfold shapeCheck; simp only [h, hs, tHEADERS, tDATA, tRST, tWU, tPRIORITY, tPUSH, tCONT, tPING, tSETTINGS, tGOAWAY]
   cases hf : f.f1 <;> by_cases hp0 : f.plen = 0 <;> by_cases hp6 : f.plen % 6 = 0 <;> simp_all
 theorem sh_set0 (h : f.ty = tSETTINGS) (hs : f.sid = 0) (hb : ¬((f.f1 && f.plen ≠ 0) = true ∨ f.plen % 6 ≠ 0)) :
-    shapeCheck F c f = none := by
+    shapeCheck c f = none := by
   unfold shapeCheck; simp only [h, hs, tHEADERS, tDATA, tRST, tWU, tPRIORITY, tPUSH, tCONT, tPING, tSETTINGS, tGOAWAY]
   cases hf : f.f1 <;> by_cases hp0 : f.plen = 0 <;> by_cases hp6 : f.plen % 6 = 0 <;> simp_all
-theorem sh_pri1 (h : f.ty = tPRIORITY) (hs : f.sid = 0) : shapeCheck F c f = some (connErr c ePROTOCOL) := by
+theorem sh_pri1 (h : f.ty = tPRIORITY) (hs : f.sid = 0) : shapeCheck c f = some (connErr c ePROTOCOL) := by
   unfold shapeCheck; simp [h, hs, tHEADERS, tDATA, tRST, tWU, tPRIORITY, tPUSH, tCONT, tPING, tSETTINGS, tGOAWAY]
 theorem sh_pri6 (h : f.ty = tPRIORITY) (hs : f.sid ≠ 0) (hp : f.plen ≠ 5) :
-    shapeCheck F c f = some (connErr c eFRAME_SIZE) := by
+    shapeCheck c f = some (connErr c eFRAME_SIZE) := by
   unfold shapeCheck; simp [h, hs, hp, tHEADERS, tDATA, tRST, tWU, tPRIORITY, tPUSH, tCONT, tPING, tSETTINGS, tGOAWAY]
 theorem sh_priI (h : f.ty = tPRIORITY) (hs : f.sid ≠ 0) (hp : f.plen = 5) (hw : f.word % 2147483648 = f.sid)
-    (hi : (!mem c f.sid && isIdleId F c f.sid) = true) : shapeCheck F c f = some (connErr c ePROTOCOL) := by
-  have h16 : F.h2_16 = true := rfl
-  unfold shapeCheck; cases hm : mem c f.sid <;> cases hid : isIdleId F c f.sid <;> simp_all [tHEADERS, tDATA, tRST, tWU, tPRIORITY, tPUSH, tCONT, tPING, tSETTINGS, tGOAWAY]
+    (hi : (!mem c f.sid && isIdleId c f.sid) = true) : shapeCheck c f = some (connErr c ePROTOCOL) := by
+  unfold shapeCheck; cases hm : mem c f.sid <;> cases hid : isIdleId c f.sid <;> simp_all [tHEADERS, tDATA, tRST, tWU, tPRIORITY, tPUSH, tCONT, tPING, tSETTINGS, tGOAWAY]
 theorem sh_priR (h : f.ty = tPRIORITY) (hs : f.sid ≠ 0) (hp : f.plen = 5) (hw : f.word % 2147483648 = f.sid)
-    (hi : ¬(!mem c f.sid && isIdleId F c f.sid) = true) :
-    shapeCheck F c f = some (closeIfKnown (rstC c f.sid) f.sid, [.rst f.sid ePROTOCOL]) := by
-  have h16 : F.h2_16 = true := rfl
-  unfold shapeCheck; cases hm : mem c f.sid <;> cases hid : isIdleId F c f.sid <;> simp_all [tHEADERS, tDATA, tRST, tWU, tPRIORITY, tPUSH, tCONT, tPING, tSETTINGS, tGOAWAY]
+    (hi : ¬(!mem c f.sid && isIdleId c f.sid) = true) :
+    shapeCheck c f = some (closeIfKnown (rstC c f.sid) f.sid, [.rst f.sid ePROTOCOL]) := by
+  unfold shapeCheck; cases hm : mem c f.sid <;> cases hid : isIdleId c f.sid <;> simp_all [tHEADERS, tDATA, tRST, tWU, tPRIORITY, tPUSH, tCONT, tPING, tSETTINGS, tGOAWAY]
 theorem sh_pri0 (h : f.ty = tPRIORITY) (hs : f.sid ≠ 0) (hp : f.plen = 5) (hw : f.word % 2147483648 ≠ f.sid) :
-    shapeCheck F c f = none := by
+    shapeCheck c f = none := by
   unfold shapeCheck; simp [h, hs, hp, hw, tHEADERS, tDATA, tRST, tWU, tPRIORITY, tPUSH, tCONT, tPING, tSETTINGS, tGOAWAY]
-theorem sh_rst1 (h : f.ty = tRST) (hs : f.sid = 0) : shapeCheck F c f = some (connErr c ePROTOCOL) := by
+theorem sh_rst1 (h : f.ty = tRST) (hs : f.sid = 0) : shapeCheck c f = some (connErr c ePROTOCOL) := by
   unfold shapeCheck; simp [h, hs, tHEADERS, tDATA, tRST, tWU, tPRIORITY, tPUSH, tCONT, tPING, tSETTINGS, tGOAWAY]
 theorem sh_rst6 (h : f.ty = tRST) (hs : f.sid ≠ 0) (hp : f.plen ≠ 4) :
-    shapeCheck F c f = some (connErr c eFRAME_SIZE) := by
+    shapeCheck c f = some (connErr c eFRAME_SIZE) := by
   unfold shapeCheck; simp [h, hs, hp, tHEADERS, tDATA, tRST, tWU, tPRIORITY, tPUSH, tCONT, tPING, tSETTINGS, tGOAWAY]
 theorem sh_rstI (h : f.ty = tRST) (hs : f.sid ≠ 0) (hp : f.plen = 4)
-    (hi : (!mem c f.sid && isIdleId F c f.sid) = true) : shapeCheck F c f = some (connErr c ePROTOCOL) := by
-  unfold shapeCheck; cases hm : mem c f.sid <;> cases hid : isIdleId F c f.sid <;> simp_all [tHEADERS, tDATA, tRST, tWU, tPRIORITY, tPUSH, tCONT, tPING, tSETTINGS, tGOAWAY]
+    (hi : (!mem c f.sid && isIdleId c f.sid) = true) : shapeCheck c f = some (connErr c ePROTOCOL) := by
+  unfold shapeCheck; cases hm : mem c f.sid <;> cases hid : isIdleId c f.sid <;> simp_all [tHEADERS, tDATA, tRST, tWU, tPRIORITY, tPUSH, tCONT, tPING, tSETTINGS, tGOAWAY]
 theorem sh_rst0 (h : f.ty = tRST) (hs : f.sid ≠ 0) (hp : f.plen = 4)
-    (hi : ¬(!mem c f.sid && isIdleId F c f.sid) = true) : shapeCheck F c f = none := by
-  unfold shapeCheck; cases hm : mem c f.sid <;> cases hid : isIdleId F c f.sid <;> simp_all [tHEADERS, tDATA, tRST, tWU, tPRIORITY, tPUSH, tCONT, tPING, tSETTINGS, tGOAWAY]
-theorem sh_wu6 (h : f.ty = tWU) (hp : f.plen ≠ 4) : shapeCheck F c f = some (connErr c eFRAME_SIZE) := by
+    (hi : ¬(!mem c f.sid && isIdleId c f.sid) = true) : shapeCheck c f = none := by
+  unfold shapeCheck; cases hm : mem c f.sid <;> cases hid : isIdleId c f.sid <;> simp_all [tHEADERS, tDATA, tRST, tWU, tPRIORITY, tPUSH, tCONT, tPING, tSETTINGS, tGOAWAY]
+theorem sh_wu6 (h : f.ty = tWU) (hp : f.plen ≠ 4) : shapeCheck c f = some (connErr c eFRAME_SIZE) := by
   unfold shapeCheck; simp [h, hp, tHEADERS, tDATA, tRST, tWU, tPRIORITY, tPUSH, tCONT, tPING, tSETTINGS, tGOAWAY]
-theorem sh_wu0 (h : f.ty = tWU) (hp : f.plen = 4) : shapeCheck F c f = none := by
+theorem sh_wu0 (h : f.ty = tWU) (hp : f.plen = 4) : shapeCheck c f = none := by
   unfold shapeCheck; simp [h, hp, tHEADERS, tDATA, tRST, tWU, tPRIORITY, tPUSH, tCONT, tPING, tSETTINGS, tGOAWAY]
-theorem sh_data1 (h : f.ty = tDATA) (hs : f.sid = 0) : shapeCheck F c f = some (connErr c ePROTOCOL) := by
+theorem sh_data1 (h : f.ty = tDATA) (hs : f.sid = 0) : shapeCheck c f = some (connErr c ePROTOCOL) := by
   unfold shapeCheck; simp [h, hs, tHEADERS, tDATA, tRST, tWU, tPRIORITY, tPUSH, tCONT, tPING, tSETTINGS, tGOAWAY]
-theorem sh_data0 (h : f.ty = tDATA) (hs : f.sid ≠ 0) : shapeCheck F c f = none := by
+theorem sh_data0 (h : f.ty = tDATA) (hs : f.sid ≠ 0) : shapeCheck c f = none := by
   unfold shapeCheck; simp [h, hs, tHEADERS, tDATA, tRST, tWU, tPRIORITY, tPUSH, tCONT, tPING, tSETTINGS, tGOAWAY]
-theorem sh_push (h : f.ty = tPUSH) : shapeCheck F c f = some (connErr c ePROTOCOL) := by
+theorem sh_push (h : f.ty = tPUSH) : shapeCheck c f = some (connErr c ePROTOCOL) := by
   unfold shapeCheck; simp [h, tHEADERS, tDATA, tRST, tWU, tPRIORITY, tPUSH, tCONT, tPING, tSETTINGS, tGOAWAY]
 theorem sh_other (h1 : f.ty ≠ tPING) (h2 : f.ty ≠ tGOAWAY) (h3 : f.ty ≠ tSETTINGS) (h4 : f.ty ≠ tPRIORITY)
-    (h5 : f.ty ≠ tRST) (h6 : f.ty ≠ tWU) (h7 : f.ty ≠ tDATA) (h8 : f.ty ≠ tPUSH) : shapeCheck F c f = none := by
+    (h5 : f.ty ≠ tRST) (h6 : f.ty ≠ tWU) (h7 : f.ty ≠ tDATA) (h8 : f.ty ≠ tPUSH) : shapeCheck c f = none := by
   unfold shapeCheck; simp [h1, h2, h3, h4, h5, h6, h7, h8]
 
 theorem wuH_zero (h : f.sid = 0) :
-    (∃ e, wuH F c f = connErr c e) ∨ (∃ c', wuH F c f = (c', []) ∧ SameSt c' c) := by
+    (∃ e, wuH c f = connErr c e) ∨ (∃ c', wuH c f = (c', []) ∧ SameSt c' c) := by
   unfold wuH
   simp only [h, ↓reduceIte]
   split
@@ -346,7 +342,7 @@ macro "tyconst" : tactic => `(tactic| simp only [tHEADERS, tDATA, tRST, tWU, tPR
   tSETTINGS, tGOAWAY] at *)
 
 theorem fixed_handle (dec : Dec) (c : Conn) (f : Fr) (hI : Inv c) (hg : c.goawaySent = false)
-    (hsz : f.plen ≤ c.localMaxFrame) : ∃ r, handle F dec c f = .ok r ∧ HGood c f r := by
+    (hsz : f.plen ≤ c.localMaxFrame) : ∃ r, handle dec c f = .ok r ∧ HGood c f r := by
   unfold handle
   by_cases hc : c.continuing ≠ 0
   · rw [if_pos hc]
@@ -355,7 +351,7 @@ theorem fixed_handle (dec : Dec) (c : Conn) (f : Fr) (hI : Inv c) (hg : c.goaway
       · have : hlab c f = (f.sid, if f.eh then .hdrEnd c.blockES else .contMid) := by simp [hlab, hc, hct]
         rw [this]; exact sgood_cont dec c f hI hg hc hct.1 hct.2
       · intro hn; simp [needProtoH, hct.1, hct.2, hc] at hn
-    · have hcb : contBranch F dec c f = connErr c ePROTOCOL := by
+    · have hcb : contBranch dec c f = connErr c ePROTOCOL := by
         unfold contBranch; rw [if_pos]; by_cases h1 : f.ty = tCONT
         · simp [h1] at hct ⊢; exact hct
         · simp [h1]
@@ -398,9 +394,9 @@ theorem fixed_handle (dec : Dec) (c : Conn) (f : Fr) (hI : Inv c) (hg : c.goaway
     · have hs := sh_ping6 c f hPING hsid hpl
       rw [hs]; exact ⟨_, rfl, hco _ ho (fun h => by rw [hn hsid] at h; cases h)⟩
     have hs := sh_ping0 c f hPING hsid (by omega)
-    have hd : dispatch F dec c f = .ok (if f.f1 then (c, []) else (c, [.pingAck])) := by
+    have hd : dispatch dec c f = .ok (if f.f1 then (c, []) else (c, [.pingAck])) := by
       simp [dispatch, hPING, tHEADERS, tDATA, tRST, tWU, tPRIORITY, tPUSH, tCONT, tPING, tSETTINGS, tGOAWAY]
-    rw [hs]; simp only [if_neg hsz', idCheck_nonhdr F c f (by rw [hPING]; decide), hd]
+    rw [hs]; simp only [if_neg hsz', idCheck_nonhdr c f (by rw [hPING]; decide), hd]
     refine ⟨_, rfl, ?_⟩
     split
     · exact hsa _ _ ho (hn hsid) (SameSt.refl c) (by simp)
@@ -415,10 +411,13 @@ theorem fixed_handle (dec : Dec) (c : Conn) (f : Fr) (hI : Inv c) (hg : c.goaway
     · have hs := sh_ga1 c f hGA hsid
       rw [hs]; exact ⟨_, rfl, hco _ ho (fun _ => rfl)⟩
     have hsid : f.sid = 0 := by omega
-    have hs := sh_ga0 c f hGA hsid
-    have hd : dispatch F dec c f = .ok ({ c with goawayReceived := true }, []) := by
+    by_cases hp8 : f.plen < 8
+    · have hs := sh_ga6 c f hGA hsid hp8
+      rw [hs]; exact ⟨_, rfl, hco _ ho (fun h => by rw [hn hsid] at h; cases h)⟩
+    have hs := sh_ga0 c f hGA hsid hp8
+    have hd : dispatch dec c f = .ok ({ c with goawayReceived := true }, []) := by
       simp [dispatch, hGA, tHEADERS, tDATA, tRST, tWU, tPRIORITY, tPUSH, tCONT, tPING, tSETTINGS, tGOAWAY]
-    rw [hs]; simp only [if_neg hsz', idCheck_nonhdr F c f (by rw [hGA]; decide), hd]
+    rw [hs]; simp only [if_neg hsz', idCheck_nonhdr c f (by rw [hGA]; decide), hd]
     exact ⟨_, rfl, hsa _ _ ho (hn hsid) ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩ (by simp)⟩
   by_cases hSET : f.ty = tSETTINGS
   · have hn : f.sid = 0 → needProtoH c f = false := fun h => by simp [needProtoH, h0, h, hSET, tHEADERS, tDATA, tRST, tWU, tPRIORITY, tPUSH, tCONT, tPING, tSETTINGS, tGOAWAY]
@@ -434,8 +433,8 @@ theorem fixed_handle (dec : Dec) (c : Conn) (f : Fr) (hI : Inv c) (hg : c.goaway
     · have hs := sh_set6 c f hSET hsid hb
       rw [hs]; exact ⟨_, rfl, hco _ ho (fun h => by rw [hn hsid] at h; cases h)⟩
     have hs := sh_set0 c f hSET hsid hb
-    have hd : dispatch F dec c f = .ok (settingsH c f) := by simp [dispatch, hSET, tHEADERS, tDATA, tRST, tWU, tPRIORITY, tPUSH, tCONT, tPING, tSETTINGS, tGOAWAY]
-    rw [hs]; simp only [if_neg hsz', idCheck_nonhdr F c f (by rw [hSET]; decide), hd]
+    have hd : dispatch dec c f = .ok (settingsH c f) := by simp [dispatch, hSET, tHEADERS, tDATA, tRST, tWU, tPRIORITY, tPUSH, tCONT, tPING, tSETTINGS, tGOAWAY]
+    rw [hs]; simp only [if_neg hsz', idCheck_nonhdr c f (by rw [hSET]; decide), hd]
     refine ⟨_, rfl, ?_, fun h => by rw [hn hsid] at h; cases h⟩
     rw [ho]; exact sgood_settings c f hI hg _
   by_cases hPRI : f.ty = tPRIORITY
@@ -448,12 +447,12 @@ theorem fixed_handle (dec : Dec) (c : Conn) (f : Fr) (hI : Inv c) (hg : c.goaway
     · have hs := sh_pri6 c f hPRI hsid hpl
       rw [hs]; refine ⟨_, rfl, hgood_conn c f _ hg (by simp [connAny]) (fun h => by rw [hn] at h; cases h)⟩
     by_cases hself : f.word % 2147483648 = f.sid
-    · by_cases hid : (!mem c f.sid && isIdleId F c f.sid) = true
+    · by_cases hid : (!mem c f.sid && isIdleId c f.sid) = true
       · have hs := sh_priI c f hPRI hsid (by omega) hself hid
         rw [hs]; refine ⟨_, rfl, hgood_conn c f _ hg ?_ (fun _ => rfl)⟩
         rw [hl]; simp only
         have : abs c f.sid = .idle := by
-          simp only [isIdleId_F, Bool.and_eq_true, Bool.not_eq_true'] at hid
+          simp only [Bool.and_eq_true, Bool.not_eq_true'] at hid
           rw [abs_none (by simpa [mem] using hid.1), hid.2]; rfl
         rw [this]; rfl
       · have hs := sh_priR c f hPRI hsid (by omega) hself hid
@@ -461,16 +460,16 @@ theorem fixed_handle (dec : Dec) (c : Conn) (f : Fr) (hI : Inv c) (hg : c.goaway
         rw [hl]
         apply sgood_closeRst c _ _ _ hI h0
         · apply abs_ne_idle_of hI h0
-          simp only [isIdleId_F, Bool.and_eq_true, Bool.not_eq_true', not_and] at hid
+          simp only [Bool.and_eq_true, Bool.not_eq_true', not_and] at hid
           cases hm : mem c f.sid
-          · right; cases hi : idleAbs c f.sid
+          · right; cases hi : isIdleId c f.sid
             · rfl
             · exact absurd hi (hid hm)
           · left; rfl
         · intro t ht; simp [strmOK, ht]
     have hs := sh_pri0 c f hPRI hsid (by omega) hself
-    have hd : dispatch F dec c f = .ok (c, []) := by simp [dispatch, hPRI, tHEADERS, tDATA, tRST, tWU, tPRIORITY, tPUSH, tCONT, tPING, tSETTINGS, tGOAWAY]
-    rw [hs]; simp only [if_neg hsz', idCheck_nonhdr F c f (by rw [hPRI]; decide), hd]
+    have hd : dispatch dec c f = .ok (c, []) := by simp [dispatch, hPRI, tHEADERS, tDATA, tRST, tWU, tPRIORITY, tPUSH, tCONT, tPING, tSETTINGS, tGOAWAY]
+    rw [hs]; simp only [if_neg hsz', idCheck_nonhdr c f (by rw [hPRI]; decide), hd]
     refine ⟨_, rfl, ?_, fun h => by rw [hn] at h; cases h⟩
     rw [hl]
     exact sgood_keep c _ _ _ c hI rfl rfl (okPost_prio _ _ _ (Or.inr trivial)) (by simp) (by simp) (by simp)
@@ -483,24 +482,24 @@ theorem fixed_handle (dec : Dec) (c : Conn) (f : Fr) (hI : Inv c) (hg : c.goaway
     by_cases hpl : f.plen ≠ 4
     · have hs := sh_rst6 c f hRST hsid hpl
       rw [hs]; refine ⟨_, rfl, hgood_conn c f _ hg (by simp [connAny]) (fun h => by rw [hn] at h; cases h)⟩
-    by_cases hid : (!mem c f.sid && isIdleId F c f.sid) = true
+    by_cases hid : (!mem c f.sid && isIdleId c f.sid) = true
     · have hs := sh_rstI c f hRST hsid (by omega) hid
       rw [hs]; refine ⟨_, rfl, hgood_conn c f _ hg ?_ (fun _ => rfl)⟩
       rw [hl]; simp only
       have : abs c f.sid = .idle := by
-        simp only [isIdleId_F, Bool.and_eq_true, Bool.not_eq_true'] at hid
+        simp only [Bool.and_eq_true, Bool.not_eq_true'] at hid
         rw [abs_none (by simpa [mem] using hid.1), hid.2]; rfl
       rw [this]; rfl
     have hs := sh_rst0 c f hRST hsid (by omega) hid
-    have hd : dispatch F dec c f = .ok (rstH c f) := by simp [dispatch, hRST, tHEADERS, tDATA, tRST, tWU, tPRIORITY, tPUSH, tCONT, tPING, tSETTINGS, tGOAWAY]
-    rw [hs]; simp only [if_neg hsz', idCheck_nonhdr F c f (by rw [hRST]; decide), hd]
+    have hd : dispatch dec c f = .ok (rstH c f) := by simp [dispatch, hRST, tHEADERS, tDATA, tRST, tWU, tPRIORITY, tPUSH, tCONT, tPING, tSETTINGS, tGOAWAY]
+    rw [hs]; simp only [if_neg hsz', idCheck_nonhdr c f (by rw [hRST]; decide), hd]
     refine ⟨_, rfl, ?_, fun h => by rw [hn] at h; cases h⟩
     rw [hl]
     apply sgood_rstH c f hI hg h0
     apply abs_ne_idle_of hI h0
-    simp only [isIdleId_F, Bool.and_eq_true, Bool.not_eq_true', not_and] at hid
+    simp only [Bool.and_eq_true, Bool.not_eq_true', not_and] at hid
     cases hm : mem c f.sid
-    · right; cases hi : idleAbs c f.sid
+    · right; cases hi : isIdleId c f.sid
       · rfl
       · exact absurd hi (hid hm)
     · left; rfl
@@ -511,8 +510,8 @@ theorem fixed_handle (dec : Dec) (c : Conn) (f : Fr) (hI : Inv c) (hg : c.goaway
     · have hs := sh_wu6 c f hWU hpl
       rw [hs]; refine ⟨_, rfl, hgood_conn c f _ hg (by simp [connAny]) (fun h => by rw [hn] at h; cases h)⟩
     have hs := sh_wu0 c f hWU (by omega)
-    have hd : dispatch F dec c f = .ok (wuH F c f) := by simp [dispatch, hWU, tHEADERS, tDATA, tRST, tWU, tPRIORITY, tPUSH, tCONT, tPING, tSETTINGS, tGOAWAY]
-    rw [hs]; simp only [if_neg hsz', idCheck_nonhdr F c f (by rw [hWU]; decide), hd]
+    have hd : dispatch dec c f = .ok (wuH c f) := by simp [dispatch, hWU, tHEADERS, tDATA, tRST, tWU, tPRIORITY, tPUSH, tCONT, tPING, tSETTINGS, tGOAWAY]
+    rw [hs]; simp only [if_neg hsz', idCheck_nonhdr c f (by rw [hWU]; decide), hd]
     refine ⟨_, rfl, ?_, fun h => by rw [hn] at h; cases h⟩
     by_cases hsid : f.sid = 0
     · rw [hl0 hsid]
@@ -528,8 +527,8 @@ theorem fixed_handle (dec : Dec) (c : Conn) (f : Fr) (hI : Inv c) (hg : c.goaway
     have hl : hlab c f = (f.sid, .data f.f1) := by simp [hlab, h0, hsid, hDATA, tHEADERS, tDATA, tRST, tWU, tPRIORITY, tPUSH, tCONT, tPING, tSETTINGS, tGOAWAY]
     have hn : needProtoH c f = false := by simp [needProtoH, h0, hsid, hDATA, tHEADERS, tDATA, tRST, tWU, tPRIORITY, tPUSH, tCONT, tPING, tSETTINGS, tGOAWAY]
     have hs := sh_data0 c f hDATA hsid
-    have hd : dispatch F dec c f = .ok (dataH F c f) := by simp [dispatch, hDATA, tHEADERS, tDATA, tRST, tWU, tPRIORITY, tPUSH, tCONT, tPING, tSETTINGS, tGOAWAY]
-    rw [hs]; simp only [if_neg hsz', idCheck_nonhdr F c f (by rw [hDATA]; decide), hd]
+    have hd : dispatch dec c f = .ok (dataH c f) := by simp [dispatch, hDATA, tHEADERS, tDATA, tRST, tWU, tPRIORITY, tPUSH, tCONT, tPING, tSETTINGS, tGOAWAY]
+    rw [hs]; simp only [if_neg hsz', idCheck_nonhdr c f (by rw [hDATA]; decide), hd]
     refine ⟨_, rfl, ?_, fun h => by rw [hn] at h; cases h⟩
     rw [hl]; exact sgood_dataH c f hI hg h0 hsid
   by_cases hPUSH : f.ty = tPUSH
@@ -546,25 +545,25 @@ theorem fixed_handle (dec : Dec) (c : Conn) (f : Fr) (hI : Inv c) (hg : c.goaway
       rw [hs]; simp only [if_neg hsz']
       cases hcl : c.isClient
       · by_cases hlp : c.lastPeer = 0
-        · have hid : idCheck F c f = .inr c := by unfold idCheck; simp [hHDR, hcl, hsid, hlp, F]
-          have hh : headersH F dec c f = .ok (connErr c ePROTOCOL) := by simp [headersH, hsid, F]
-          rw [hid]; simp only [dispatch_headers dec c f F hHDR, hh]
+        · have hid : idCheck c f = .inr c := by unfold idCheck; simp [hHDR, hcl, hsid, hlp]
+          have hh : headersH dec c f = .ok (connErr c ePROTOCOL) := by simp [headersH, hsid]
+          rw [hid]; simp only [dispatch_headers dec c f hHDR, hh]
           exact ⟨_, rfl, hco _ (by rw [hl0 hsid]) (fun _ => rfl)⟩
-        have hid : idCheck F c f = .inl (connErr c ePROTOCOL) := by
-          unfold idCheck; simp [hHDR, hcl, hsid, hm0, F, hlp]
+        have hid : idCheck c f = .inl (connErr c ePROTOCOL) := by
+          unfold idCheck; simp [hHDR, hcl, hsid, hm0, hlp]
         rw [hid]; exact ⟨_, rfl, hco _ (by rw [hl0 hsid]) (fun _ => rfl)⟩
-      · have hid : idCheck F c f = .inr c := by unfold idCheck; simp [hcl]
-        have hh : headersH F dec c f = .ok (connErr c ePROTOCOL) := by simp [headersH, hsid, F]
-        rw [hid]; simp only [dispatch_headers dec c f F hHDR, hh]
+      · have hid : idCheck c f = .inr c := by unfold idCheck; simp [hcl]
+        have hh : headersH dec c f = .ok (connErr c ePROTOCOL) := by simp [headersH, hsid]
+        rw [hid]; simp only [dispatch_headers dec c f hHDR, hh]
         exact ⟨_, rfl, hco _ (by rw [hl0 hsid]) (fun _ => rfl)⟩
     have hl : hlab c f = (f.sid, if f.eh then .hdr f.f1 else .hdrBegin) := by simp [hlab, h0, hsid, hHDR]
     have hn : needProtoH c f = false := by simp [needProtoH, h0, hsid, hHDR, tHEADERS, tDATA, tRST, tWU, tPRIORITY, tPUSH, tCONT, tPING, tSETTINGS, tGOAWAY]
     rw [hs]; simp only [if_neg hsz']
-    have hex : ∃ r, (match idCheck F c f with | .inl r => Except.ok r | .inr c => dispatch F dec c f) = .ok r := by
-      cases idCheck F c f with
+    have hex : ∃ r, (match idCheck c f with | .inl r => Except.ok r | .inr c => dispatch dec c f) = .ok r := by
+      cases idCheck c f with
       | inl r => exact ⟨r, rfl⟩
       | inr c' =>
-        simp only [dispatch_headers dec c' f F hHDR]
+        simp only [dispatch_headers dec c' f hHDR]
         unfold headersH; rw [if_neg hsid]
         repeat' split
         all_goals exact ⟨_, rfl⟩
@@ -572,14 +571,14 @@ theorem fixed_handle (dec : Dec) (c : Conn) (f : Fr) (hI : Inv c) (hg : c.goaway
     refine ⟨r, hr, ?_, fun h => by rw [hn] at h; cases h⟩
     rw [hl]; exact sgood_headers dec c f r hI hg h0 hHDR hsid hr
   by_cases hCONT : f.ty = tCONT
-  · have hd : dispatch F dec c f = .ok (connErr c ePROTOCOL) := by simp [dispatch, hCONT, tHEADERS, tDATA, tRST, tWU, tPRIORITY, tPUSH, tCONT, tPING, tSETTINGS, tGOAWAY]
-    rw [hs]; simp only [if_neg hsz', idCheck_nonhdr F c f hHDR, hd]
+  · have hd : dispatch dec c f = .ok (connErr c ePROTOCOL) := by simp [dispatch, hCONT, tHEADERS, tDATA, tRST, tWU, tPRIORITY, tPUSH, tCONT, tPING, tSETTINGS, tGOAWAY]
+    rw [hs]; simp only [if_neg hsz', idCheck_nonhdr c f hHDR, hd]
     refine ⟨_, rfl, hgood_conn c f _ hg ?_ (fun _ => rfl)⟩
     by_cases hsid : f.sid = 0
     · rw [hl0 hsid]; simp [connCodes]
     · have hl : hlab c f = (f.sid, .cont) := by simp [hlab, h0, hsid, hCONT, tHEADERS, tDATA, tRST, tWU, tPRIORITY, tPUSH, tCONT, tPING, tSETTINGS, tGOAWAY]
       rw [hl]; simp [connCodes]
-  have hd : dispatch F dec c f = .ok (c, []) := by
+  have hd : dispatch dec c f = .ok (c, []) := by
     simp [dispatch, hPING, hGA, hSET, hRST, hWU, hDATA, hHDR, hCONT]
   have ho : (hlab c f).2 = .other := by
     by_cases h : f.sid = 0
@@ -588,30 +587,53 @@ theorem fixed_handle (dec : Dec) (c : Conn) (f : Fr) (hI : Inv c) (hg : c.goaway
   have hn : needProtoH c f = false := by
     by_cases h : f.sid = 0 <;>
       simp [needProtoH, h0, h, hHDR, hDATA, hRST, hWU, hPRI, hPUSH, hCONT, hSET, hPING, hGA]
-  rw [hs]; simp only [if_neg hsz', idCheck_nonhdr F c f hHDR, hd]
+  rw [hs]; simp only [if_neg hsz', idCheck_nonhdr c f hHDR, hd]
   exact ⟨_, rfl, hsa _ _ ho hn (SameSt.refl c) (by simp)⟩
+
+/-- Connection flow control on top of `handle`: an overrunning DATA frame
+is FLOW_CONTROL_ERROR, which §5.1 allows on DATA in every state (§5.4);
+otherwise only `recvW`, which the abstraction does not read, changes. -/
+theorem fixed_handleW (dec : Dec) (c : Conn) (f : Fr) (hI : Inv c) (hg : c.goawaySent = false)
+    (hsz : f.plen ≤ c.localMaxFrame) : ∃ r, handleW dec c f = .ok r ∧ HGood c f r := by
+  unfold handleW
+  split
+  · rename_i hfl
+    simp only [Bool.and_eq_true, decide_eq_true_eq] at hfl
+    have hrd := hfl.1
+    unfold reachesData at hrd
+    simp only [Bool.and_eq_true, beq_iff_eq, bne_iff_ne, ne_eq, decide_eq_true_eq] at hrd
+    obtain ⟨⟨⟨hc, hd⟩, h0⟩, -⟩ := hrd
+    have hl : hlab c f = (f.sid, .data f.f1) := by
+      simp [hlab, hc, h0, hd, tHEADERS, tDATA]
+    refine ⟨_, rfl, hgood_conn c f eFLOW hg ?_ ?_⟩
+    · rw [hl]; simp only
+      cases abs c f.sid <;> simp [connCodes, connAny]
+    · intro hp; simp [needProtoH, hc, h0, hd, tDATA, tSETTINGS, tPING, tGOAWAY, tCONT] at hp
+  · obtain ⟨r, hr, hs, hp⟩ := fixed_handle dec c f hI hg hsz
+    rw [hr]
+    refine ⟨_, rfl, sgood_congr (r := r) rfl rfl hs, hp⟩
 
 /-! ## The drivers -/
 
 theorem fixed_preface (dec : Dec) (c : Conn) (f : Fr) (hI : Inv c) (hg : c.goawaySent = false)
     (hsz : f.plen ≤ c.localMaxFrame) :
-    ∃ r, prefaceGate F dec c f = .ok r ∧ SGood c (flab c f).1 (flab c f).2 r ∧ FReq c f r := by
+    ∃ r, prefaceGate dec c f = .ok r ∧ SGood c (flab c f).1 (flab c f).2 r ∧ FReq c f r := by
   have hsz' : ¬ f.plen > c.localMaxFrame := by omega
   unfold prefaceGate
   by_cases hps : c.peerSettingsSeen = true
   · have hpb : prefaceBad c f = false := by simp [prefaceBad, hps]
     have hfl : flab c f = hlab c f := by simp [flab, hsz', hpb]
-    rw [if_neg (by simp [hps]), handleW_F]
-    obtain ⟨r, hr, hs, hp⟩ := fixed_handle dec c f hI hg hsz
+    rw [if_neg (by simp [hps])]
+    obtain ⟨r, hr, hs, hp⟩ := fixed_handleW dec c f hI hg hsz
     refine ⟨r, hr, by rw [hfl]; exact hs, fun h => absurd h hsz', fun _ h => hp (by simpa [hpb] using h)⟩
   · have hps : c.peerSettingsSeen = false := by simpa using hps
     rw [if_pos (by simp [hps])]
     by_cases hset : (f.ty = tSETTINGS ∧ f.f1 = false)
     · have hpb : prefaceBad c f = false := by simp [prefaceBad, hset.1, hset.2]
       have hfl : flab c f = hlab c f := by simp [flab, hsz', hpb]
-      rw [if_pos (by simp [hset.1, hset.2]), handleW_F]
+      rw [if_pos (by simp [hset.1, hset.2])]
       have hI' : Inv { c with peerSettingsSeen := true } := inv_congr (c := c) rfl hI
-      obtain ⟨r, hr, hs, hp⟩ := fixed_handle dec { c with peerSettingsSeen := true } f hI' hg hsz
+      obtain ⟨r, hr, hs, hp⟩ := fixed_handleW dec { c with peerSettingsSeen := true } f hI' hg hsz
       have hnp : needProtoH { c with peerSettingsSeen := true } f = needProtoH c f := rfl
       refine ⟨r, hr, by rw [hfl]; exact hs, fun h => absurd h hsz', fun _ h => hp (by rw [hnp]; simpa [hpb] using h)⟩
     · have hpb : prefaceBad c f = true := by
@@ -623,31 +645,29 @@ theorem fixed_preface (dec : Dec) (c : Conn) (f : Fr) (hI : Inv c) (hg : c.goawa
         · simp
       have hfl : flab c f = (f.sid, .other) := by simp [flab, hpb]
       rw [if_neg (by simpa using hset)]
-      have h8 : F.h2_08 = true := rfl
-      rw [if_pos h8]
       refine ⟨_, rfl, by rw [hfl]; exact sgood_conn0 c _ c _ hg, fun h => absurd h hsz',
         fun _ _ => gaCode_connErr c _ hg⟩
 
-/-- **The fixed model meets §5.1 on every inbound frame**: from an `Inv`
+/-- **The model meets §5.1 on every inbound frame**: from an `Inv`
 state with no GOAWAY sent, the frame is handled without raising, the
 reply and new state satisfy the §5.1 obligation for the frame's spec
 reading, and the frame-level rules hold. -/
 theorem fixed_frame (dec : Dec) (c : Conn) (f : Fr) (hI : Inv c) (hg : c.goawaySent = false) :
-    ∃ r, step F dec c (.frame f) = .ok r ∧ SGood c (flab c f).1 (flab c f).2 r ∧ FReq c f r := by
+    ∃ r, step dec c (.frame f) = .ok r ∧ SGood c (flab c f).1 (flab c f).2 r ∧ FReq c f r := by
   unfold step
   by_cases hsz : f.plen > c.localMaxFrame
   · have hfl : flab c f = (f.sid, .other) := by simp [flab, hsz]
-    have hr : (if c.isClient then driveClient F dec c f else driveFrame F dec c f) = .ok (connErr c eFRAME_SIZE) := by
+    have hr : (if c.isClient then driveClient dec c f else driveFrame dec c f) = .ok (connErr c eFRAME_SIZE) := by
       split
-      · unfold driveClient; rw [if_pos hsz]; rfl
+      · unfold driveClient; rw [if_pos hsz]
       · unfold driveFrame; rw [if_neg (by simp [hg]), if_pos hsz]
     simp only at hr ⊢
     rw [hr]
     exact ⟨_, rfl, by rw [hfl]; exact sgood_conn0 c _ c _ hg, fun _ => gaCode_connErr c _ hg,
       fun h => absurd h (by omega)⟩
-  · have hpg : (if c.isClient then driveClient F dec c f else driveFrame F dec c f) = prefaceGate F dec c f := by
+  · have hpg : (if c.isClient then driveClient dec c f else driveFrame dec c f) = prefaceGate dec c f := by
       split
-      · unfold driveClient; rw [if_neg hsz]; have h17 : F.h2_17 = true := rfl; simp [h17]
+      · unfold driveClient; rw [if_neg hsz]
       · unfold driveFrame; rw [if_neg (by simp [hg]), if_neg hsz]
     simp only at hpg ⊢
     rw [hpg]

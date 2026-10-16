@@ -4,17 +4,17 @@ import Flare.L3_Protocol.Ws.Frame
 # WebSocket receive paths (RFC 6455 §5.1, §5.2, §5.4, §5.5)
 
 * **Opcode check.** `OpcodeSafe`: every frame the decoder returns has a
-  defined opcode. `decode` (alias `decodeOld`) is the decoder before the
-  WS-01 fix; `decodeKnown` is the shipped one, with the check; `decodeKnown_safe` proves it
-  safe and `decodeKnown_encode` shows it still round-trips every frame with
-  a defined opcode.
+  defined opcode. `decodeKnown` is `decode` plus the opcode check;
+  `decodeKnown_safe` proves it safe and `decodeKnown_encode` shows it still
+  round-trips every frame with a defined opcode.
 * **Mask direction.** `serverAccept` (`WsConnection._recv_one`) refuses
-  unmasked frames: `server_safe`. `clientAcceptOld` (`WsClient._recv_one`
-  before the WS-03 fix) had no check; the shipped `clientAccept` refuses a
-  masked frame: `clientAccept_safe`.
-* **Message assembly.** `recvMessageOld` models `WsClient.recv_message`
-  before the WS-02 fix; `nextMessage` is the shipped reader.
-  `Delivered` is the declarative RFC 6455 §5.4 meaning of "the next complete
+  unmasked frames: `server_safe`; `clientAccept` (`WsClient._recv_one`)
+  refuses masked ones: `clientAccept_safe`.
+* **Server `recv`.** `serverRecv` (`WsConnection.recv`) closes with 1007 on a
+  final TEXT frame that is not UTF-8 (`serverRecv_utf8`), with 1002 on an
+  unmasked frame (`serverRecv_mask`), and otherwise delivers the frame
+  unchanged (`serverRecv_keeps`, `serverRecv_safe`).
+* **Message assembly.** `Delivered` is the declarative RFC 6455 §5.4 meaning of "the next complete
   message": the data frames consumed are a TEXT/BINARY start plus
   CONTINUATIONs, ending at the first FIN, with control frames interleaved
   anywhere, and the payload is their concatenation. `nextMessage` is the
@@ -30,15 +30,11 @@ open Flare
 def OpcodeSafe (dec : Bytes → DRes) : Prop :=
   ∀ d f n, dec d = .ok f n → knownOpcode f.opcode = true
 
-/-- `decode_one` before the WS-01 fix (an alias of `decode`, named for the
-counterexample). -/
-abbrev decodeOld : Bool → Nat → Bytes → DRes := decode
-
 /-- The shipped `decode_one`: with the reserved-opcode check. The Mojo code
 raises right after the RSV checks; this checks after decoding. The only
 difference is that a truncated reserved-opcode frame is `needMore` here
 instead of `error`.
-mirrors flare/ws/frame.mojo `decode_one` (fixed, WS-01) -/
+mirrors flare/ws/frame.mojo#WsFrame.decode_one sha=64c344c5d112 at=7aa8820c (fixed, WS-01) -/
 def decodeKnown (allowRsv1 : Bool) (maxP : Nat) (d : Bytes) : DRes :=
   match decode allowRsv1 maxP d with
   | .ok f n => if knownOpcode f.opcode then .ok f n else .error
@@ -70,20 +66,16 @@ theorem decodeKnown_encode (allowRsv1 : Bool) (maxP : Nat) (f : Frame) (mask : B
 /-! ## Mask direction -/
 
 /-- `WsConnection._recv_one`: decode, then refuse an unmasked frame.
-mirrors flare/ws/server.mojo:541-575 @59bda50 -/
+mirrors flare/ws/server.mojo#WsConnection._recv_one sha=9c464aa111c4 at=59bda50f -/
 def serverAccept (maxP : Nat) (d : Bytes) : DRes :=
-  match decode false maxP d with
+  match decodeKnown false maxP d with
   | .ok f n => if f.masked then .ok f n else .error
   | r => r
 
-/-- `WsClient._recv_one` before the WS-03 fix: decode only.
-mirrors flare/ws/client.mojo:717-763 @59bda50 -/
-def clientAcceptOld (maxP : Nat) (d : Bytes) : DRes := decode false maxP d
-
 /-- The shipped `WsClient._recv_one`, with the RFC 6455 §5.1 check.
-mirrors flare/ws/client.mojo `_recv_one` (fixed, WS-03) -/
+mirrors flare/ws/client.mojo#WsClient._recv_one sha=a278a400b80f at=8b4f33ad (fixed, WS-03) -/
 def clientAccept (maxP : Nat) (d : Bytes) : DRes :=
-  match decode false maxP d with
+  match decodeKnown false maxP d with
   | .ok f n => if f.masked then .error else .ok f n
   | r => r
 
@@ -98,6 +90,65 @@ theorem server_safe (maxP : Nat) : ServerSafe (serverAccept maxP) := by
     · cases h; assumption
     · cases h
   · rename_i r hr; exact absurd h (hr f n)
+
+/-- One server `recv` call on a data frame: hand it to the handler, fail
+the connection after a best-effort CLOSE with the listed status codes, or
+wait for more bytes. The PING auto-reply loop and the 1009 close for an
+oversized frame are outside this model, so every other decode error is
+`.fail []`. -/
+inductive Step
+  | deliver (f : Frame)
+  | fail (closes : List Nat)
+  | wait
+  deriving DecidableEq, Repr
+
+/-- mirrors flare/ws/server.mojo#WsConnection.recv+WsConnection._recv_one sha=55989d5ff93d at=ea1b9282 -/
+def serverRecv (maxP : Nat) (d : Bytes) : Step :=
+  match decodeKnown false maxP d with
+  | .ok f _ =>
+    if f.masked then
+      if f.opcode = 1 && f.fin && !Flare.L1.Utf8.isValidUtf8 f.payload then .fail [1007]
+      else .deliver f
+    else .fail [1002]
+  | .error => .fail []
+  | .needMore => .wait
+
+/-- RFC 6455 §8.1, §7.4.1: an accepted (masked) final TEXT frame whose
+payload is not well-formed UTF-8 fails the connection with CLOSE 1007. -/
+def Utf8Spec (maxP : Nat) (r : Bytes → Step) : Prop :=
+  ∀ d f n, decodeKnown false maxP d = .ok f n → f.masked = true → f.opcode = 1 → f.fin = true →
+    Flare.L1.Utf8.isValidUtf8 f.payload = false → r d = .fail [1007]
+
+/-- RFC 6455 §5.1, §7.4.1: a decodable frame without the MASK bit is
+refused with CLOSE 1002. A reserved opcode is a decode error before the
+mask is looked at, so it fails the connection without a CLOSE. -/
+def MaskSpec (maxP : Nat) (r : Bytes → Step) : Prop :=
+  ∀ d f n, decodeKnown false maxP d = .ok f n → f.masked = false → r d = .fail [1002]
+
+theorem serverRecv_utf8 (maxP : Nat) : Utf8Spec maxP (serverRecv maxP) := by
+  intro d f n hd hm ho hf hv
+  simp [serverRecv, hd, hm, ho, hf, hv]
+
+theorem serverRecv_mask (maxP : Nat) : MaskSpec maxP (serverRecv maxP) := by
+  intro d f n hd hm
+  simp [serverRecv, hd, hm]
+
+/-- Every other masked frame is delivered unchanged. -/
+theorem serverRecv_keeps (maxP : Nat) (d : Bytes) (f : Frame) (n : Nat)
+    (hd : decodeKnown false maxP d = .ok f n) (hm : f.masked = true)
+    (hok : ¬ (f.opcode = 1 ∧ f.fin = true ∧ Flare.L1.Utf8.isValidUtf8 f.payload = false)) :
+    serverRecv maxP d = .deliver f := by
+  have : (f.opcode = 1 && f.fin && !Flare.L1.Utf8.isValidUtf8 f.payload) = false := by
+    cases h1 : decide (f.opcode = 1) <;> cases h2 : f.fin <;>
+      cases h3 : Flare.L1.Utf8.isValidUtf8 f.payload <;> simp_all
+  simp [serverRecv, hd, hm, this]
+
+/-- The handler only ever sees masked frames. -/
+theorem serverRecv_safe (maxP : Nat) (d : Bytes) (f : Frame) (h : serverRecv maxP d = .deliver f) :
+    f.masked = true := by
+  unfold serverRecv at h
+  repeat' split at h
+  all_goals first | (cases h; assumption) | cases h
 
 theorem clientAccept_safe (maxP : Nat) : ClientSafe (clientAccept maxP) := by
   intro d f n h
@@ -123,22 +174,10 @@ def Msg.payload? : Msg → Option Bytes
   | _ => none
 
 /-- `WsClient.recv`: answers PING and reads on.
-mirrors flare/ws/client.mojo:693-715 @59bda50 -/
+mirrors flare/ws/client.mojo#WsClient.recv sha=159b8bb5ec9d at=59bda50f -/
 def recvFrame : List Frame → Option (Frame × List Frame)
   | [] => none
   | f :: fs => if f.opcode = 9 then recvFrame fs else some (f, fs)
-
-/-- `WsClient.recv_message` before the WS-02 fix: CLOSE ends, BINARY is
-binary, "TEXT or anything else" is text (UTF-8 checked on that one frame).
-Kept for the counterexamples.
-mirrors flare/ws/client.mojo:765-794 @59bda50 -/
-def recvMessageOld (fs : List Frame) : Option (Msg × List Frame) :=
-  match recvFrame fs with
-  | none => none
-  | some (f, rest) =>
-    if f.opcode = 8 then some (.closed, rest)
-    else if f.opcode = 2 then some (.binary f.payload, rest)
-    else some (if Flare.L1.Utf8.isValidUtf8 f.payload then .text f.payload else .error, rest)
 
 def isData (f : Frame) : Bool := !isControl f.opcode
 
@@ -189,7 +228,7 @@ CLOSE ends, TEXT/BINARY starts a message that runs to the CONTINUATION with
 FIN; any other data opcode is a protocol error. The size bound on the
 reassembled payload (`max_frame_size`) is not modelled: it only turns some
 `.text`/`.binary` results into an error.
-mirrors flare/ws/client.mojo:765-858 (fixed, WS-02) -/
+mirrors flare/ws/client.mojo#WsClient._recv_data_frame+WsClient.recv_message sha=73a42af7acbd at=97cfd1be (fixed, WS-02) -/
 def nextMessage : List Frame → Option (Msg × List Frame)
   | [] => none
   | f :: fs =>
@@ -278,7 +317,7 @@ theorem nextMessage_delivered : Delivered nextMessage := by
 /-! ## UTF-8 -/
 
 /-- `WsFrame.text_payload` succeeds exactly on RFC 3629 well-formed payloads.
-mirrors flare/ws/frame.mojo:522-536 @59bda50 -/
+mirrors flare/ws/frame.mojo#WsFrame.text_payload sha=78badd72946a at=59bda50f -/
 theorem textPayload_ok_iff (p : Bytes) :
     Flare.L1.Utf8.isValidUtf8 p = true ↔ Flare.L1.Utf8.WF p :=
   Flare.L1.Utf8.isValidUtf8_iff p

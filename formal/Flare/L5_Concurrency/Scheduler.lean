@@ -37,8 +37,8 @@ modification order is total and the SC interleaving can produce every
 value an acquire load can return. The free of a joined worker's resources
 is ordered after all of that worker's accesses by `pthread_join`
 (happens-before from thread termination to join return). For detached
-workers no ordering argument is needed in the fixed configuration because
-nothing they can reach is ever freed. These arguments are stated here, not
+workers no ordering argument is needed because nothing they can reach is
+ever freed. These arguments are stated here, not
 proved in Lean.
 
 ## Environment assumption
@@ -62,8 +62,7 @@ self-join (`live_handle_calls`), which no in-repo caller performs
   outcome for `uaf`.
 * The drain wait loop is over-approximated: any number of single-worker
   samples of `WORKER_STAT_DONE` in any order, and the deadline can expire at
-  any point. This is sound for safety; the counterexample traces sample
-  every worker once, as the Mojo loop does.
+  any point. This is sound for safety.
 * The shared-listener mode (`FLARE_REUSEPORT_WORKERS=0`) is modelled in
   `Flare.L5.SharedListener` (the workers hold only the fd number, not the
   heap `TcpListener`); `start`'s rollback and the stuck-branch index
@@ -72,7 +71,7 @@ self-join (`live_handle_calls`), which no in-repo caller performs
 namespace Flare.L5.Scheduler
 
 /-- Worker program counter.
-mirrors flare/runtime/_worker.mojo:99-162 @59bda50 -/
+mirrors flare/runtime/_worker.mojo#_worker_entry sha=3f94db3d9d08 at=59bda50f -/
 inductive WPc where
   | start   -- :110-136 read the context (stop address, pinning)
   | loop    -- frontend serve loop: `load_stop_flag(stopping)`
@@ -85,7 +84,7 @@ inductive WPc where
 /-- Per-worker state: the program counter, the shared `WORKER_STAT_DONE`
 slot, the drain thread's snapshot `done[i]`, what the drain did to the
 handle, and the freed bits of this worker's heap cells.
-mirrors flare/runtime/scheduler.mojo:243-277 @59bda50 -/
+mirrors flare/runtime/scheduler.mojo#Scheduler sha=cd290d220f65 at=59bda50f -/
 structure WS where
   pc : WPc
   done : Bool
@@ -98,9 +97,9 @@ structure WS where
   deriving DecidableEq, Repr
 
 /-- Drain thread program counter.
-mirrors flare/runtime/scheduler.mojo:815-901 @59bda50 -/
+mirrors flare/runtime/scheduler.mojo#Scheduler.drain sha=df979eac331a at=59bda50f -/
 inductive MPc where
-  | signal          -- :820 `_signal_and_close_listener` (store stop := True)
+  | signal          -- `_signal_stop` (store stop := True)
   | wait            -- :831-844 sample `WORKER_STAT_DONE` until all done or deadline
   | sweep (k : Nat) -- :846-855 join worker k if done[k], else detach it
   | report          -- :869-885 read every stats cell
@@ -116,13 +115,9 @@ structure St where
   uaf : Bool
   deriving DecidableEq, Repr
 
-/-- `hard`: `timeout_ms <= 0` or `shutdown()` (every worker joined).
-`fixStop`: the CONC-03 fix (leak the stop flag when a worker is detached).
-`fixLis`: the CONC-04 fix (free the non-stuck workers' listeners). -/
+/-- `hard`: `timeout_ms <= 0` or `shutdown()` (every worker joined). -/
 structure Cfg where
   hard : Bool
-  fixStop : Bool
-  fixLis : Bool
   deriving DecidableEq, Repr
 
 inductive Lbl where
@@ -134,13 +129,13 @@ inductive Lbl where
 def w0 : WS := ⟨.start, false, false, false, false, false, false, false⟩
 
 /-- State right after `Scheduler.start` returned with `n` workers.
-mirrors flare/runtime/scheduler.mojo:361-641 @59bda50 -/
+mirrors flare/runtime/scheduler.mojo#Scheduler.start sha=1ab2edc505a7 at=59bda50f -/
 def init (n : Nat) : St := ⟨List.replicate n w0, false, false, .signal, false⟩
 
 def Freed (w : WS) : Bool := w.ctxF || w.statsF || w.lisF
 
 /-- One worker step: the new worker state and whether it dereferenced a
-freed cell. mirrors flare/runtime/_worker.mojo:110-162 @59bda50 -/
+freed cell. mirrors flare/runtime/_worker.mojo#_worker_entry sha=3f94db3d9d08 at=59bda50f -/
 def wStep (stop stopF : Bool) (w : WS) : Option (WS × Bool) :=
   match w.pc with
   | .start => some ({ w with pc := .loop }, w.ctxF)
@@ -150,24 +145,21 @@ def wStep (stop stopF : Bool) (w : WS) : Option (WS × Bool) :=
   | .ret => some ({ w with pc := .term }, false)
   | .term => none
 
-/-- The free policy after the sweep. Pre-fix (`fixStop = fixLis = false`):
-the stuck workers' ctx and stats entries are popped, the whole per-worker
-listener list is cleared as soon as any worker is stuck, and
-`_free_resources` frees what is left, including the stop flag. Shipped
-(`fixStop`, CONC-03; `fixLis`, CONC-04): the stop flag is leaked
-(`self._stopping_addr = 0`) when a worker was detached, and only the stuck
-workers' listeners are dropped from the list that gets freed.
-mirrors flare/runtime/scheduler.mojo:890-935,703-744 (fixed, CONC-03, CONC-04) -/
-def freeAll (c : Cfg) (s : St) : St :=
+/-- The free policy after the sweep: the stuck workers' ctx, stats and
+listener entries are dropped from what gets freed (CONC-04), the stop flag
+is leaked (`self._stopping_addr = 0`) when a worker was detached (CONC-03),
+and `_free_resources` frees the rest.
+mirrors flare/runtime/scheduler.mojo#Scheduler.drain+default_worker_count+Scheduler._free_resources sha=0489f4553029 at=bdc6e488 (fixed, CONC-03, CONC-04) -/
+def freeAll (s : St) : St :=
   let anyDet := s.ws.any (·.detached)
   { s with
     ws := s.ws.map fun w =>
       { w with ctxF := !w.detached, statsF := !w.detached,
-               lisF := if c.fixLis then !w.detached else !anyDet },
-    stopF := if c.fixStop then !anyDet else true,
+               lisF := !w.detached },
+    stopF := !anyDet,
     m := .fin }
 
-/-- One drain-thread step. mirrors flare/runtime/scheduler.mojo:815-901 @59bda50 -/
+/-- One drain-thread step. mirrors flare/runtime/scheduler.mojo#Scheduler.drain sha=df979eac331a at=59bda50f -/
 def mStep (c : Cfg) (s : St) : Option St :=
   match s.m with
   | .signal => some { s with stop := true, m := .wait, uaf := s.uaf || s.stopF }
@@ -184,10 +176,10 @@ def mStep (c : Cfg) (s : St) : Option St :=
         else none
       else some { s with ws := s.ws.set k { w with detached := true }, m := .sweep (k + 1) }
   | .report => some { s with m := .free, uaf := s.uaf || s.ws.any (·.statsF) }
-  | .free => some (freeAll c s)
+  | .free => some (freeAll s)
   | .fin => none
 
-/-- mirrors flare/runtime/scheduler.mojo:831-844 and flare/runtime/_worker.mojo:110-162 @59bda50 -/
+/-- mirrors flare/runtime/scheduler.mojo#Scheduler.drain sha=df979eac331a at=193ddcec and flare/runtime/_worker.mojo#_worker_entry sha=3f94db3d9d08 at=59bda50f -/
 def step (c : Cfg) (s : St) : Lbl → Option St
   | .w i =>
     match s.ws[i]? with
@@ -204,17 +196,10 @@ def step (c : Cfg) (s : St) : Lbl → Option St
 
 def lts (c : Cfg) (n : Nat) : LTS St Lbl := LTS.ofFn (· = init n) (step c)
 
-/-- The pre-fix code (59bda50): `drain(timeout_ms > 0)`, before CONC-03 and
-CONC-04 were fixed. Kept so the counterexamples stay checkable. -/
-def cfgImpl : Cfg := ⟨false, false, false⟩
-/-- The code at 59bda50: `shutdown()` / `drain(timeout_ms <= 0)`. -/
-def cfgShutdown : Cfg := ⟨true, false, false⟩
-/-- `drain(timeout_ms > 0)` as shipped: the CONC-03 fix (the stop flag is
-leaked when a worker is detached) and the CONC-04 fix (only the stuck
-workers' listeners are dropped from the freed list) are both in. -/
-def cfgShipped : Cfg := ⟨false, true, true⟩
-/-- `drain(timeout_ms > 0)` with both fixes (the shipped drain). -/
-def cfgFixed : Cfg := ⟨false, true, true⟩
+/-- `shutdown()` / `drain(timeout_ms <= 0)`. -/
+def cfgShutdown : Cfg := ⟨true⟩
+/-- `drain(timeout_ms > 0)`. -/
+def cfgDrain : Cfg := ⟨false⟩
 
 /-! ## Specification -/
 
@@ -259,14 +244,13 @@ def MI (c : Cfg) (s : St) : MPc → Prop
   | .report | .free => s.stop = true ∧ NoneFreed s ∧ ∀ w ∈ s.ws, Decided w
   | .fin => s.stop = true ∧ (∀ w ∈ s.ws, Decided w) ∧
       (∀ w ∈ s.ws, w.detached = false →
-        w.ctxF = true ∧ w.statsF = true ∧
-        ((c.fixLis = true ∨ ∀ v ∈ s.ws, v.detached = false) → w.lisF = true)) ∧
+        w.ctxF = true ∧ w.statsF = true ∧ w.lisF = true) ∧
       ((∀ w ∈ s.ws, w.detached = false) → s.stopF = true) ∧
-      (s.stopF = true → c.fixStop = false ∨ ∀ w ∈ s.ws, w.detached = false)
+      (s.stopF = true → ∀ w ∈ s.ws, w.detached = false)
 
 def Core (c : Cfg) (s : St) : Prop := (∀ w ∈ s.ws, WI c w) ∧ MI c s s.m
 
-/-- The memory-safety part, inductive only when `fixStop ∨ hard`. -/
+/-- The memory-safety part, inductive together with `Core`. -/
 def SI (s : St) : Prop := s.uaf = false ∧ (s.stopF = true → ∀ w ∈ s.ws, w.joined = true)
 
 /-! ### List lemmas -/
@@ -408,16 +392,13 @@ theorem core_step_w (c : Cfg) (s s' : St) (i : Nat) (I : Core c s)
       refine ⟨a1, forall_set a2 (hdec (a2 w hwm)), ?_, fun hv => a4 (hall hv), ?_⟩
       · intro v hv hvd
         rcases List.mem_or_eq_of_mem_set hv with hv | hv
-        · obtain ⟨b1, b2, b3⟩ := a3 v hv hvd
-          exact ⟨b1, b2, fun hh => b3 (hh.imp id hall)⟩
+        · exact a3 v hv hvd
         · rw [hv] at hvd ⊢
           obtain ⟨b1, b2, b3⟩ := a3 w hwm (by rw [← hD]; exact hvd)
           rw [e1.1, e1.2.1, e1.2.2]
-          exact ⟨b1, b2, fun hh => b3 (hh.imp id hall)⟩
+          exact ⟨b1, b2, b3⟩
       · intro hst
-        rcases a5 hst with h5 | h5
-        · exact Or.inl h5
-        · exact Or.inr (forall_set h5 (by rw [hD]; exact h5 w hwm))
+        exact forall_set (a5 hst) (by rw [hD]; exact a5 hst w hwm)
 
 theorem core_step_sample (c : Cfg) (s s' : St) (i : Nat) (I : Core c s)
     (h : step c s (.sample i) = some s') : Core c s' := by
@@ -519,8 +500,7 @@ theorem core_step_m (c : Cfg) (s s' : St) (I : Core c s)
       rcases hd with hd | hd
       · exact hd
       · exfalso
-        have : s.ws.any (·.detached) = true := List.any_eq_true.mpr ⟨v, hv, hd⟩
-        simp [Freed, hd, this] at hf
+        simp [Freed, hd] at hf
     · simp only [MI]
       refine ⟨a1, ?_, ?_, ?_, ?_⟩
       · intro w hw
@@ -529,31 +509,19 @@ theorem core_step_m (c : Cfg) (s s' : St) (I : Core c s)
       · intro w hw hd
         obtain ⟨v, hv, rfl⟩ := List.mem_map.mp hw
         simp only at hd ⊢
-        refine ⟨by simp [hd], by simp [hd], ?_⟩
-        intro hh
-        rcases hh with hh | hh
-        · simp [hh, hd]
-        · have hall : ∀ u ∈ s.ws, u.detached = false := by
-            intro u hu
-            have := hh _ (List.mem_map.mpr ⟨u, hu, rfl⟩)
-            simpa using this
-          have := hany.mpr hall
-          cases c.fixLis <;> simp [hd, this]
+        exact ⟨by simp [hd], by simp [hd], by simp [hd]⟩
       · intro hall
         have hall' : ∀ u ∈ s.ws, u.detached = false := by
           intro u hu
           have := hall _ (List.mem_map.mpr ⟨u, hu, rfl⟩)
           simpa using this
         have := hany.mpr hall'
-        cases c.fixStop <;> simp [this]
+        simp [this]
       · intro hst
-        cases hfs : c.fixStop
-        · exact Or.inl rfl
-        · right
-          simp only [hfs, if_true, Bool.not_eq_true'] at hst
-          intro w hw
-          obtain ⟨v, hv, rfl⟩ := List.mem_map.mp hw
-          exact hany.mp hst v hv
+        simp only [Bool.not_eq_true'] at hst
+        intro w hw
+        obtain ⟨v, hv, rfl⟩ := List.mem_map.mp hw
+        exact hany.mp hst v hv
   · -- fin
     cases h
 
@@ -584,7 +552,7 @@ theorem live_of_core (c : Cfg) (s : St) (I : Core c s) (S : SI s) : LiveRefsAllo
     · rfl
     · rw [S.2 hs w hw] at hj; cases hj
 
-theorem si_step (c : Cfg) (hc : c.fixStop = true ∨ c.hard = true) (s s' : St) (l : Lbl)
+theorem si_step (c : Cfg) (s s' : St) (l : Lbl)
     (I : Core c s) (S : SI s) (h : step c s l = some s') : SI s' := by
   have I' : Core c s' := by
     cases l with
@@ -673,11 +641,7 @@ theorem si_step (c : Cfg) (hc : c.fixStop = true ∨ c.hard = true) (s s' : St) 
       intro hst w hw
       obtain ⟨v, hv, rfl⟩ := List.mem_map.mp hw
       have hnd : v.detached = false := by
-        rcases b5 hst with hb | hb
-        · rcases hc with hc | hc
-          · rw [hc] at hb; cases hb
-          · exact (I.1 v hv).2.2.2.2 hc
-        · simpa using hb _ (List.mem_map.mpr ⟨v, hv, rfl⟩)
+        simpa using b5 hst _ (List.mem_map.mpr ⟨v, hv, rfl⟩)
       rcases a4 v hv with hd | hd
       · exact hd
       · rw [hnd] at hd; cases hd
@@ -685,48 +649,41 @@ theorem si_step (c : Cfg) (hc : c.fixStop = true ∨ c.hard = true) (s s' : St) 
 
 def CoreSI (c : Cfg) (s : St) : Prop := Core c s ∧ SI s
 
-theorem coreSI_inductive (c : Cfg) (hc : c.fixStop = true ∨ c.hard = true) (n : Nat) :
+theorem coreSI_inductive (c : Cfg) (n : Nat) :
     (lts c n).Inductive (CoreSI c) := by
   refine ⟨fun s h => ?_, fun s l s' I h => ⟨(core_inductive c n).step s l s' I.1 h,
-    si_step c hc s s' l I.1 I.2 h⟩⟩
+    si_step c s s' l I.1 I.2 h⟩⟩
   subst h
   exact ⟨core_init c n, rfl, fun h => by cases h⟩
 
-/-- The general safety theorem: whenever drain leaks the stop flag with a
-detached worker (`fixStop`), or detaches nobody (`hard`), no step ever
-dereferences a freed cell and nothing a live worker can reference is
-freed. Any number of workers, every interleaving. Proved. -/
-theorem safe_of_cfg (c : Cfg) (hc : c.fixStop = true ∨ c.hard = true) (n : Nat) :
+/-- In both configurations no step ever dereferences a freed cell and
+nothing a live worker can reference is freed. Any number of workers, every
+interleaving. -/
+theorem safe_of_cfg (c : Cfg) (n : Nat) :
     ∀ s, (lts c n).Reachable s → MemSafe s ∧ LiveRefsAllocated s := by
   intro s hr
-  have I := (coreSI_inductive c hc n).reachable s hr
+  have I := (coreSI_inductive c n).reachable s hr
   exact ⟨I.2.1, live_of_core c s I.1 I.2⟩
 
-/-- No leak beyond the detached workers' resources, whenever the
-non-stuck workers' listeners are kept for freeing (`fixLis`) or nobody is
-detached (`hard`). Proved, general. -/
-theorem noLeak_of_cfg (c : Cfg) (hc : c.fixLis = true ∨ c.hard = true) (n : Nat) :
+/-- No leak beyond the detached workers' resources (and then the stop
+flag). -/
+theorem noLeak_of_cfg (c : Cfg) (n : Nat) :
     ∀ s, (lts c n).Reachable s → NoLeak s := by
   intro s hr hm
   have I := (core_inductive c n).reachable s hr
-  obtain ⟨hW, hM⟩ := I
+  obtain ⟨-, hM⟩ := I
   simp only [hm, MI] at hM
   obtain ⟨-, -, a3, a4, -⟩ := hM
-  refine ⟨fun w hw hd => ?_, a4⟩
-  obtain ⟨b1, b2, b3⟩ := a3 w hw hd
-  refine ⟨b1, b2, b3 ?_⟩
-  rcases hc with hc | hc
-  · exact Or.inl hc
-  · exact Or.inr fun v hv => (hW v hv).2.2.2.2 hc
+  exact ⟨a3, a4⟩
 
-/-- With the fix, a worker that is still running after drain returned (a
-detached one) reads an allocated stop flag holding `True`, so its next
-serve-loop check exits. Proved, general. -/
-theorem detached_sees_stop (c : Cfg) (hc : c.fixStop = true ∨ c.hard = true) (n : Nat) :
+/-- A worker that is still running after drain returned (a detached one)
+reads an allocated stop flag holding `True`, so its next serve-loop check
+exits. -/
+theorem detached_sees_stop (c : Cfg) (n : Nat) :
     ∀ s, (lts c n).Reachable s → s.m = .fin → ∀ w ∈ s.ws, w.pc ≠ .term →
       s.stop = true ∧ s.stopF = false := by
   intro s hr hm w hw hpc
-  have I := (coreSI_inductive c hc n).reachable s hr
+  have I := (coreSI_inductive c n).reachable s hr
   have hM := I.1.2
   simp only [hm, MI] at hM
   exact ⟨hM.1, (live_of_core c s I.1 I.2 w hw hpc).2⟩
@@ -741,42 +698,20 @@ theorem soft_join_bounded (c : Cfg) (hs : c.hard = false) (n : Nat) :
   obtain ⟨-, -, h3, h4, -⟩ := I.1 w hw
   exact h3 (h4 hs hseen)
 
-/-- Headline (code at 59bda50, `shutdown()` and `drain(timeout_ms <= 0)`):
-memory safe and leak free. Proved, general. -/
+/-- Headline (`shutdown()` and `drain(timeout_ms <= 0)`): memory safe and
+leak free. -/
 theorem shutdown_safe (n : Nat) :
     ∀ s, (lts cfgShutdown n).Reachable s → MemSafe s ∧ LiveRefsAllocated s ∧ NoLeak s :=
-  fun s hr => ⟨(safe_of_cfg cfgShutdown (Or.inr rfl) n s hr).1,
-    (safe_of_cfg cfgShutdown (Or.inr rfl) n s hr).2, noLeak_of_cfg cfgShutdown (Or.inr rfl) n s hr⟩
+  fun s hr => ⟨(safe_of_cfg cfgShutdown n s hr).1,
+    (safe_of_cfg cfgShutdown n s hr).2, noLeak_of_cfg cfgShutdown n s hr⟩
 
-/-- Headline (fixed `drain(timeout_ms > 0)`): memory safe, nothing a live
-worker can reference is freed, and nothing but the detached workers'
-resources (and then the stop flag) is leaked. Proved, general. -/
-theorem fixed_safe (n : Nat) :
-    ∀ s, (lts cfgFixed n).Reachable s → MemSafe s ∧ LiveRefsAllocated s ∧ NoLeak s :=
-  fun s hr => ⟨(safe_of_cfg cfgFixed (Or.inl rfl) n s hr).1,
-    (safe_of_cfg cfgFixed (Or.inl rfl) n s hr).2, noLeak_of_cfg cfgFixed (Or.inl rfl) n s hr⟩
-
-/-! ## Executable traces -/
-
-def exec (c : Cfg) : St → List Lbl → Option St
-  | s, [] => some s
-  | s, l :: ls => (step c s l).bind fun s' => exec c s' ls
-
-theorem run_of_exec (c : Cfg) (n : Nat) :
-    ∀ s ls s', exec c s ls = some s' → (lts c n).Run s ls s' := by
-  intro s ls
-  induction ls generalizing s with
-  | nil => intro s' h; simp [exec] at h; subst h; exact .nil _
-  | cons l ls ih =>
-    intro s' h
-    simp only [exec] at h
-    cases hs : step c s l with
-    | none => simp [hs] at h
-    | some t => simp only [hs, Option.bind_some] at h; exact .cons hs (ih t s' h)
-
-theorem reachable_of_exec (c : Cfg) (n : Nat) (ls : List Lbl) (s : St)
-    (h : exec c (init n) ls = some s) : (lts c n).Reachable s :=
-  ⟨init n, ls, rfl, run_of_exec c n _ _ _ h⟩
+/-- Headline (`drain(timeout_ms > 0)`): memory safe, nothing a live worker
+can reference is freed, and nothing but the detached workers' resources (and
+then the stop flag) is leaked. -/
+theorem drain_safe (n : Nat) :
+    ∀ s, (lts cfgDrain n).Reachable s → MemSafe s ∧ LiveRefsAllocated s ∧ NoLeak s :=
+  fun s hr => ⟨(safe_of_cfg cfgDrain n s hr).1,
+    (safe_of_cfg cfgDrain n s hr).2, noLeak_of_cfg cfgDrain n s hr⟩
 
 /-! ## Bounded exhaustive exploration
 
@@ -921,20 +856,15 @@ def specB (s : St) : Bool :=
     (s.ws.all (fun w => w.detached || (w.ctxF && w.statsF && w.lisF)) &&
      (!(s.ws.all (fun w => !w.detached)) || s.stopF)))
 
-/-- Bounded (1 and 2 workers, every interleaving, exhaustive): the fixed
-drain meets `specB`. The general proof is `fixed_safe`; this is an
-independent check of the same model by state enumeration. -/
-theorem bounded_fixed : check cfgFixed 1 specB 400 = true ∧ check cfgFixed 2 specB 4000 = true := by
+/-- Bounded (1 and 2 workers, every interleaving, exhaustive): the drain
+meets `specB`. The general proof is `drain_safe`; this is an independent
+check of the same model by state enumeration. -/
+theorem bounded_drain : check cfgDrain 1 specB 400 = true ∧ check cfgDrain 2 specB 4000 = true := by
   decide +kernel
 
 /-- Bounded (1 and 2 workers): `shutdown()` meets `specB`. -/
 theorem bounded_shutdown :
     check cfgShutdown 1 specB 400 = true ∧ check cfgShutdown 2 specB 4000 = true := by
-  decide +kernel
-
-/-- The explorer is not vacuous: on the code at 59bda50 (`drain(timeout_ms >
-0)`, one worker) it reports a violation. -/
-theorem bounded_impl_fails : check cfgImpl 1 specB 400 = false := by
   decide +kernel
 
 end Flare.L5.Scheduler

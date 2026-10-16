@@ -18,14 +18,14 @@ open Flare
 
 /-! ## Byte classes -/
 
-/-- RFC 9110 separators `()<>@,;:\"/[]?={}`. mirrors flare/http/cookie.mojo:172 @59bda50 -/
+/-- RFC 9110 separators `()<>@,;:\"/[]?={}`. mirrors flare/http/cookie.mojo#_is_token_byte sha=c4c6b447484a at=59bda50f -/
 def separators : List UInt8 := [40, 41, 60, 62, 64, 44, 59, 58, 92, 34, 47, 91, 93, 63, 61, 123, 125]
 
-/-- mirrors flare/http/cookie.mojo:168-175 @59bda50 -/
+/-- mirrors flare/http/cookie.mojo#_is_token_byte sha=c4c6b447484a at=59bda50f -/
 def isTokenByte (c : UInt8) : Bool :=
   !(c.toNat ≤ 32 || c.toNat ≥ 127) && !(separators.contains c)
 
-/-- mirrors flare/http/cookie.mojo:178-182 @59bda50 -/
+/-- mirrors flare/http/cookie.mojo#_all_token sha=188037ca6cfc at=59bda50f -/
 def allToken (s : Bytes) : Bool := s.all isTokenByte
 
 /-- RFC 6265 `cookie-octet` (the byte test in flare/http/cookie.mojo:195-201 @59bda50). -/
@@ -33,13 +33,13 @@ def isCookieOctet (c : UInt8) : Bool :=
   c.toNat == 0x21 || (0x23 ≤ c.toNat && c.toNat ≤ 0x2B) || (0x2D ≤ c.toNat && c.toNat ≤ 0x3A) ||
   (0x3C ≤ c.toNat && c.toNat ≤ 0x5B) || (0x5D ≤ c.toNat && c.toNat ≤ 0x7E)
 
-/-- mirrors flare/http/cookie.mojo:185-204 @59bda50 -/
+/-- mirrors flare/http/cookie.mojo#_is_cookie_value sha=fd6e42524c71 at=59bda50f -/
 def isCookieValue (s : Bytes) : Bool :=
   if 2 ≤ s.length ∧ s.head? = some 34 ∧ s.getLast? = some 34 then
     ((s.drop 1).take (s.length - 2)).all isCookieOctet
   else s.all isCookieOctet
 
-/-- mirrors flare/http/cookie.mojo:207-212 @59bda50 -/
+/-- mirrors flare/http/cookie.mojo#_is_av_value sha=2b445ad3dbf3 at=59bda50f -/
 def isAvByte (c : UInt8) : Bool := !(c.toNat < 32 || c.toNat == 127 || c.toNat == 59)
 
 def isAvValue (s : Bytes) : Bool := s.all isAvByte
@@ -120,7 +120,7 @@ def asciiLower (s : Bytes) : Bytes :=
 
 /-- SameSite normalisation; `none` = raise. (Mojo `String.lower()` is
 modelled as ASCII lowering; no non-ASCII code point lowers to one of the
-letters of `strict`/`lax`/`none`.) mirrors flare/http/cookie.mojo:112-122 @59bda50 -/
+letters of `strict`/`lax`/`none`.) mirrors flare/http/cookie.mojo#Cookie.to_set_cookie_header sha=37be9554744a at=59bda50f -/
 def normSameSite (ss : Bytes) : Option Bytes :=
   if ss = [] then some []
   else if asciiLower ss = [115, 116, 114, 105, 99, 116] then some STRICT
@@ -149,7 +149,7 @@ decreasing_by omega
 /-- `out += "; <attr>"` when `b`. -/
 def opt (b : Bool) (attr : Bytes) : Bytes := if b then [59, 32] ++ attr else []
 
-/-- mirrors flare/http/cookie.mojo:89-136 @59bda50 -/
+/-- mirrors flare/http/cookie.mojo#Cookie.to_set_cookie_header sha=37be9554744a at=59bda50f -/
 def toSetCookie (c : Cookie) : Option Bytes :=
   if c.name = [] ∨ allToken c.name = false then none
   else if isCookieValue c.value = false then none
@@ -364,7 +364,7 @@ theorem toSetCookie_none_secure (c : Cookie) (out : Bytes) (h : toSetCookie c = 
 def isDigit (c : UInt8) : Bool := 48 ≤ c.toNat && c.toNat ≤ 57
 
 /-- The digit loop with Mojo `Int` (wrapping Int64) arithmetic.
-mirrors flare/http/cookie.mojo:158-164 @59bda50 -/
+mirrors flare/http/cookie.mojo#_parse_max_age sha=3660cbbd5c8e at=59bda50f -/
 def digitsAcc : Bytes → Int64 → Option Int64
   | [], acc => some acc
   | c :: r, acc =>
@@ -374,7 +374,7 @@ def digitsAcc : Bytes → Int64 → Option Int64
 /-- The digit string after an optional leading `-`. -/
 def digitsPart (c : UInt8) (r : Bytes) : Bytes := if c = 45 then r else c :: r
 
-/-- `none` = `_MAX_AGE_IGNORED`. mirrors flare/http/cookie.mojo:146-165 @59bda50 -/
+/-- `none` = `_MAX_AGE_IGNORED`. mirrors flare/http/cookie.mojo#_parse_max_age sha=3660cbbd5c8e at=59bda50f -/
 def parseMaxAge (v : Bytes) : Option Int64 :=
   match v with
   | [] => none

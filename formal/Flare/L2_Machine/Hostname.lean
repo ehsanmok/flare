@@ -24,8 +24,6 @@ Proved:
   label is at most 63 bytes;
 * `validate_iff`: flare accepts exactly the valid names (fixed, NET-08);
   `validate_sound` is the soundness half;
-* `validateOld_gap`: before the fix, the only valid names flare rejected
-  were 254 bytes long and ended in `.` (NET-08);
 * the too-long error text cuts the name at byte 20, possibly inside a
   UTF-8 sequence (NET-09); `truncChars_wf` proves the fixed cut is
   well-formed.
@@ -43,7 +41,7 @@ inductive Res where
   deriving DecidableEq, Repr
 
 /-- the per-byte loop, `ll` = `label_len`.
-mirrors flare/dns/resolver.mojo:100-119 @59bda50 -/
+mirrors flare/dns/resolver.mojo#resolve sha=3f1453988d24 at=59bda50f -/
 def scan : Bytes → Nat → Res
   | [], _ => .ok
   | b :: r, ll =>
@@ -51,13 +49,6 @@ def scan : Bytes → Nat → Res
     else if b = dot then scan r 0
     else if ll + 1 > 63 then .label
     else scan r (ll + 1)
-
-/-- Pre-fix validation: the raw byte length is compared with 253
-(flare/dns/resolver.mojo:68-107 @59bda50). -/
-def validateOld (h : Bytes) : Res :=
-  if h.length = 0 then .empty
-  else if h.length > 253 then .tooLong
-  else scan h 0
 
 def isDot (b : UInt8) : Bool := b == dot
 
@@ -67,7 +58,7 @@ def labels (h : Bytes) : List Bytes := h.splitOnP isDot
 def nameLen (h : Bytes) : Nat := if h.getLast? = some dot then h.length - 1 else h.length
 
 /-- The shipped validation: one trailing root dot is not counted against 253.
-mirrors flare/dns/resolver.mojo:72-119 (fixed, NET-08) -/
+mirrors flare/dns/resolver.mojo#resolve sha=fbb517864b3e at=dd1016f6 (fixed, NET-08) -/
 def validate (h : Bytes) : Res :=
   if h.length = 0 then .empty
   else if nameLen h > 253 then .tooLong
@@ -181,31 +172,10 @@ theorem validate_iff (h : Bytes) : validate h = .ok ↔ Valid h := by
 theorem validate_sound (h : Bytes) (hv : validate h = .ok) : Valid h :=
   (validate_iff h).1 hv
 
-/-- **The pre-fix gap**: a valid name the old check rejected is exactly 254
-bytes long and ends in the root dot. -/
-theorem validateOld_gap (h : Bytes) (hv : Valid h) (hr : validateOld h ≠ .ok) :
-    h.length = 254 ∧ h.getLast? = some dot := by
-  obtain ⟨hne, hf, hl, hlab⟩ := hv
-  have hs : scan h 0 = .ok := (scan_ok_iff_labels h).2 ⟨hf, hlab⟩
-  have h0 : h.length ≠ 0 := fun e => hne (List.eq_nil_of_length_eq_zero e)
-  unfold validateOld at hr
-  rw [if_neg h0] at hr
-  by_cases h1 : h.length > 253
-  · unfold nameLen at hl
-    split at hl
-    · rename_i hd; exact ⟨by omega, hd⟩
-    · omega
-  · rw [if_neg h1] at hr; exact absurd hs hr
-
 /-! ## The too-long error text -/
 
 /-- `"…"` in UTF-8 -/
 def ellipsis : Bytes := [0xE2, 0x80, 0xA6]
-
-/-- Pre-fix variable part of the too-long message:
-`String(unsafe_from_utf8=host_bytes[:20]) + "…"`
-(flare/dns/resolver.mojo:82-87 @59bda50). -/
-def tooLongTailOld (h : Bytes) : Bytes := h.take 20 ++ ellipsis
 
 /-- Keep whole characters only, at most `k` bytes. The Mojo code gets the
 same prefix by stepping the cut at byte 20 back over continuation bytes
@@ -221,7 +191,7 @@ termination_by _ h => h.length
 decreasing_by simp only [List.length_drop, List.length_cons]; omega
 
 /-- the variable part of the too-long message after the fix.
-mirrors flare/dns/resolver.mojo:89-100 (fixed, NET-09) -/
+mirrors flare/dns/resolver.mojo#resolve sha=fbb517864b3e at=dd1016f6 (fixed, NET-09) -/
 def tooLongTail (h : Bytes) : Bytes := truncChars 20 h ++ ellipsis
 
 theorem truncChars_wf (h : Bytes) (hw : WF h) (k : Nat) : WF (truncChars k h) := by

@@ -7,10 +7,10 @@ Pure helpers shared by the reactor's raw-byte framing scan and the full
 request parser:
 
 * `classify` mirrors `classify_transfer_coding`
-  (`flare/http/proto/chunked.mojo:63-93`): split on `,`, strip SP/HTAB,
+  (`flare/http/proto/chunked.mojo#classify_transfer_coding sha=544cc0cc964c at=193ddcec`): split on `,`, strip SP/HTAB,
   ASCII-lowercase, drop empty tokens.
 * `parseCL` mirrors `parse_content_length_bytes`
-  (`flare/http/_scan.mojo:259-294`).
+  (`flare/http/_scan.mojo#parse_content_length_bytes sha=3e33c073968d at=193ddcec`).
 
 The Mojo `classify_transfer_coding` works on a `String`. The reactor builds
 that string with `chr(Int(byte))`, so a byte `≥ 0x80` becomes a 2-byte
@@ -23,23 +23,23 @@ open Flare
 
 /-! ## Byte classes -/
 
-/-- mirrors flare/http/_scan.mojo:273,289 @59bda50 -/
+/-- mirrors flare/http/_scan.mojo#parse_content_length_bytes sha=3e33c073968d at=59bda50f -/
 def isWS (b : UInt8) : Bool := b == 32 || b == 9
-/-- mirrors flare/http/_scan.mojo:279 @59bda50 -/
+/-- mirrors flare/http/_scan.mojo#parse_content_length_bytes sha=3e33c073968d at=59bda50f -/
 def isDigit (b : UInt8) : Bool := 48 ≤ b && b ≤ 57
 
-/-- mirrors flare/http/proto/chunked.mojo:33-36 @59bda50 -/
+/-- mirrors flare/http/proto/chunked.mojo#_lower sha=ae0d6fa5b390 at=59bda50f -/
 def lower (b : UInt8) : UInt8 := if 65 ≤ b ∧ b ≤ 90 then b + 32 else b
 
 /-- `tchar` (RFC 9110 §5.6.2).
-mirrors flare/http/_server/parse_util.mojo:125-145 @59bda50 -/
+mirrors flare/http/_server/parse_util.mojo#_is_token_char sha=4917d288c082 at=59bda50f -/
 def isTchar (c : UInt8) : Bool :=
   (65 ≤ c && c ≤ 90) || (97 ≤ c && c ≤ 122) || (48 ≤ c && c ≤ 57) ||
   c == 33 || c == 35 || c == 36 || c == 37 || c == 38 ||
   c == 39 || c == 42 || c == 43 || c == 45 || c == 46 ||
   c == 94 || c == 95 || c == 96 || c == 124 || c == 126
 
-/-- mirrors flare/http/_server/parse_util.mojo:148-162 @59bda50 -/
+/-- mirrors flare/http/_server/parse_util.mojo#_is_field_value_char sha=e1add4a0a979 at=59bda50f -/
 def isFieldVchar (c : UInt8) : Bool := c == 9 || c == 32 || (33 ≤ c && c ≤ 126) || 128 ≤ c
 
 theorem lower_eq_of (h s : UInt8)
@@ -85,13 +85,13 @@ def CLC : Bytes := CLn ++ [58]
 def CHK : Bytes := [99,104,117,110,107,101,100]
 
 /-- Case-insensitive prefix test; `needle` is a lowercase literal.
-mirrors flare/http/proto/chunked.mojo:39-48 and flare/http/_scan.mojo:144-170 @59bda50 -/
+mirrors flare/http/proto/chunked.mojo#_matches_at sha=55b020d48866 at=ea1b9282 and flare/http/_scan.mojo#_match_content_length_prefix sha=fbdd33f4e536 at=ea1b9282 -/
 def ieqPrefix : Bytes → Bytes → Bool
   | [], _ => true
   | _ :: _, [] => false
   | n :: ns, h :: hs => lower h == n && ieqPrefix ns hs
 
-/-- `ascii_eq_ignore_case`. mirrors flare/http/proto/ascii.mojo:85-118 @59bda50 -/
+/-- `ascii_eq_ignore_case`. mirrors flare/http/proto/ascii.mojo#ascii_eq_ignore_case sha=a94678a128f6 at=59bda50f -/
 def ieq (k lit : Bytes) : Bool := k.length == lit.length && ieqPrefix lit k
 
 theorem ieqPrefix_append_left : ∀ (n h t : Bytes), ieqPrefix n h = true → ieqPrefix n (h ++ t) = true
@@ -130,7 +130,7 @@ theorem ieqPrefix_append_stop : ∀ (n h t : Bytes) (s : UInt8), s ∉ n → low
     rw [ieqPrefix_append_stop ms xs t s (fun h => hn (List.mem_cons_of_mem _ h)) hs]
 
 /-- The first `c` in a byte list (the colon search).
-mirrors flare/http/_server/parse.mojo:234-238 @59bda50 -/
+mirrors flare/http/_server/parse.mojo#_parse_http_request_bytes sha=ddb7cb75d062 at=ea1b9282 -/
 def findB (c : UInt8) : Bytes → Option Nat
   | [] => none
   | x :: xs => if x = c then some 0 else (findB c xs).map (· + 1)
@@ -166,11 +166,11 @@ theorem findB_of (c : UInt8) : ∀ (l : Bytes) (k : Nat), k < l.length → l.get
 def lstrip (l : Bytes) : Bytes := l.dropWhile isWS
 
 /-- `_ascii_strip_slice` / `String.strip(" \t")`: SP/HTAB off both ends.
-mirrors flare/http/_server/parse_util.mojo:65-90 @59bda50 -/
+mirrors flare/http/_server/parse_util.mojo#_ascii_strip_slice sha=bac9f9c64e73 at=59bda50f -/
 def strip (l : Bytes) : Bytes := (lstrip (lstrip l).reverse).reverse
 
 /-- `String.split(",")`.
-mirrors flare/http/proto/chunked.mojo:80 @59bda50 -/
+mirrors flare/http/proto/chunked.mojo#classify_transfer_coding sha=544cc0cc964c at=59bda50f -/
 def splitComma : Bytes → List Bytes
   | [] => [[]]
   | c :: cs =>
@@ -179,14 +179,14 @@ def splitComma : Bytes → List Bytes
     | [] => [[c]]
     | h :: t => (c :: h) :: t
 
-/-- mirrors flare/http/proto/chunked.mojo:81 @59bda50 -/
+/-- mirrors flare/http/proto/chunked.mojo#classify_transfer_coding sha=544cc0cc964c at=59bda50f -/
 def normTok (t : Bytes) : Bytes := (strip t).map lower
 
 /-- The nonempty, stripped, lowercased comma-separated tokens.
-mirrors flare/http/proto/chunked.mojo:79-83 @59bda50 -/
+mirrors flare/http/proto/chunked.mojo#classify_transfer_coding sha=544cc0cc964c at=59bda50f -/
 def tokens (v : Bytes) : List Bytes := ((splitComma v).map normTok).filter (fun t => !t.isEmpty)
 
-/-- mirrors flare/http/proto/chunked.mojo:79-93 @59bda50 -/
+/-- mirrors flare/http/proto/chunked.mojo#classify_transfer_coding sha=544cc0cc964c at=59bda50f -/
 def classifyT (ts : List Bytes) : Int :=
   match ts.getLast? with
   | none => -1
@@ -195,7 +195,7 @@ def classifyT (ts : List Bytes) : Int :=
     if CHK ∈ ts.dropLast then -1 else
     if ts.length > 1 then -2 else 1
 
-/-- `classify_transfer_coding`. mirrors flare/http/proto/chunked.mojo:63-93 @59bda50 -/
+/-- `classify_transfer_coding`. mirrors flare/http/proto/chunked.mojo#classify_transfer_coding sha=544cc0cc964c at=59bda50f -/
 def classify (v : Bytes) : Int := classifyT (tokens v)
 
 theorem splitComma_ne_nil : ∀ l : Bytes, splitComma l ≠ []
@@ -343,11 +343,11 @@ theorem strip_of_all {l : Bytes} (h : ∀ x ∈ l, isWS x = false) : strip l = l
   rw [e1 l h, e1 l.reverse (fun x hx => h x (List.mem_reverse.mp hx)), List.reverse_reverse]
 
 /-! ## Content-Length (RFC 9110 §8.6)
-The digit accumulator. mirrors flare/http/_scan.mojo:278-284 @59bda50 -/
+The digit accumulator. mirrors flare/http/_scan.mojo#parse_content_length_bytes sha=3e33c073968d at=59bda50f -/
 def decVal (ds : Bytes) : Nat := ds.foldl (fun acc d => acc * 10 + (d.toNat - 48)) 0
 
 /-- The tail test after the digits and trailing OWS.
-mirrors flare/http/_scan.mojo:286-294 @59bda50 -/
+mirrors flare/http/_scan.mojo#parse_content_length_bytes sha=3e33c073968d at=59bda50f -/
 def finCL (v : Int) : Bytes → Int
   | [] => v
   | c :: _ => if c = 13 ∨ c = 10 then v else -1
@@ -355,7 +355,7 @@ def finCL (v : Int) : Bytes → Int
 /-- `parse_content_length_bytes` over `p[start:end]`, `-1` for invalid.
 The Mojo loop returns `-1` at the 19th digit; this returns `-1` when the
 digit run is longer than 18, which is the same verdict.
-mirrors flare/http/_scan.mojo:259-294 @59bda50 -/
+mirrors flare/http/_scan.mojo#parse_content_length_bytes sha=3e33c073968d at=59bda50f -/
 def parseCL (l : Bytes) : Int :=
   let l1 := l.dropWhile isWS
   let ds := l1.takeWhile isDigit

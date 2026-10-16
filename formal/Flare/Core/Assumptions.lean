@@ -14,7 +14,7 @@ def RecvContract (cap : Nat) (ret : Int) : Prop := ret = -1 ∨ (0 ≤ ret ∧ r
 
 /-- `send(2)` on a blocking stream socket with `len > 0` bytes returns `-1`
 or `1..len`. POSIX does *not* guarantee `ret ≠ 0`; flare's `write_all`
-needs that stronger fact (see `Flare.Bugs.B08`). -/
+needs that stronger fact. -/
 def SendContractStrong (len : Nat) (ret : Int) : Prop :=
   ret = -1 ∨ (1 ≤ ret ∧ ret ≤ len)
 

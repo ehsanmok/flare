@@ -1,13 +1,10 @@
 import Flare.L2_Machine
 /-! L2 OS-facing machines: axiom footprint of the headline theorems. Expected:
-`propext`, `Quot.sound`, `Classical.choice` (some use none). Counterexamples
-in `Flare.Bugs.NET_*` / `Flare.Bugs.RT_*` proved by `native_decide` also show
-the per-theorem auxiliary axiom `<thm>._native.native_decide.ax_1_1`. -/
+`propext`, `Quot.sound`, `Classical.choice` (some use none). -/
 
 -- Socket ownership, timeval, accept
 #print axioms Flare.L2.Socket.close_idempotent
 #print axioms Flare.L2.Socket.fd_closed_once
-#print axioms Flare.L2.Socket.sched_patch_closes_once
 #print axioms Flare.L2.Socket.timeval_exact
 #print axioms Flare.L2.Socket.timeval_fits
 #print axioms Flare.L2.Socket.accept_nodelay_safe
@@ -19,6 +16,7 @@ the per-theorem auxiliary axiom `<thm>._native.native_decide.ax_1_1`. -/
 #print axioms Flare.L2.WriteLoop.udsWriteAll_eq
 #print axioms Flare.L2.WriteLoop.readExact_terminates
 #print axioms Flare.L2.WriteLoop.writevAll_strong
+#print axioms Flare.L2.WriteLoop.writevAll_done_complete
 -- BufReader
 #print axioms Flare.L2.BufReader.consume_view
 #print axioms Flare.L2.BufReader.readExact_correct
@@ -43,7 +41,6 @@ the per-theorem auxiliary axiom `<thm>._native.native_decide.ax_1_1`. -/
 #print axioms Flare.L2.IoUring.pbufIdx_wrap
 #print axioms Flare.L2.IoUring.pbuf_add_preserves_tail
 -- UringReactor wakeup
-#print axioms Flare.L2.UringWakeup.pollWith_inv
 #print axioms Flare.L2.UringWakeup.poll_inv
 #print axioms Flare.L2.UringWakeup.poll_never_blocks_unarmed
 -- Timer wheel
@@ -58,8 +55,6 @@ the per-theorem auxiliary axiom `<thm>._native.native_decide.ax_1_1`. -/
 #print axioms Flare.L2.TimerWheel.cancel_never_fires
 #print axioms Flare.L2.TimerWheel.run_nodup
 #print axioms Flare.L2.TimerWheel.nextFire_lower_bound
-#print axioms Flare.L2.TimerWheel.nextFire_eq_old_no_overflow
-#print axioms Flare.L2.TimerWheel.nextFireOld_lower_bound_no_overflow
 -- Handoff queue
 #print axioms Flare.L2.Handoff.push_refines
 #print axioms Flare.L2.Handoff.pop_refines
@@ -75,16 +70,15 @@ the per-theorem auxiliary axiom `<thm>._native.native_decide.ax_1_1`. -/
 #print axioms Flare.L2.FrameMux.routeAll_eq
 #print axioms Flare.L2.FrameMux.nextId_injective
 #print axioms Flare.L2.FrameMux.feedM_error_stuck
+#print axioms Flare.L2.FrameMux.feedM_no_duplicates
 -- UDP recvfrom, UDS sockaddr_un
 #print axioms Flare.L2.Udp.impl_addr6
 #print axioms Flare.L2.Udp.addr4_ok
 #print axioms Flare.L2.Uds.fill_len_le
 #print axioms Flare.L2.Uds.readPath_fill
-#print axioms Flare.L2.Uds.readPathOld_fill_iff_ascii
 -- DnsCache
 #print axioms Flare.L2.DnsCache.store_size_bound
 #print axioms Flare.L2.DnsCache.store_hits_within_ttl
-#print axioms Flare.L2.DnsCache.huge_ttl_expiry_wraps
 -- BufferPool
 #print axioms Flare.L2.BufferPool.classIndex_fits
 #print axioms Flare.L2.BufferPool.classIndex_least
@@ -93,45 +87,9 @@ the per-theorem auxiliary axiom `<thm>._native.native_decide.ax_1_1`. -/
 -- Blocking pool cap
 #print axioms Flare.L2.Blocking.paired_cap_invariant
 #print axioms Flare.L2.Blocking.cap_invariant
--- Bugs: counterexamples and fixes
-#print axioms Flare.Bugs.NET_01.recvFrom_ipv6_wrong_sender
-#print axioms Flare.Bugs.NET_01.recvFromFixed_correct
-#print axioms Flare.Bugs.NET_02.writeAll_livelock
-#print axioms Flare.Bugs.NET_02.writeAllFixed_terminates
-#print axioms Flare.Bugs.NET_02.writeAll_zero_raises
-#print axioms Flare.Bugs.NET_03.huge_ttl_never_hits
-#print axioms Flare.Bugs.NET_03.huge_ttl_trace
-#print axioms Flare.Bugs.NET_03.store_exceeds_max_at_INT_MAX
-#print axioms Flare.Bugs.NET_03.storeFixed_hits_within_ttl
-#print axioms Flare.Bugs.NET_03.storeFixed_size_bound
-#print axioms Flare.Bugs.NET_04.feed_after_error_duplicates
-#print axioms Flare.Bugs.NET_04.feedFixed_no_duplicates
-#print axioms Flare.Bugs.NET_05.accept_leaks_on_decode_error
-#print axioms Flare.Bugs.NET_05.accept_spec
-#print axioms Flare.Bugs.NET_05.accept_closes_on_decode_error
-#print axioms Flare.Bugs.NET_05.accept_agrees
-#print axioms Flare.Bugs.NET_06.decode_encode_not_id
-#print axioms Flare.Bugs.NET_06.decodeFixed_encode
-#print axioms Flare.Bugs.RT_01.nextFire_not_lower_bound
-#print axioms Flare.Bugs.RT_01.nextFire_ok_without_overflow
-#print axioms Flare.Bugs.RT_01.nextFire_lower_bound
-#print axioms Flare.Bugs.RT_02.writev_silent_short_write
-#print axioms Flare.Bugs.RT_02.writevAll_spec
-#print axioms Flare.Bugs.RT_03.poll_blocks_unarmed
-#print axioms Flare.Bugs.RT_03.poll_never_blocks_unarmed
-#print axioms Flare.Bugs.RT_04.peek_returns_full_peer
-#print axioms Flare.Bugs.RT_04.peek_below_capacity
-#print axioms Flare.Bugs.RT_05.acquire_after_shrunk_release
-#print axioms Flare.Bugs.RT_05.release_preserves_capacity
-#print axioms Flare.Bugs.RT_06.persistentFailOpen_unbounded
-#print axioms Flare.Bugs.RT_06.fixed_cap
-#print axioms Flare.Bugs.RT_07.failOpen_breaks_cap
-#print axioms Flare.Bugs.RT_07.cap_invariant
-#print axioms Flare.Bugs.RT_08.linux_failure_crashes
-#print axioms Flare.Bugs.RT_08.macos_failure_fails_open
-#print axioms Flare.Bugs.RT_08.never_crashes
-#print axioms Flare.Bugs.RT_08.agrees_with_old
-#print axioms Flare.Bugs.RT_08.failure_fails_closed
+#print axioms Flare.L2.Blocking.SemOpen.never_crashes
+#print axioms Flare.L2.Blocking.SemOpen.failure_fails_closed
+-- Fixed findings
 
 -- Happy Eyeballs ordering, hostname validation, UDS bind takeover
 #print axioms Flare.L2.HappyEyeballs.order_perm
@@ -140,22 +98,11 @@ the per-theorem auxiliary axiom `<thm>._native.native_decide.ax_1_1`. -/
 #print axioms Flare.L2.HappyEyeballs.order_head
 #print axioms Flare.L2.HappyEyeballs.order_get_even_v4first
 #print axioms Flare.L2.Hostname.validate_sound
-#print axioms Flare.L2.Hostname.validateOld_gap
 #print axioms Flare.L2.Hostname.validate_iff
 #print axioms Flare.L2.Hostname.tooLongTail_wf
-#print axioms Flare.L2.UdsListener.prep_agrees
 #print axioms Flare.L2.UdsListener.prep_safe
 #print axioms Flare.L2.UdsListener.deinit_spec
 #print axioms Flare.L2.UdsListener.deinit_race
-#print axioms Flare.Bugs.NET_07.takeover_unlinks_live
-#print axioms Flare.Bugs.NET_07.prep_safe
-#print axioms Flare.Bugs.NET_08.valid_but_rejected
-#print axioms Flare.Bugs.NET_08.validateFixed_spec
-#print axioms Flare.Bugs.NET_09.message_not_wf
-#print axioms Flare.Bugs.NET_09.fixed_wf
-#print axioms Flare.Bugs.NET_10.order_breaks_spec
-#print axioms Flare.Bugs.NET_10.order_spec
-#print axioms Flare.Bugs.NET_10.order_fixes_input
 
 -- UDP batch layout / cmsg walk; timer wheel jump order and UInt64 clock
 #print axioms Flare.L2.UdpBatch.layout_constants
@@ -172,6 +119,3 @@ the per-theorem auxiliary axiom `<thm>._native.native_decide.ax_1_1`. -/
 #print axioms Flare.L2.TimerWheel.nextFire64_wraps
 #print axioms Flare.L2.TimerWheel.run64_eq
 #print axioms Flare.L2.TimerWheel.run64_init
-#print axioms Flare.Bugs.NET_11.allocSize_wraps
-#print axioms Flare.Bugs.NET_11.covers_fixed
-#print axioms Flare.Bugs.NET_11.wrap_refused

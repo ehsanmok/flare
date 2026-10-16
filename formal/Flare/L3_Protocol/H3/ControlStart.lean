@@ -2,52 +2,31 @@ import Flare.L3_Protocol.H3.Control
 import Flare.L3_Protocol.Quic.Streams
 
 /-!
-# H3-07: the server never opens its HTTP/3 control stream
+# The server's HTTP/3 control stream (RFC 9114 §6.2.1)
 
-flare/quic/server.mojo:2210-2433 @59bda50 (`_drain_1rtt_coalesced`): the
-1-RTT egress writes ACK / HANDSHAKE_DONE / MAX_DATA / MAX_STREAMS /
-NEW_CONNECTION_ID and one STREAM frame sequence per entry of
-`http3_response_egress`, which is keyed by the client's request stream id.
-No server-initiated unidirectional stream is ever opened:
-`Http3Connection.emit_initial_settings` (flare/http3/server.mojo:1230-1275)
-is called nowhere under `flare/` (only from tests/h3/test_h3_uni_streams.mojo
-and examples/advanced/http3_server.mojo:167, which prints its length), and
-`control_stream_id` (flare/http3/server.mojo:588) stays -1. The docstring of
-`emit_initial_settings` ("The reactor opens a local control uni-stream via
-QUIC and emits these bytes") describes code that does not exist.
+"Each side MUST initiate a single control stream at the beginning of the
+connection and send its SETTINGS frame as the first frame on this stream."
 
-Spec clause: RFC 9114 §6.2.1: "Each side MUST initiate a single control
-stream at the beginning of the connection and send its SETTINGS frame as the
-first frame on this stream."
-
-What goes wrong: the client never learns the server's
-SETTINGS_MAX_FIELD_SECTION_SIZE, QPACK limits or ENABLE_CONNECT_PROTOCOL; a
-client that waits for the peer's SETTINGS before using extensions never gets
-them, and a strict client may close with H3_MISSING_SETTINGS.
-
-Model: the server's outbound stream set after the handshake and the first
+`Http3Connection.take_control_stream_start()` hands over the bytes of
+`emit_initial_settings()` once, and `QuicListener._drain_1rtt_coalesced`
+sends them as stream 3 at offset 0 with the first 1-RTT flight (H3-07). The
+model is the server's outbound stream set after the handshake and the first
 request/response, as `(stream id, bytes from offset 0)` pairs.
-Counterexample (`implOld_no_control`): for any set of client bidirectional
-request streams, no server-initiated uni stream exists at all (observed
-over loopback: the server sends only on stream 0).
-Fix (`implOut`): with the first 1-RTT flight, send stream 3 carrying
-`emit_initial_settings()`; `fixed_spec` proves this is the single control
-stream and that it starts with type 0x00 and a decodable SETTINGS frame.
 
-Status: resolved. `implOldOut` is the pre-fix outbound set (the counterexample
-is about it); the shipped `implOut` meets RFC 9114 §6.2.1 (`fixed_spec`).
-`Http3Connection.take_control_stream_start()` hands over the bytes once and
-`QuicListener._drain_1rtt_coalesced` sends them as stream 3 at offset 0 with
-the first 1-RTT flight. Regression tests: tests/h3/test_h3_uni_streams.mojo
-`test_take_control_stream_start_is_once_and_decodes_at_the_peer`,
-tests/h3/test_h3_client_e2e.mojo
-`test_server_opens_its_control_stream_with_settings`.
+Results:
+* `emit_control_start`: the stream opens with type 0x00 and a SETTINGS frame
+  that decodes back to exactly the configured settings;
+* `implOut_spec`: for any set of client request streams the outbound set
+  has exactly one server-initiated uni stream opening as a control stream;
+* `control_stream_sendable`, `control_classified`: stream 3 is a server
+  uni stream the server may send on, and the peer's classifier
+  (`Control.classify`) takes it as the control stream.
 -/
-namespace Flare.Bugs.H3_07
+namespace Flare.L3.H3.ControlStart
 open Flare.L3.H3
 
-/-- mirrors flare/http3/server.mojo:136-175 @59bda50 (the `Http3Config`
-fields read by `emit_initial_settings`) -/
+/-- The `Http3Config` fields read by `emit_initial_settings`.
+mirrors flare/http3/server.mojo#Http3Config sha=556adbd318b0 at=ea1b9282 -/
 structure Config where
   maxFieldSection : Nat := 65536
   qpackCap : Nat := 0
@@ -58,12 +37,12 @@ structure Config where
 def Config.Valid (c : Config) : Prop :=
   c.maxFieldSection < 2 ^ 62 ∧ c.qpackCap < 2 ^ 62 ∧ c.qpackBlocked < 2 ^ 62
 
-/-- mirrors flare/http3/server.mojo:1332-1357 (fixed, H3-07) -/
+/-- mirrors flare/http3/server.mojo#Http3Connection.emit_initial_settings sha=59a32f76e580 at=ea1b9282 -/
 def settingsList (c : Config) : List (Nat × Nat) :=
   [(0x06, c.maxFieldSection), (0x01, c.qpackCap), (0x07, c.qpackBlocked)] ++
     (if c.connect then [(0x08, 1)] else [])
 
-/-- mirrors flare/http3/server.mojo:1316-1361 (fixed, H3-07) -/
+/-- mirrors flare/http3/server.mojo#Http3Connection.emit_initial_settings sha=59a32f76e580 at=ea1b9282 -/
 def emitInitialSettings (enc : Nat → Bytes) (c : Config) : Bytes :=
   enc 0x00 ++ encodeFrame enc 0x04 (encodeSettings enc (settingsList c))
 
@@ -89,43 +68,22 @@ def Spec (out : Out) : Prop :=
 /-- Request streams opened by the client are client-initiated bidirectional. -/
 def ClientBidi (reqs : List Nat) : Prop := ∀ s ∈ reqs, s % 4 = 0
 
-/-- PRE-FIX outbound set (flare/quic/server.mojo:2210-2433 @59bda50,
-`_drain_1rtt_coalesced`: STREAM frames come only from `http3_response_egress`,
-keyed by request stream). Kept so the counterexample stays checkable. -/
-def implOldOut (resp : Nat → Bytes) (reqs : List Nat) : Out :=
-  reqs.map fun s => (s, resp s)
-
-/-- The shipped outbound set: stream 3 with the bytes of
-`Http3Connection.take_control_stream_start()` (= `emit_initial_settings()`),
-appended in `_drain_1rtt_coalesced` to the first 1-RTT flight, next to
-HANDSHAKE_DONE.
-mirrors flare/quic/server.mojo:2288-2310 and flare/http3/server.mojo:1363-1380
-(fixed, H3-07) -/
+/-- The outbound set: stream 3 with the bytes of `take_control_stream_start()`,
+appended to the first 1-RTT flight next to HANDSHAKE_DONE, then one response
+stream per request.
+mirrors flare/quic/server.mojo#QuicListener._drain_1rtt_coalesced sha=febb6014ce9a at=74fe61fd, flare/http3/server.mojo#Http3Connection.take_control_stream_start sha=309466764d0e at=74fe61fd (fixed, H3-07) -/
 def implOut (enc : Nat → Bytes) (c : Config) (resp : Nat → Bytes) (reqs : List Nat) : Out :=
-  (3, emitInitialSettings enc c) :: implOldOut resp reqs
+  (3, emitInitialSettings enc c) :: reqs.map fun s => (s, resp s)
 
-theorem implOldOut_not_serverUni (resp : Nat → Bytes) (reqs : List Nat) (h : ClientBidi reqs) :
-    ∀ p ∈ implOldOut resp reqs, serverUni p.1 = false := by
+theorem responses_not_serverUni (resp : Nat → Bytes) (reqs : List Nat) (h : ClientBidi reqs) :
+    ∀ p ∈ reqs.map (fun s => (s, resp s)), serverUni p.1 = false := by
   intro p hp
-  simp only [implOldOut, List.mem_map] at hp
+  simp only [List.mem_map] at hp
   obtain ⟨s, hs, rfl⟩ := hp
   have := h s hs
   simp only [serverUni, Flare.L3.Quic.Streams.serverInit, Bool.and_eq_false_iff,
     decide_eq_false_iff_not]
   left; omega
-
-/-- **Counterexample**: whatever the client requests, the server's outbound
-streams contain no control stream. -/
-theorem implOld_no_control (resp : Nat → Bytes) (reqs : List Nat) (h : ClientBidi reqs) :
-    ¬ Spec (implOldOut resp reqs) := by
-  rintro ⟨⟨p, hp, hu, _⟩, _⟩
-  rw [implOldOut_not_serverUni resp reqs h p hp] at hu
-  cases hu
-
-/-- The observed run: one GET on stream 0; the server sends only on stream 0. -/
-theorem implOld_observed (resp : Nat → Bytes) :
-    (implOldOut resp [0]).map (·.1) = [0] ∧ ¬ Spec (implOldOut resp [0]) :=
-  ⟨rfl, implOld_no_control resp [0] (by simp [ClientBidi])⟩
 
 theorem enc_len (enc : Nat → Bytes) (henc : VarintCodec enc) (v : Nat) (hv : v < 2 ^ 62) :
     (enc v).length ≤ 8 := by
@@ -165,7 +123,7 @@ theorem settingsList_valid (c : Config) (hc : c.Valid) :
 theorem settingsList_len (c : Config) : (settingsList c).length ≤ 4 := by
   unfold settingsList; split <;> simp
 
-/-- The fixed stream opens with 0x00 and a SETTINGS frame that decodes back to
+/-- The control stream opens with 0x00 and a SETTINGS frame that decodes back to
 exactly the configured settings. -/
 theorem emit_control_start (enc : Nat → Bytes) (henc : VarintCodec enc)
     (hpos : ∀ v, 1 ≤ (enc v).length) (c : Config) (hc : c.Valid) :
@@ -190,12 +148,13 @@ theorem emit_controlStart (enc : Nat → Bytes) (henc : VarintCodec enc)
   obtain ⟨h1, h2, h3⟩ := emit_control_start enc henc hpos c hc
   exact ⟨_, _, _, h1, h2, h3⟩
 
-/-- **Fix**: the fixed outbound set meets RFC 9114 §6.2.1. -/
-theorem fixed_spec (enc : Nat → Bytes) (henc : VarintCodec enc)
+/-- **RFC 9114 §6.2.1** (H3-07): the server's outbound set has exactly one
+control stream, and it starts with a decodable SETTINGS frame. -/
+theorem implOut_spec (enc : Nat → Bytes) (henc : VarintCodec enc)
     (hpos : ∀ v, 1 ≤ (enc v).length) (c : Config) (hc : c.Valid)
     (resp : Nat → Bytes) (reqs : List Nat) (h : ClientBidi reqs) :
     Spec (implOut enc c resp reqs) := by
-  have hno := implOldOut_not_serverUni resp reqs h
+  have hno := responses_not_serverUni resp reqs h
   have only3 : ∀ p ∈ implOut enc c resp reqs, serverUni p.1 = true → p.1 = 3 := by
     intro p hp hu
     simp only [implOut, List.mem_cons] at hp
@@ -207,16 +166,15 @@ theorem fixed_spec (enc : Nat → Bytes) (henc : VarintCodec enc)
   intro p hp q hq hup huq _ _
   rw [only3 p hp hup, only3 q hq huq]
 
-/-- Stream 3 is a server-initiated uni stream the server may send on
-(reusing the stream-state model of `Quic/Streams.lean`). -/
-theorem fixed_stream_sendable :
+/-- Stream 3 is a server-initiated uni stream the server may send on. -/
+theorem control_stream_sendable :
     serverUni 3 = true ∧ Flare.L3.Quic.Streams.hasSend .server 3 = true ∧
       Flare.L3.Quic.Streams.hasRecv .server 3 = false := by decide
 
-/-- The receiving side's uni-stream classifier (`Control.classify`) treats the
-fixed stream's type byte 0x00 on stream 3 as the peer's control stream. -/
-theorem fixed_classified :
-    Control.classify Control.Fixes.all {} 0x00 3 = .ok ({ ctrl := some 3 }, .control) := by
+/-- The receiving side's uni-stream classifier treats type 0x00 on stream 3
+as the peer's control stream. -/
+theorem control_classified :
+    Control.classify {} 0x00 3 = .ok ({ ctrl := some 3 }, .control) := by
   simp [Control.classify]
 
-end Flare.Bugs.H3_07
+end Flare.L3.H3.ControlStart

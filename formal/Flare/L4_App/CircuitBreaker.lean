@@ -14,10 +14,8 @@ bookkeeping), with any number of requests in flight.
 
 Granularity: arrival and completion are each one atomic step. This is
 coarser than the Mojo code (each is several separate atomic loads/stores),
-so every trace of the model is a trace of the code; counterexamples found
-here are real. Properties proved for the *fixed* model assume the fix makes
-the entry atomic (compare-and-swap on the OPEN -> HALF_OPEN transition), as
-the repro's fix text says.
+so every trace of the model is a trace of the code, given that the entry's
+OPEN -> HALF_OPEN transition is a compare-and-swap (APP-42).
 
 Time is a ghost-free `Int` clock (ns, `perf_counter_ns`); `cooldown` is
 `cooldown_ms * 1_000_000` (no wrap for `cooldown_ms < 9.2·10^12`).
@@ -29,21 +27,17 @@ one probe is let through (half-open); success closes, failure re-opens.
 Ghost fields: `openedAt` (true time the breaker last (re)opened) and
 `halfAdmits` (admissions since the breaker last entered half-open).
 
-`stepG fix41 fix42` is the transliteration, with two switches for the two
-minimal fixes (`false false` is the pre-fix code at 59bda50, `stepOld`):
-* `fix41`: stamp opened-at with the completion time, not the arrival time
-  (APP-41, fixed: the shipped code, `stepShipped`);
-* `fix42`: fast-fail arrivals while half-open, claiming OPEN → HALF_OPEN with a
-  compare-and-swap (APP-42, fixed: the shipped code, `stepShipped`).
+`step` is the transliteration of the shipped code: opened-at is stamped
+with the completion time (APP-41) and arrivals fast-fail while half-open,
+the OPEN -> HALF_OPEN claim being a compare-and-swap (APP-42).
 
-Results:
-* `step_counts_inv` (impl, general): `fails ≥ 0`, closed → `fails < thr`,
-  open/half-open → `fails ≥ thr` in every reachable state.
-* `step_success_closes`, `step_failure_reopens`, `step_open_rejects`
-  (impl, general): the sequential transition rules.
-* `Flare.Bugs.APP_41`, `Flare.Bugs.APP_42`: counterexample traces for the
-  cooldown and single-probe clauses, and proofs that the fixed models meet
-  them.
+Results, for every threshold and cooldown:
+* `step_counts_inv`: `fails ≥ 0`, closed → `fails < thr`, open/half-open →
+  `fails ≥ thr` in every reachable state.
+* `step_success_closes`, `step_failure_reopens`, `step_open_rejects`: the
+  sequential transition rules.
+* `cooldown_respected`, `single_probe`: the cooldown and single-probe
+  clauses.
 -/
 namespace Flare.L4.CircuitBreaker
 
@@ -78,64 +72,64 @@ def initS : S := ⟨⟨.closed, 0, 0⟩, [], 0, 0, 0⟩
 
 /-- Entry check of `serve` (threshold > 0). A fast-fail (503) leaves the
 cell untouched; an admission adds the request to the in-flight set.
-mirrors flare/http/reliability.mojo:471-491 (fixed, APP-41, APP-42) -/
-def arrive (fix42 : Bool) (cooldown : Int) (s : S) (id : Nat) (now : Int) : S :=
+mirrors flare/http/reliability.mojo#CircuitBreaker.serve sha=d30e4014ab39 at=664a9c00 (fixed, APP-41, APP-42) -/
+def arrive (cooldown : Int) (s : S) (id : Nat) (now : Int) : S :=
   let s := { s with clock := now }
   if s.cell.st = .opn ∧ now - s.cell.opened < cooldown then s
-  else if fix42 ∧ s.cell.st = .half then s
+  else if s.cell.st = .half then s
   else if s.cell.st = .opn then
     { s with cell := { s.cell with st := .half }, halfAdmits := 1,
              inflight := s.inflight ++ [⟨id, now⟩] }
-  else if s.cell.st = .half then
-    { s with halfAdmits := s.halfAdmits + 1, inflight := s.inflight ++ [⟨id, now⟩] }
   else { s with inflight := s.inflight ++ [⟨id, now⟩] }
 
 /-- `_record_failure(now)` / `_record_success()` after the inner call;
-`start` is the `now` read on entry (:471), `now` the completion time. The
-shipped code (`fix41`) passes `perf_counter_ns()` read at the completion to
-`_record_failure` (:498, :503); the pre-fix code passed `start`.
-mirrors flare/http/reliability.mojo:457-462, 492-504 (fixed, APP-41) -/
-def finish (fix41 : Bool) (thr : Int) (s : S) (r : Req) (now : Int) (failed : Bool) : S :=
+`now` is `perf_counter_ns()` read at the completion (:498, :503).
+mirrors flare/http/reliability.mojo#CircuitBreaker._record_failure+CircuitBreaker.serve sha=22216d500479 at=664a9c00 (fixed, APP-41) -/
+def finish (thr : Int) (s : S) (r : Req) (now : Int) (failed : Bool) : S :=
   let s := { s with clock := now, inflight := s.inflight.erase r }
   if failed then
     let f := s.cell.fails + 1
     if f ≥ thr then
-      { s with cell := ⟨.opn, f, if fix41 then now else r.start⟩, openedAt := now }
+      { s with cell := ⟨.opn, f, now⟩, openedAt := now }
     else { s with cell := { s.cell with fails := f } }
   else { s with cell := { s.cell with fails := 0, st := .closed } }
 
 /-- Executable step: arrivals need a fresh id, completions an in-flight
 id; the clock is monotone (`Flare.Assumptions.MonotoneClock`).
-mirrors flare/http/reliability.mojo:471-504 (fixed, APP-41, APP-42) -/
-def stepG (fix41 fix42 : Bool) (thr cooldown : Int) (s : S) : Lbl → Option S
+mirrors flare/http/reliability.mojo#CircuitBreaker.serve sha=d30e4014ab39 at=664a9c00 (fixed, APP-41, APP-42) -/
+def step (thr cooldown : Int) (s : S) : Lbl → Option S
   | .arrive id now =>
     if s.clock ≤ now ∧ (s.inflight.all fun r => r.id != id) then
-      some (arrive fix42 cooldown s id now)
+      some (arrive cooldown s id now)
     else none
   | .finish id now failed =>
     if s.clock ≤ now then
       match s.inflight.find? (fun r => r.id == id) with
-      | some r => some (finish fix41 thr s r now failed)
+      | some r => some (finish thr s r now failed)
       | none => none
     else none
 
-/-- The pre-fix code (59bda50), before APP-41 was fixed. -/
-def stepOld (thr cooldown : Int) : S → Lbl → Option S := stepG false false thr cooldown
+def lts (thr cooldown : Int) : LTS S Lbl :=
+  LTS.ofFn (fun s => s = initS) (step thr cooldown)
 
-/-- The shipped code: APP-41 is fixed (the opening is stamped with the
-completion time) and so is APP-42 (one probe while half-open). -/
-def stepShipped (thr cooldown : Int) : S → Lbl → Option S := stepG true true thr cooldown
+/-- Spec clause (cooldown): every OPEN -> HALF_OPEN transition is an
+arrival at least `cooldown` after the breaker (re)opened. -/
+def CooldownOK (M : LTS S Lbl) (cd : Int) : Prop :=
+  ∀ s l s', M.Reachable s → M.step s l s' → s.cell.st = .opn → s'.cell.st = .half →
+    ∃ id now, l = .arrive id now ∧ cd ≤ now - s.openedAt
 
-def lts (fix41 fix42 : Bool) (thr cooldown : Int) : LTS S Lbl :=
-  LTS.ofFn (fun s => s = initS) (stepG fix41 fix42 thr cooldown)
+/-- Spec clause (single probe): while half-open at most one request has
+been admitted since the breaker entered half-open. -/
+def SingleProbe (M : LTS S Lbl) : Prop :=
+  ∀ s, M.Reachable s → s.cell.st = .half → s.halfAdmits ≤ 1
 
 /-- Failure-count invariant. -/
 def CountsInv (thr : Int) (s : S) : Prop :=
   0 ≤ s.cell.fails ∧ (s.cell.st = .closed → s.cell.fails < thr) ∧
   (s.cell.st ≠ .closed → thr ≤ s.cell.fails)
 
-theorem counts_inductive (f41 f42 : Bool) (thr cd : Int) (hthr : 0 < thr) :
-    (lts f41 f42 thr cd).Inductive (CountsInv thr) where
+theorem counts_inductive (thr cd : Int) (hthr : 0 < thr) :
+    (lts thr cd).Inductive (CountsInv thr) where
   init := by
     intro s hs; subst hs; simp [CountsInv, initS]; omega
   step := by
@@ -144,7 +138,7 @@ theorem counts_inductive (f41 f42 : Bool) (thr cd : Int) (hthr : 0 < thr) :
     simp only [lts, LTS.ofFn] at hstep
     cases l with
     | arrive id now =>
-      simp only [stepG] at hstep
+      simp only [step] at hstep
       split at hstep
       · injection hstep with hstep; subst hstep
         simp only [arrive]
@@ -154,10 +148,10 @@ theorem counts_inductive (f41 f42 : Bool) (thr cd : Int) (hthr : 0 < thr) :
           · exact ⟨h0, h1, h2⟩
           · split
             · next hst => refine ⟨h0, by simp, fun _ => h2 (by rw [hst]; simp)⟩
-            · split <;> exact ⟨h0, h1, h2⟩
+            · exact ⟨h0, h1, h2⟩
       · cases hstep
     | finish id now failed =>
-      simp only [stepG] at hstep
+      simp only [step] at hstep
       split at hstep
       · split at hstep
         · next r _ =>
@@ -173,75 +167,150 @@ theorem counts_inductive (f41 f42 : Bool) (thr cd : Int) (hthr : 0 < thr) :
         · cases hstep
       · cases hstep
 
-/-- Every reachable state of the pre-fix code satisfies the failure-count
-bounds. -/
+/-- Every reachable state satisfies the failure-count bounds. -/
 theorem step_counts_inv (thr cd : Int) (hthr : 0 < thr) (s : S)
-    (h : (lts false false thr cd).Reachable s) : CountsInv thr s :=
-  (counts_inductive false false thr cd hthr).reachable s h
-
-/-- Every reachable state of the shipped code satisfies the failure-count
-bounds. -/
-theorem step_counts_inv_shipped (thr cd : Int) (hthr : 0 < thr) (s : S)
-    (h : (lts true true thr cd).Reachable s) : CountsInv thr s :=
-  (counts_inductive true true thr cd hthr).reachable s h
+    (h : (lts thr cd).Reachable s) : CountsInv thr s :=
+  (counts_inductive thr cd hthr).reachable s h
 
 /-- While open and within the cooldown, every arrival fast-fails: the cell
 and the in-flight set are unchanged. -/
-theorem step_open_rejects (f42 : Bool) (cd : Int) (s : S) (id : Nat) (now : Int)
+theorem step_open_rejects (cd : Int) (s : S) (id : Nat) (now : Int)
     (ho : s.cell.st = .opn) (hc : now - s.cell.opened < cd) :
-    arrive f42 cd s id now = { s with clock := now } := by
+    arrive cd s id now = { s with clock := now } := by
   simp [arrive, ho, hc]
 
 /-- A success always closes the breaker and clears the failure count
 (in particular a successful half-open probe closes it). -/
-theorem step_success_closes (f41 : Bool) (thr : Int) (s : S) (r : Req) (now : Int) :
-    (finish f41 thr s r now false).cell.st = .closed ∧
-    (finish f41 thr s r now false).cell.fails = 0 := by
+theorem step_success_closes (thr : Int) (s : S) (r : Req) (now : Int) :
+    (finish thr s r now false).cell.st = .closed ∧
+    (finish thr s r now false).cell.fails = 0 := by
   simp [finish]
 
 /-- A failure while half-open (or open) re-opens the breaker, given the
 count invariant. -/
-theorem step_failure_reopens (f41 : Bool) (thr : Int) (s : S) (r : Req) (now : Int)
+theorem step_failure_reopens (thr : Int) (s : S) (r : Req) (now : Int)
     (hinv : CountsInv thr s) (hst : s.cell.st ≠ .closed) :
-    (finish f41 thr s r now true).cell.st = .opn := by
+    (finish thr s r now true).cell.st = .opn := by
   have := hinv.2.2 hst
   simp only [finish]
   rw [if_pos trivial, if_pos (show s.cell.fails + 1 ≥ thr by omega)]
 
-end Flare.L4.CircuitBreaker
+/-! ## The cooldown clause (APP-41) -/
 
-namespace Flare.L4.CircuitBreaker
+/-- Ghost invariant: while open, the stored opened-at equals the true
+opening time. -/
+def StampInv (s : S) : Prop := s.cell.st = .opn → s.cell.opened = s.openedAt
 
-/-- Run a list of labels with the executable step function. -/
-def runAll (f41 f42 : Bool) (thr cd : Int) : S → List Lbl → Option S
-  | s, [] => some s
-  | s, l :: ls => match stepG f41 f42 thr cd s l with
-    | some s' => runAll f41 f42 thr cd s' ls
-    | none => none
+theorem stamp_inductive (thr cd : Int) : (lts thr cd).Inductive StampInv where
+  init := by intro s hs; subst hs; simp [StampInv, initS]
+  step := by
+    intro s l s' hinv hstep
+    simp only [lts, LTS.ofFn] at hstep
+    cases l with
+    | arrive id now =>
+      simp only [step] at hstep
+      split at hstep
+      · injection hstep with hstep; subst hstep
+        simp only [arrive]
+        split
+        · exact hinv
+        · split
+          · exact hinv
+          · split
+            · intro h; simp at h
+            · exact hinv
+      · cases hstep
+    | finish id now failed =>
+      simp only [step] at hstep
+      split at hstep
+      · split at hstep
+        · injection hstep with hstep; subst hstep
+          simp only [finish]
+          split
+          · split
+            · intro _; simp
+            · exact hinv
+          · intro h; simp at h
+        · cases hstep
+      · cases hstep
 
-theorem runAll_run (f41 f42 : Bool) (thr cd : Int) :
-    ∀ (ls : List Lbl) (s s' : S), runAll f41 f42 thr cd s ls = some s' →
-      (lts f41 f42 thr cd).Run s ls s'
-  | [], s, s', h => by simp [runAll] at h; subst h; exact .nil _
-  | l :: ls, s, s', h => by
-    simp only [runAll] at h
-    split at h
-    · next s1 h1 => exact .cons h1 (runAll_run f41 f42 thr cd ls s1 s' h)
-    · cases h
+/-- `finish` never produces HALF_OPEN from OPEN. -/
+theorem finish_not_half (thr : Int) (s : S) (r : Req) (now : Int) (b : Bool)
+    (ho : s.cell.st = .opn) : (finish thr s r now b).cell.st ≠ .half := by
+  simp only [finish]
+  split
+  · split
+    · simp
+    · simp [ho]
+  · simp
 
-theorem reachable_of_runAll (f41 f42 : Bool) (thr cd : Int) (ls : List Lbl) (s : S)
-    (h : runAll f41 f42 thr cd initS ls = some s) : (lts f41 f42 thr cd).Reachable s :=
-  ⟨initS, ls, rfl, runAll_run f41 f42 thr cd ls initS s h⟩
+/-- The breaker moves to half-open only on an arrival at least `cooldown`
+after it (re)opened. -/
+theorem cooldown_respected (thr cd : Int) : CooldownOK (lts thr cd) cd := by
+  intro s l s' hr hstep ho hh
+  have hinv := (stamp_inductive thr cd).reachable s hr
+  simp only [lts, LTS.ofFn] at hstep
+  cases l with
+  | arrive id now =>
+    refine ⟨id, now, rfl, ?_⟩
+    simp only [step] at hstep
+    split at hstep
+    · injection hstep with hstep; subst hstep
+      simp only [arrive] at hh
+      by_cases hc : now - s.cell.opened < cd
+      · simp [ho, hc] at hh
+      · have := hinv ho; omega
+    · cases hstep
+  | finish id now failed =>
+    exfalso
+    simp only [step] at hstep
+    split at hstep
+    · split at hstep
+      · next r _ =>
+        injection hstep with hstep; subst hstep
+        exact finish_not_half thr s r now failed ho hh
+      · cases hstep
+    · cases hstep
 
-/-- Spec clause (cooldown): every OPEN -> HALF_OPEN transition is an
-arrival at least `cooldown` after the breaker (re)opened. -/
-def CooldownOK (M : LTS S Lbl) (cd : Int) : Prop :=
-  ∀ s l s', M.Reachable s → M.step s l s' → s.cell.st = .opn → s'.cell.st = .half →
-    ∃ id now, l = .arrive id now ∧ cd ≤ now - s.openedAt
+/-! ## The single-probe clause (APP-42) -/
 
-/-- Spec clause (single probe): while half-open at most one request has
-been admitted since the breaker entered half-open. -/
-def SingleProbe (M : LTS S Lbl) : Prop :=
-  ∀ s, M.Reachable s → s.cell.st = .half → s.halfAdmits ≤ 1
+def HalfInv (s : S) : Prop := s.cell.st = .half → s.halfAdmits ≤ 1
+
+theorem half_inductive (thr cd : Int) : (lts thr cd).Inductive HalfInv where
+  init := by intro s hs; subst hs; simp [HalfInv, initS]
+  step := by
+    intro s l s' hinv hstep
+    simp only [lts, LTS.ofFn] at hstep
+    cases l with
+    | arrive id now =>
+      simp only [step] at hstep
+      split at hstep
+      · injection hstep with hstep; subst hstep
+        simp only [arrive]
+        split
+        · exact hinv
+        · split
+          · exact hinv
+          · split
+            · intro _; simp
+            · exact hinv
+      · cases hstep
+    | finish id now failed =>
+      simp only [step] at hstep
+      split at hstep
+      · split at hstep
+        · injection hstep with hstep; subst hstep
+          simp only [finish]
+          split
+          · split
+            · intro h; simp at h
+            · exact hinv
+          · intro h; simp at h
+        · cases hstep
+      · cases hstep
+
+/-- While half-open, at most one request has been let through. -/
+theorem single_probe (thr cd : Int) : SingleProbe (lts thr cd) :=
+  fun s hr => (half_inductive thr cd).reachable s hr
 
 end Flare.L4.CircuitBreaker

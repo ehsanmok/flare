@@ -1,10 +1,7 @@
 import Flare.L1_Encoding
 /-! L1 encodings: axiom footprint of the headline theorems. Expected:
-`propext`, `Quot.sound`, `Classical.choice` everywhere outside
-`Flare.Bugs`; bit-level goals use the kernel-checked `bit_blast` macro, not
-`bv_decide`. The concrete traces in `Flare.Bugs.ENC_01/03/04` use
-`native_decide`, reported as a per-theorem auxiliary axiom
-`<thm>._native.native_decide.ax_*`. -/
+`propext`, `Quot.sound`, `Classical.choice`; bit-level goals use the
+kernel-checked `bit_blast` macro, not `bv_decide`. -/
 
 -- Raw buffers, byte order, decimal
 #print axioms Flare.L1.Buf.readBytes_writeBytes
@@ -17,6 +14,8 @@ import Flare.L1_Encoding
 #print axioms Flare.L1.Address.parseSock_render
 #print axioms Flare.L1.IpPredicates.isPrivate_dotted
 #print axioms Flare.L1.IpPredicates.isMulticast_dotted
+#print axioms Flare.L1.IpPredicates.isMulticast6_correct
+#print axioms Flare.L1.IpPredicates.isMulticast6_compressed
 #print axioms Flare.L1.Sockaddr.readPort_fillIn
 #print axioms Flare.L1.Sockaddr.readPort_fillIn6
 #print axioms Flare.L1.Sockaddr.getFamily_eq_kFamily
@@ -28,14 +27,11 @@ import Flare.L1_Encoding
 #print axioms Flare.L1.Utf8.lossy_wf
 #print axioms Flare.L1.Utf8.lossy_of_wf
 -- ByteReader / ByteWriter / ProtoReader
-#print axioms Flare.L1.ByteCursor.guard_iff
-#print axioms Flare.L1.ByteCursor.guard_iff_of_small
 #print axioms Flare.L1.ByteCursor.guardFixed_iff
 #print axioms Flare.L1.ByteCursor.readU16be_write
 #print axioms Flare.L1.ByteCursor.readU32le_write
 #print axioms Flare.L1.ByteCursor.readU64be_write
 #print axioms Flare.L1.ByteCursor.readU64le_write
-#print axioms Flare.L1.ByteCursor.skipOld_inv_of_small
 #print axioms Flare.L1.ByteCursor.skip_inv
 #print axioms Flare.L1.ByteCursor.readBytes_spec
 #print axioms Flare.L1.ByteCursor.readUtf8_wf
@@ -115,7 +111,6 @@ import Flare.L1_Encoding
 #print axioms Flare.L1.CivilTime.civilToUnix64_wraps
 #print axioms Flare.L1.CivilTime.httpdate_exact
 #print axioms Flare.L1.CivilTime.unixToCivil64_eq
-#print axioms Flare.L1.CivilTime.daysFromCivilOld_eq_of_year_nonneg
 #print axioms Flare.L1.CivilTime.parseDigits_four
 -- Protobuf varint
 #print axioms Flare.L1.ProtoVarint.writeVarint_length
@@ -123,15 +118,3 @@ import Flare.L1_Encoding
 #print axioms Flare.L1.ProtoVarint.rawVarint_writeVarint
 #print axioms Flare.L1.ProtoVarint.rawVarint_eleven
 #print axioms Flare.L1.ProtoVarint.tenth_byte_truncates
--- Findings
-#print axioms Flare.Bugs.ENC_01.counterexample
-#print axioms Flare.Bugs.ENC_01.isMulticast6Fixed_correct
-#print axioms Flare.Bugs.ENC_01.isMulticast_v6
-#print axioms Flare.Bugs.ENC_02.counterexample
-#print axioms Flare.Bugs.ENC_02.inverse_counterexample
-#print axioms Flare.Bugs.ENC_02.fixed_spec
-#print axioms Flare.Bugs.ENC_03.counterexample
-#print axioms Flare.Bugs.ENC_03.fixed_preserves_inv
-#print axioms Flare.Bugs.ENC_03.fixed_read_bytes_preserves_inv
-#print axioms Flare.Bugs.ENC_04.counterexample
-#print axioms Flare.Bugs.ENC_04.fixed_preserves_inv

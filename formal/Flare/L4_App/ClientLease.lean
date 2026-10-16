@@ -75,7 +75,7 @@ structure Orc where
 /-- The replay on a fresh connection. A raise anywhere after the dial runs
 `fresh`'s destructor; `release` is preceded by moving the fd out, so a
 raise inside it closes nothing.
-mirrors flare/http/client.mojo:2578-2593 @59bda50 -/
+mirrors flare/http/client.mojo#HttpClient._send_h1_pooled sha=6ed5d3b70f65 at=59bda50f -/
 def retry (o : Orc) : List Act × Bool :=
   if !o.dial2 then ([], false)
   else if !o.arm2 then ([.close .second], false)
@@ -87,13 +87,13 @@ def retry (o : Orc) : List Act × Bool :=
 
 /-- After `stream.close()` on the failure path: raise unless the fd was
 pooled and the request may be replayed.
-mirrors flare/http/client.mojo:2566-2577 @59bda50 -/
+mirrors flare/http/client.mojo#HttpClient._send_h1_pooled sha=6ed5d3b70f65 at=59bda50f -/
 def tail (attempted : Bool) (o : Orc) : List Act × Bool :=
   if !attempted then ([], false) else if !o.replay then ([], false) else retry o
 
 /-- `_send_h1_pooled`; `attempted` is `acquire(key) >= 0`. Returns the
 disposal actions in order and whether the call returned normally.
-mirrors flare/http/client.mojo:2509-2593 @59bda50 -/
+mirrors flare/http/client.mojo#HttpClient._send_h1_pooled sha=6ed5d3b70f65 at=59bda50f -/
 def sendPooled (attempted : Bool) (o : Orc) : List Act × Bool :=
   if !attempted && !o.dial1 then ([], false)
   else if !o.arm1 then ([.close .first], false)

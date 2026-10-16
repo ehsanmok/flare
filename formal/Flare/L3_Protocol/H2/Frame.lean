@@ -42,7 +42,7 @@ inductive ParseRes where
   | error (msg : String)
   deriving Repr, DecidableEq
 
-/-- mirrors flare/http2/frame.mojo:200-233 @59bda50 -/
+/-- mirrors flare/http2/frame.mojo#parse_frame sha=a5a8a24afa30 at=59bda50f -/
 def parseFrame (buf : Bytes) : ParseRes :=
   match buf with
   | b0 :: b1 :: b2 :: b3 :: b4 :: b5 :: b6 :: b7 :: b8 :: rest =>
@@ -55,7 +55,7 @@ def parseFrame (buf : Bytes) : ParseRes :=
                payload := rest.take length } (rest.drop length)
   | _ => .needMore
 
-/-- mirrors flare/http2/frame.mojo:239-257 @59bda50 -/
+/-- mirrors flare/http2/frame.mojo#encode_frame sha=05fe99fe89cb at=59bda50f -/
 def encodeFrame (f : Frame) : Bytes :=
   let n := f.payload.length
   let sid := f.sid &&& 0x7FFFFFFF
@@ -184,7 +184,7 @@ inductive DrainRes where
   | deliver (f : Frame) (rest : Bytes)
   deriving Repr, DecidableEq
 
-/-- mirrors flare/http2/server.mojo:395-414 @59bda50 -/
+/-- mirrors flare/http2/server.mojo#Http2Connection.feed sha=16d9854b86ac at=59bda50f -/
 def drainOne (localMax : Nat) (inbox : Bytes) : DrainRes :=
   if 9 ≤ inbox.length ∧ declaredLen inbox > localMax then .refuseFrameSize
   else match parseFrame inbox with

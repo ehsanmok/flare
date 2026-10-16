@@ -39,7 +39,7 @@ def rdTail (b : Bytes) (pos : Nat) : Nat → UInt64 → Except Err UInt64
       let x ← rd b (pos + 1)
       rdTail b (pos + 1) k ((acc <<< 8) ||| x.toUInt64)
 
-/-- mirrors flare/quic/varint.mojo:104-138 @59bda50 (applied to `buf[pos:]`;
+/-- mirrors flare/quic/varint.mojo#encode_varint+decode_varint sha=2aa71ded4048 at=59bda50f (applied to `buf[pos:]`;
 the empty-slice raise covers `pos = len`). -/
 def varint (b : Bytes) : Parser UInt64 := fun pos =>
   if pos > b.length then .error .oob
@@ -53,7 +53,7 @@ def varint (b : Bytes) : Parser UInt64 := fun pos =>
       let v ← rdTail b pos (length - 1) (first.toUInt64 &&& 0x3F)
       .ok (v, pos + length)
 
-/-- mirrors flare/quic/frame.mojo:701-714 @59bda50 (`_read_bytes`: the
+/-- mirrors flare/quic/frame.mojo#_read_varint+_read_bytes sha=cce0d687973b at=59bda50f (`_read_bytes`: the
 `pos + n > len(buf)` check precedes the copy loop). -/
 def bytes (b : Bytes) (n : Nat) : Parser Bytes := fun pos =>
   if pos + n > b.length then .error (.raise "quic frame: truncated payload")

@@ -34,12 +34,12 @@ def WAKEUP_TOKEN : UInt64 := 0xFFFFFFFFFFFFFFFF
 
 /-! ## Bit translation -/
 
-/-- mirrors flare/runtime/reactor.mojo:112-120 @59bda50 -/
+/-- mirrors flare/runtime/reactor.mojo#_interest_to_epoll sha=2cff87b11381 at=59bda50f -/
 def interestToEpoll (interest : Nat) : UInt32 :=
   (if interest &&& INTEREST_READ ≠ 0 then EPOLLIN ||| EPOLLRDHUP else 0) |||
   (if interest &&& INTEREST_WRITE ≠ 0 then EPOLLOUT else 0)
 
-/-- mirrors flare/runtime/reactor.mojo:123-135 @59bda50 -/
+/-- mirrors flare/runtime/reactor.mojo#_epoll_to_event_flags sha=60673170a8c2 at=59bda50f -/
 def epollToEventFlags (bits : UInt32) : Nat :=
   (if bits &&& EPOLLIN ≠ 0 then EVENT_READABLE else 0) |||
   (if bits &&& EPOLLOUT ≠ 0 then EVENT_WRITABLE else 0) |||
@@ -105,7 +105,7 @@ inductive Err | reserved | zeroInterest | dup | notReg | sys
 def upd {α} (f : Int → Option α) (k : Int) (v : Option α) : Int → Option α :=
   fun x => if x = k then v else f x
 
-/-- mirrors flare/runtime/reactor.mojo:290-315,646-665 @59bda50
+/-- mirrors flare/runtime/reactor.mojo#Reactor.register+Reactor._register_raw sha=65bbaddeb1ce at=59bda50f
 `ok` is the result of `epoll_ctl(ADD)` / the kqueue install. -/
 def register (s : St) (fd : Int) (tok : UInt64) (interest : Nat) (ok : Bool) :
     Except Err St :=
@@ -115,7 +115,7 @@ def register (s : St) (fd : Int) (tok : UInt64) (interest : Nat) (ok : Bool) :
   else if ok then .ok { reg := upd s.reg fd (some tok), kern := upd s.kern fd (some (tok, interest)) }
   else .error .sys
 
-/-- mirrors flare/runtime/reactor.mojo:317-383 @59bda50
+/-- mirrors flare/runtime/reactor.mojo#Reactor.register_exclusive sha=c0c6966234cf at=59bda50f
 `okExcl`: ADD with EPOLLEXCLUSIVE; `okPlain`: the fallback plain ADD. -/
 def registerExclusive (s : St) (fd : Int) (tok : UInt64) (interest : Nat)
     (okExcl okPlain : Bool) : Except Err St :=
@@ -126,7 +126,7 @@ def registerExclusive (s : St) (fd : Int) (tok : UInt64) (interest : Nat)
     .ok { reg := upd s.reg fd (some tok), kern := upd s.kern fd (some (tok, interest)) }
   else .error .sys
 
-/-- mirrors flare/runtime/reactor.mojo:385-413 @59bda50 -/
+/-- mirrors flare/runtime/reactor.mojo#Reactor.modify sha=832a2e1b0f66 at=59bda50f -/
 def modify (s : St) (fd : Int) (interest : Nat) (ok : Bool) : Except Err St :=
   if interest = 0 then .error .zeroInterest
   else match s.reg fd with
@@ -135,7 +135,7 @@ def modify (s : St) (fd : Int) (interest : Nat) (ok : Bool) : Except Err St :=
       if ok then .ok { s with kern := upd s.kern fd (some (tok, interest)) }
       else .error .sys
 
-/-- mirrors flare/runtime/reactor.mojo:415-479 @59bda50
+/-- mirrors flare/runtime/reactor.mojo#Reactor.unregister sha=ef48ec083856 at=59bda50f
 The kernel DEL result is ignored: bookkeeping is always erased. -/
 def unregister (s : St) (fd : Int) (_delOk : Bool) : Except Err St :=
   match s.reg fd with
@@ -272,7 +272,7 @@ def epollBits (i : Nat) (r : Ready) : UInt32 :=
   (if i &&& 1 ≠ 0 ∧ r.eof then EPOLLRDHUP else 0)
 
 /-- kqueue: one event per *ready filter*; flags from EV_EOF / EV_ERROR.
-mirrors flare/runtime/reactor.mojo:586-604 @59bda50 (filter → EVENT_*). -/
+mirrors flare/runtime/reactor.mojo#Reactor.poll sha=db252a57807f at=59bda50f (filter → EVENT_*). -/
 def kqueueEvents (i : Nat) (r : Ready) : List Nat :=
   (if i &&& 1 ≠ 0 ∧ (r.rd ∨ r.eof) then
     [EVENT_READABLE ||| bit r.eof EVENT_HUP] else []) ++

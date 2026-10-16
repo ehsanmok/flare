@@ -16,7 +16,7 @@ Results:
 -/
 namespace Flare.L3.Quic.PacketNumber
 
-/-- mirrors flare/quic/protection.mojo:93-115 @59bda50 -/
+/-- mirrors flare/quic/protection.mojo#decode_packet_number sha=b6d960e433e7 at=59bda50f -/
 def decodePnImpl (tpn : UInt64) (pnLength : Int64) (largest : UInt64) : UInt64 :=
   let pnNbits := pnLength * 8
   let expected := largest + 1

@@ -18,19 +18,15 @@ only a send part at its initiator and only a receive part at the other end.
 * §19.10: MAX_STREAM_DATA, the same two cases, STREAM_STATE_ERROR;
 * §19.13: STREAM_DATA_BLOCKED on a send-only stream, STREAM_STATE_ERROR.
 
-`server` is the server's check (STREAM in `_route_http3_stream_chunks`; the other
-four frames in `check_stream_frame_id`, state.mojo, fixed QUIC-15;
-`ServerFixes.shipped` says which fixes are in); `client` is the client's (`clientShipped` says the check is on). `checked`
-is the bit-level check the fixes add; `checked_eq_spec` proves it is the
-spec, and `serverFixed_eq_spec` / `clientFixed_eq_spec` instantiate it.
-`server_stream_conforms` proves the server's existing STREAM check is
-already exact for bidirectional limits and stream direction.
+`server` is the server's check (STREAM in `_route_http3_stream_chunks`, with the
+unidirectional limit of QUIC-16; the other four frames in `check_stream_frame_id`,
+state.mojo, QUIC-15); `client` is the client's (QUIC-17). `checked` is the
+bit-level check; `checked_eq_spec` proves it is the spec, and
+`serverFixed_eq_spec` / `clientFixed_eq_spec` instantiate it.
 
-The second half models the per-stream state. flare kept one `state` for
-both halves of a bidirectional stream (flare/quic/state.mojo:80-107), so
-RESET_STREAM (receive half) and STOP_SENDING (send half) overwrote each
-other (`stepImpl`, pre-fix, QUIC-18). `Halves` is the RFC's split (§3.1
-sending, §3.2 receiving) and is what the code now records, in the
+The second half models the per-stream state. RESET_STREAM (receive half) and
+STOP_SENDING (send half) are recorded separately (QUIC-18). `Halves` is the
+RFC's split (§3.1 sending, §3.2 receiving) and is what the code records, in the
 `peer_reset` / `send_reset` fields of `Stream`; the client reads those two
 (`resetSeenH`, `sendRefusedH`). `halves_reset_iff` / `halves_stop_iff` prove
 the state records each event no matter what follows.
@@ -109,88 +105,58 @@ theorem checked_eq_spec (r : Role) (c : Ctx) (k : Kind) (sid : Nat) :
 
 /-! ## The server -/
 
-structure ServerFixes where
-  /-- QUIC-15: direction / creation / limit checks on the other frames -/
-  dir : Bool
-  /-- QUIC-16: the unidirectional stream limit on STREAM -/
-  uni : Bool
-
-/-- The fixes in `flare/quic/server.mojo` and `state.mojo` now. -/
-def ServerFixes.shipped : ServerFixes := ⟨true, true⟩
-
-/-- STREAM: mirrors flare/quic/server.mojo:1407-1430 @59bda50; the other
-four frames: mirrors flare/quic/state.mojo:454-486, 712-722 @59bda50 (no
+/-- STREAM: mirrors flare/quic/server.mojo#QuicListener._route_http3_stream_chunks sha=efd4a176d4c2 at=59bda50f; the other
+four frames: mirrors flare/quic/state.mojo#apply_max_stream_data+apply_reset_stream+apply_stop_sending+_ConnFrameHandler.on_max_streams+_ConnFrameHandler.on_data_blocked+_ConnFrameHandler.on_stream_data_blocked+_ConnFrameHandler.on_streams_blocked sha=3afbe9a553df at=59bda50f (no
 check; RESET_STREAM / STOP_SENDING / MAX_STREAM_DATA touch a known stream,
 STREAM_DATA_BLOCKED is ignored). -/
-def server (fx : ServerFixes) (c : Ctx) (k : Kind) (sid : Nat) : Option Err :=
+def server (c : Ctx) (k : Kind) (sid : Nat) : Option Err :=
   match k with
   | .stream =>
     if sid % 2 = 1 then some .state
     else if sid % 4 = 0 ∧ c.maxBidi < sid / 4 + 1 then some .limit
-    else if fx.uni ∧ sid % 4 = 2 ∧ c.maxUni < sid / 4 + 1 then some .limit
+    else if sid % 4 = 2 ∧ c.maxUni < sid / 4 + 1 then some .limit
     else none
-  | _ => if fx.dir then checked .server c k sid else none
+  | _ => checked .server c k sid
 
-/-- flare's server opens no stream of its own: it answers on the client's
-bidirectional streams and opens no unidirectional stream
-(flare/quic/server.mojo has no egress for one). -/
-def ServerOpensNone (c : Ctx) : Prop := ∀ sid, c.opened sid = false
+/-- The streams flare's server has opened: none until its first 1-RTT
+flight, then exactly its HTTP/3 control stream 3 (RFC 9114 §6.2.1), which
+`_drain_1rtt_coalesced` sends and records with `mark_local_stream_opened`.
+It answers requests on the client's bidirectional streams.
+mirrors flare/quic/state.mojo#mark_local_stream_opened sha=5c6368f1a77a at=74fe61fd and
+flare/quic/server.mojo#QuicListener._drain_1rtt_coalesced sha=febb6014ce9a at=74fe61fd -/
+def ServerOpened (sent : Bool) (c : Ctx) : Prop := ∀ sid, c.opened sid = (sent && sid == 3)
 
-/-- The existing STREAM check is the spec for every stream id except a
-client unidirectional stream above the advertised limit (QUIC-16). -/
-theorem server_stream_conforms (c : Ctx) (hc : ServerOpensNone c) (sid : Nat)
-    (hu : sid % 4 = 2 → sid / 4 + 1 ≤ c.maxUni) :
-    server ⟨false, false⟩ c .stream sid = spec .server c .stream sid := by
-  rw [← checked_eq_spec]
-  unfold server checked
-  have ho := hc sid
-  by_cases h1 : sid % 2 = 1
-  · simp [h1, ho]
-  · by_cases h2 : sid % 4 = 0
-    · by_cases h3 : c.maxBidi < sid / 4 + 1
-      · simp [h1, h2, h3, ho]
-      · have : ¬ 2 ≤ sid % 4 := by omega
-        simp [h1, h2, h3, ho, this]
-    · have h4 : sid % 4 = 2 := by omega
-      have h5 := hu h4
-      have : ¬ c.maxUni < sid / 4 + 1 := by omega
-      simp [h1, h2, h4, this]
-
-theorem serverFixed_eq_spec (c : Ctx) (hc : ServerOpensNone c) (k : Kind) (sid : Nat) :
-    server ⟨true, true⟩ c k sid = spec .server c k sid := by
+theorem serverFixed_eq_spec (sent : Bool) (c : Ctx) (hc : ServerOpened sent c) (k : Kind) (sid : Nat) :
+    server c k sid = spec .server c k sid := by
   rw [← checked_eq_spec]
   cases k with
   | stream =>
     unfold server checked
-    have ho := hc sid
     by_cases h1 : sid % 2 = 1
-    · simp [h1, ho]
+    · by_cases hu : sid % 4 = 3
+      · simp [h1, hu]
+      · have h3 : sid ≠ 3 := by omega
+        have ho : c.opened sid = false := by rw [hc sid]; simp [h3]
+        have hu' : ¬ 2 ≤ sid % 4 := by omega
+        simp [h1, hu', ho]
     · by_cases h2 : sid % 4 = 0
-      · have : ¬ 2 ≤ sid % 4 := by omega
-        by_cases h3 : c.maxBidi < sid / 4 + 1 <;> simp [h1, h2, h3, ho, this]
+      · by_cases h3 : c.maxBidi < sid / 4 + 1 <;> simp [h1, h2, h3]
       · have h4 : sid % 4 = 2 := by omega
-        by_cases h3 : c.maxUni < sid / 4 + 1 <;> simp [h1, h2, h4, h3]
+        by_cases h3 : c.maxUni < sid / 4 + 1 <;> simp [h1, h4, h3]
   | _ => rfl
 
 /-! ## The client -/
 
-/-- mirrors flare/quic/client.mojo:902-912 @59bda50 (`_dispatch_frames`
-hands every frame to the shared state machine; nothing checked the stream
-id; with `fixed`, `check_stream_frame_id` runs in the state machine's frame
-handlers, QUIC-17) -/
-def client (fixed : Bool) (c : Ctx) (k : Kind) (sid : Nat) : Option Err :=
-  if fixed then checked .client c k sid else none
-
-/-- The client as shipped: the check is on (QUIC-17 fixed). -/
-def clientShipped : Bool := true
+/-- mirrors flare/quic/client.mojo#QuicClientConnection._dispatch_frames sha=1dabb9c8280e at=59bda50f (`_dispatch_frames`
+hands every frame to the shared state machine, whose frame handlers run
+`check_stream_frame_id`, QUIC-17) -/
+def client (c : Ctx) (k : Kind) (sid : Nat) : Option Err :=
+  checked .client c k sid
 
 theorem clientFixed_eq_spec (c : Ctx) (k : Kind) (sid : Nat) :
-    client true c k sid = spec .client c k sid := checked_eq_spec _ _ _ _
+    client c k sid = spec .client c k sid := checked_eq_spec _ _ _ _
 
-/-! ## One state for both halves -/
-
-inductive St | open_ | halfClosedLocal | halfClosedRemote | resetSent | resetRecvd | closed
-  deriving DecidableEq, Repr
+/-! ## The two halves of a stream -/
 
 inductive Ev
   /-- RESET_STREAM received (receive half) -/
@@ -203,27 +169,6 @@ inductive Ev
   | resetOut
   deriving DecidableEq, Repr
 
-/-- The pre-fix single state (QUIC-18): mirrors flare/quic/state.mojo:356-363,
-467-486 and flare/quic/client.mojo:1406-1428 @59bda50 -/
-def stepImpl : St → Ev → St
-  | _, .resetIn => .resetRecvd
-  | _, .stopIn => .resetSent
-  | s, .finIn => match s with
-    | .open_ => .halfClosedRemote
-    | .halfClosedLocal => .closed
-    | s => s
-  | _, .resetOut => .resetSent
-
-/-- Pre-fix reader (QUIC-18): mirrors flare/quic/client.mojo:1455-1460 @59bda50
-(`stream_reset`, which the HTTP/3 client polls at flare/http3/client.mojo:465) -/
-def resetSeen (s : St) : Bool := s == .resetRecvd
-
-/-- Pre-fix reader (QUIC-18): mirrors flare/quic/client.mojo:1357-1362 @59bda50
-(`send_stream` refused only in RESET_SENT) -/
-def sendRefused (s : St) : Bool := s == .resetSent
-
-def runImpl (evs : List Ev) : St := evs.foldl stepImpl .open_
-
 /-- The RFC's two halves (§3.1, §3.2), reduced to the facts the client
 reads: the peer reset its send half, and our send half is reset. -/
 structure Halves where
@@ -231,8 +176,8 @@ structure Halves where
   sendReset : Bool := false
   deriving DecidableEq, Repr
 
-/-- mirrors flare/quic/state.mojo `apply_reset_stream`, `apply_stop_sending` and
-flare/quic/client.mojo `cancel_stream` (fixed, QUIC-18: each sets only its own
+/-- mirrors flare/quic/state.mojo#apply_reset_stream+apply_stop_sending sha=dfde8aa9b69d at=cc5a947e and
+flare/quic/client.mojo#QuicClientConnection.cancel_stream sha=c8a6473218d3 at=cc5a947e (fixed, QUIC-18: each sets only its own
 flag, `peer_reset` / `send_reset`) -/
 def stepHalves (h : Halves) : Ev → Halves
   | .resetIn => { h with recvReset := true }
@@ -242,10 +187,10 @@ def stepHalves (h : Halves) : Ev → Halves
 
 def runHalves (evs : List Ev) : Halves := evs.foldl stepHalves {}
 
-/-- mirrors flare/quic/client.mojo `stream_reset` (fixed, QUIC-18) -/
+/-- mirrors flare/quic/client.mojo#QuicClientConnection.stream_reset sha=f0dc7dbddb34 at=cc5a947e (fixed, QUIC-18) -/
 def resetSeenH (h : Halves) : Bool := h.recvReset
 
-/-- mirrors flare/quic/client.mojo `send_stream`'s reset check (fixed, QUIC-18) -/
+/-- mirrors flare/quic/client.mojo#QuicClientConnection.send_stream sha=0131f865bdae at=cc5a947e's reset check (fixed, QUIC-18) -/
 def sendRefusedH (h : Halves) : Bool := h.sendReset
 
 theorem runHalves_go (evs : List Ev) : ∀ h : Halves,
@@ -261,13 +206,13 @@ theorem runHalves_go (evs : List Ev) : ∀ h : Halves,
     rw [a, b]
     cases e <;> simp [stepHalves, Bool.or_assoc, Bool.or_comm, Bool.or_left_comm]
 
-/-- **Fixed**: the receive-half reset is seen exactly when RESET_STREAM
+/-- The receive-half reset is seen exactly when RESET_STREAM
 arrived, whatever came after it. -/
 theorem halves_reset_iff (evs : List Ev) : (runHalves evs).recvReset = evs.contains .resetIn := by
   unfold runHalves
   have := (runHalves_go evs {}).1; simpa using this
 
-/-- **Fixed**: the send half refuses data exactly when STOP_SENDING arrived
+/-- The send half refuses data exactly when STOP_SENDING arrived
 or we reset it. -/
 theorem halves_stop_iff (evs : List Ev) :
     (runHalves evs).sendReset = (evs.contains .stopIn || evs.contains .resetOut) := by

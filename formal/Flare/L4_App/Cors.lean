@@ -35,15 +35,15 @@ abbrev Headers := List (HName × String)
 
 def nameEq (a b : HName) : Bool := a == b
 
-/-- `HeaderMap.set`. mirrors flare/http/headers.mojo:139-156 @59bda50 -/
+/-- `HeaderMap.set`. mirrors flare/http/headers.mojo#HeaderMap.set sha=4ecb11fbe00d at=59bda50f -/
 def setH (n : HName) (v : String) : Headers → Headers
   | [] => [(n, v)]
   | (k, w) :: hs => if nameEq k n then (n, v) :: hs else (k, w) :: setH n v hs
 
-/-- `HeaderMap.append`. mirrors flare/http/headers.mojo:158-170 @59bda50 -/
+/-- `HeaderMap.append`. mirrors flare/http/headers.mojo#HeaderMap.append sha=c17eeb6886b3 at=59bda50f -/
 def appendH (n : HName) (v : String) (hs : Headers) : Headers := hs ++ [(n, v)]
 
-/-- `HeaderMap.get` (`none` for flare's `""`). mirrors flare/http/headers.mojo:172-184 @59bda50 -/
+/-- `HeaderMap.get` (`none` for flare's `""`). mirrors flare/http/headers.mojo#HeaderMap.get sha=a3f57b6f78ba at=59bda50f -/
 def getH (n : HName) : Headers → Option String
   | [] => none
   | (k, w) :: hs => if nameEq k n then some w else getH n hs
@@ -69,40 +69,28 @@ structure Resp where
 /-- `_origin_allowed`'s scan as shipped (fixed, APP-21): under credentials a
 `*` entry authorises nothing but the scan continues (`continue`), so the
 decision does not depend on list order.
-mirrors flare/http/cors.mojo:89-104 (fixed, APP-21) -/
+mirrors flare/http/cors.mojo#_origin_allowed sha=7b4ed2855c49 at=90862154 (fixed, APP-21) -/
 def originAllowedLoop (origin : String) (creds : Bool) : List String → Bool
   | [] => false
   | e :: es => if e = "*" then (if creds then originAllowedLoop origin creds es else true)
                else if e = origin then true
                else originAllowedLoop origin creds es
 
-/-- mirrors flare/http/cors.mojo:89-104 (fixed, APP-21) -/
+/-- mirrors flare/http/cors.mojo#_origin_allowed sha=7b4ed2855c49 at=90862154 (fixed, APP-21) -/
 def originAllowed (origin : String) (cfg : Config) : Bool :=
   if origin = "" then false else originAllowedLoop origin cfg.creds cfg.origins
 
-/-- The scan before the APP-21 fix: it returned `not allow_credentials` at the
-first `*`.
-mirrors flare/http/cors.mojo:89-98 @59bda50 -/
-def originAllowedLoopOld (origin : String) (creds : Bool) : List String → Bool
-  | [] => false
-  | e :: es => if e = "*" then !creds else if e = origin then true
-               else originAllowedLoopOld origin creds es
-
-/-- mirrors flare/http/cors.mojo:89-98 @59bda50 -/
-def originAllowedOld (origin : String) (cfg : Config) : Bool :=
-  if origin = "" then false else originAllowedLoopOld origin cfg.creds cfg.origins
-
-/-- mirrors flare/http/cors.mojo:101-107 @59bda50 -/
+/-- mirrors flare/http/cors.mojo#_join sha=508f93ff8625 at=59bda50f -/
 def join (parts : List String) (sep : String) : String := sep.intercalate parts
 
-/-- The `Access-Control-Allow-Origin` value. mirrors flare/http/cors.mojo:124-143 @59bda50 -/
+/-- The `Access-Control-Allow-Origin` value. mirrors flare/http/cors.mojo#Cors._attach_origin sha=4356d8e9ee6e at=59bda50f -/
 def allowValue (cfg : Config) (origin : String) : String :=
   if cfg.creds then origin
   else match cfg.origins with
     | [o] => if o ≠ "*" then o else "*"
     | _ => origin
 
-/-- mirrors flare/http/cors.mojo:121-150 @59bda50 -/
+/-- mirrors flare/http/cors.mojo#Cors._attach_origin sha=4356d8e9ee6e at=59bda50f -/
 def attachOrigin (cfg : Config) (r : Resp) (origin : String) : Resp :=
   let hs := if cfg.creds then setH .acac "true" r.headers
             else r.headers
@@ -114,10 +102,9 @@ def attachOrigin (cfg : Config) (r : Resp) (origin : String) : Resp :=
 
 def isPreflight (req : Req) : Bool := req.method = "OPTIONS" && req.acrm ≠ ""
 
-/-- `Cors.serve` before the APP-22 fix: pass-through responses (no `Origin`,
-rejected origin, rejected preflight) are returned without `Vary: Origin`.
-mirrors flare/http/cors.mojo:152-197 @59bda50 -/
-def serveOld (cfg : Config) (inner : Resp) (req : Req) : Resp :=
+/-- The CORS decision of `Cors.serve` before `Vary: Origin` is ensured
+(`serve` below adds it on every path). -/
+def serveCore (cfg : Config) (inner : Resp) (req : Req) : Resp :=
   if req.origin = "" then inner
   else if !originAllowed req.origin cfg then
     if isPreflight req then ⟨403, []⟩ else inner
@@ -195,30 +182,6 @@ theorem mem_setH_of_mem (n : HName) (v : String) (hs : Headers) (x : HName × St
     · split <;> simp [ih h, h]
 
 /-! ## Origin allowance -/
-
-theorem loopOld_sound (o : String) (creds : Bool) (es : List String) :
-    originAllowedLoopOld o creds es = true →
-      ((o ∈ es ∧ o ≠ "*") ∨ (creds = false ∧ "*" ∈ es)) := by
-  induction es with
-  | nil => simp [originAllowedLoopOld]
-  | cons e es ih =>
-    simp only [originAllowedLoopOld]
-    by_cases he : e = "*"
-    · subst he; cases creds <;> simp
-    · by_cases heo : e = o
-      · subst heo; simp [he]
-      · simp only [he, heo, if_false]; intro h
-        rcases ih h with h | h
-        · exact Or.inl ⟨List.mem_cons_of_mem _ h.1, h.2⟩
-        · exact Or.inr ⟨h.1, List.mem_cons_of_mem _ h.2⟩
-
-/-- The pre-fix check is sound but incomplete (see `Flare.Bugs.APP_21`). -/
-theorem originAllowedOld_sound (o : String) (cfg : Config) :
-    originAllowedOld o cfg = true → allowedSpec cfg o := by
-  unfold originAllowedOld allowedSpec
-  split
-  · simp
-  · intro h; exact ⟨by assumption, loopOld_sound _ _ _ h⟩
 
 theorem loop_iff (o : String) (creds : Bool) (es : List String) :
     originAllowedLoop o creds es = true ↔
@@ -322,11 +285,11 @@ theorem acao_attach (cfg : Config) (r : Resp) (o : String) :
 /-- Any `Access-Control-Allow-Origin` on a response comes from an allowed
 origin and has value `allowValue` (general; the inner handler is assumed not
 to set the header itself). -/
-theorem serveOld_acao (cfg : Config) (inner : Resp) (req : Req)
+theorem serveCore_acao (cfg : Config) (inner : Resp) (req : Req)
     (hinner : acao inner = none) (v : String)
-    (hv : acao (serveOld cfg inner req) = some v) :
+    (hv : acao (serveCore cfg inner req) = some v) :
     originAllowed req.origin cfg = true ∧ v = allowValue cfg req.origin := by
-  unfold serveOld at hv
+  unfold serveCore at hv
   by_cases ho : req.origin = ""
   · simp [ho, hinner] at hv
   · cases ha : originAllowed req.origin cfg
@@ -352,11 +315,11 @@ theorem serveOld_acao (cfg : Config) (inner : Resp) (req : Req)
 
 /-- **With credentials, `Access-Control-Allow-Origin` is never `*`**
 (general): it equals the request origin, which cannot be `*` when allowed. -/
-theorem serveOld_acao_not_star_with_creds (cfg : Config) (inner : Resp) (req : Req)
+theorem serveCore_acao_not_star_with_creds (cfg : Config) (inner : Resp) (req : Req)
     (hc : cfg.creds = true) (v : String)
-    (hv : acao (serveOld cfg inner req) = some v)
+    (hv : acao (serveCore cfg inner req) = some v)
     (hinner : acao inner = none) : v ≠ "*" ∧ v = req.origin := by
-  obtain ⟨hal, hv⟩ := serveOld_acao cfg inner req hinner v hv
+  obtain ⟨hal, hv⟩ := serveCore_acao cfg inner req hinner v hv
   have hs := originAllowed_sound _ _ hal
   unfold allowedSpec at hs; rw [hc] at hs
   have hstar : req.origin ≠ "*" := by
@@ -367,11 +330,11 @@ theorem serveOld_acao_not_star_with_creds (cfg : Config) (inner : Resp) (req : R
   rw [hv, hav]; exact ⟨hstar, rfl⟩
 
 /-- Without credentials the value is the request origin or `*` (general). -/
-theorem serveOld_acao_origin_or_star (cfg : Config) (inner : Resp) (req : Req)
+theorem serveCore_acao_origin_or_star (cfg : Config) (inner : Resp) (req : Req)
     (hinner : acao inner = none) (v : String)
-    (hv : acao (serveOld cfg inner req) = some v) :
+    (hv : acao (serveCore cfg inner req) = some v) :
     v = req.origin ∨ (v = "*" ∧ cfg.creds = false) := by
-  obtain ⟨hal, hv⟩ := serveOld_acao cfg inner req hinner v hv
+  obtain ⟨hal, hv⟩ := serveCore_acao cfg inner req hinner v hv
   rw [hv]; exact allowValue_cases cfg _ hal
 
 /-- Every response the middleware stamps with an allowed origin carries
@@ -386,10 +349,10 @@ theorem attach_has_vary (cfg : Config) (r : Resp) (o : String) :
 
 /-- Preflight short-circuit (general): an allowed preflight is answered 204
 without consulting the inner handler. -/
-theorem serveOld_preflight_ignores_inner (cfg : Config) (i1 i2 : Resp) (req : Req)
+theorem serveCore_preflight_ignores_inner (cfg : Config) (i1 i2 : Resp) (req : Req)
     (hp : isPreflight req = true) :
-    serveOld cfg i1 req = serveOld cfg i2 req ∨ req.origin = "" ∨ originAllowed req.origin cfg = false := by
-  unfold serveOld
+    serveCore cfg i1 req = serveCore cfg i2 req ∨ req.origin = "" ∨ originAllowed req.origin cfg = false := by
+  unfold serveCore
   by_cases ho : req.origin = ""
   · exact Or.inr (Or.inl ho)
   · cases ha : originAllowed req.origin cfg
@@ -410,7 +373,7 @@ theorem getH_appendH_ne (n m : HName) (v : String) (hs : Headers) (h : nameEq n 
 
 /-- The shipped step: `_ensure_vary_origin` appends `Vary: Origin` unless the
 response already has it.
-mirrors flare/http/cors.mojo:107-121 (fixed, APP-22) -/
+mirrors flare/http/cors.mojo#_ensure_vary_origin sha=30359f10baa5 at=a3d3d16a (fixed, APP-22) -/
 def ensureVary (r : Resp) : Resp :=
   if hasVaryOrigin r then r else { r with headers := appendH .vary "Origin" r.headers }
 
@@ -426,11 +389,10 @@ theorem acao_ensureVary (r : Resp) : acao (ensureVary r) = acao r := by
   · rfl
   · exact getH_appendH_ne _ _ _ _ (by decide)
 
-/-- `Cors.serve` as shipped (fixed, APP-22): the pre-fix response with
-`Vary: Origin` ensured on every path.
-mirrors flare/http/cors.mojo:174-225 (fixed, APP-22) -/
+/-- `Cors.serve`: `serveCore` with `Vary: Origin` ensured on every path.
+mirrors flare/http/cors.mojo#Cors.serve sha=d596d25f6d33 at=a3d3d16a (fixed, APP-22) -/
 def serve (cfg : Config) (inner : Resp) (req : Req) : Resp :=
-  ensureVary (serveOld cfg inner req)
+  ensureVary (serveCore cfg inner req)
 
 /-- **Every response carries `Vary: Origin`** (general: any config, inner
 response and request, including requests without `Origin` and rejected
@@ -445,7 +407,7 @@ theorem serve_acao (cfg : Config) (inner : Resp) (req : Req)
     originAllowed req.origin cfg = true ∧ v = allowValue cfg req.origin := by
   unfold serve at hv
   rw [acao_ensureVary] at hv
-  exact serveOld_acao cfg inner req hinner v hv
+  exact serveCore_acao cfg inner req hinner v hv
 
 /-- **With credentials, `Access-Control-Allow-Origin` is never `*`**
 (general): it equals the request origin, which cannot be `*` when allowed. -/
@@ -455,7 +417,7 @@ theorem acao_not_star_with_creds (cfg : Config) (inner : Resp) (req : Req)
     (hinner : acao inner = none) : v ≠ "*" ∧ v = req.origin := by
   unfold serve at hv
   rw [acao_ensureVary] at hv
-  exact serveOld_acao_not_star_with_creds cfg inner req hc v hv hinner
+  exact serveCore_acao_not_star_with_creds cfg inner req hc v hv hinner
 
 /-- Without credentials the value is the request origin or `*` (general). -/
 theorem acao_origin_or_star (cfg : Config) (inner : Resp) (req : Req)
@@ -464,14 +426,14 @@ theorem acao_origin_or_star (cfg : Config) (inner : Resp) (req : Req)
     v = req.origin ∨ (v = "*" ∧ cfg.creds = false) := by
   unfold serve at hv
   rw [acao_ensureVary] at hv
-  exact serveOld_acao_origin_or_star cfg inner req hinner v hv
+  exact serveCore_acao_origin_or_star cfg inner req hinner v hv
 
 /-- Preflight short-circuit (general): an allowed preflight is answered 204
 without consulting the inner handler. -/
 theorem preflight_ignores_inner (cfg : Config) (i1 i2 : Resp) (req : Req)
     (hp : isPreflight req = true) :
     serve cfg i1 req = serve cfg i2 req ∨ req.origin = "" ∨ originAllowed req.origin cfg = false := by
-  rcases serveOld_preflight_ignores_inner cfg i1 i2 req hp with h | h | h
+  rcases serveCore_preflight_ignores_inner cfg i1 i2 req hp with h | h | h
   · exact Or.inl (by unfold serve; rw [h])
   · exact Or.inr (Or.inl h)
   · exact Or.inr (Or.inr h)

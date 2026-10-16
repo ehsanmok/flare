@@ -26,13 +26,13 @@ structure Cache where
   hits : Nat
 
 /-- `__init__` (clamps `max_entries` to at least 1).
-mirrors flare/dns/cache.mojo:70-80 @59bda50 -/
+mirrors flare/dns/cache.mojo#DnsCache.__init__ sha=62daba7b4075 at=59bda50f -/
 def Cache.new (ttl : Int64) (maxEntries : Nat) : Cache :=
   ⟨[], ttl, if maxEntries > 0 then maxEntries else 1, 0, 0⟩
 
 /-- Host normalisation: drop one trailing `.` (if the name is longer than
 one byte) and ASCII-lowercase.
-mirrors flare/dns/cache.mojo:82-95 @59bda50 -/
+mirrors flare/dns/cache.mojo#DnsCache._key sha=71f513ea91cc at=59bda50f -/
 def key (b : Bytes) : Bytes :=
   let n := if b.length > 1 ∧ b.getLast? = some 46 then b.length - 1 else b.length
   (b.take n).map fun c => if 65 ≤ c ∧ c ≤ 90 then c + 32 else c
@@ -56,27 +56,21 @@ def setKey : Dict → Nat → Int64 → Dict
   | [], k, v => [(k, v)]
   | (k', e) :: rest, k, v => if k' = k then (k, v) :: rest else (k', e) :: setKey rest k v
 
-/-- the scan's comparison: flare's strict `<` (`le = false`) or `<=` -/
-def better (le : Bool) (e best : Int64) : Bool :=
-  if le then decide (e ≤ best) else decide (e < best)
-
-/-- The eviction scan over live entries, starting from `best = Int.MAX`;
-`le = true` is the shipped `<=` (fixed, NET-03), `le = false` the pre-fix
-strict `<`.
-mirrors flare/dns/cache.mojo:101-109 (fixed, NET-03) -/
-def oldestGo (le : Bool) (now : Int64) : Dict → Int64 → Option Nat → Option Nat
+/-- The eviction scan over live entries, starting from `best = Int.MAX`,
+with the `<=` comparison (NET-03).
+mirrors flare/dns/cache.mojo#DnsCache._store sha=9d16d494cc92 at=3c870d6d (fixed, NET-03) -/
+def oldestGo (now : Int64) : Dict → Int64 → Option Nat → Option Nat
   | [], _, o => o
   | (k, e) :: rest, best, o =>
-    if e ≤ now then oldestGo le now rest best o
-    else if better le e best then oldestGo le now rest e (some k)
-    else oldestGo le now rest best o
+    if e ≤ now then oldestGo now rest best o
+    else if e ≤ best then oldestGo now rest e (some k)
+    else oldestGo now rest best o
 
 /-- Make room for a new key (the `if key not in ... and len >= max` block).
-mirrors flare/dns/cache.mojo:98-120 (fixed, NET-03) when `le = true`; with
-`le = false` it is the pre-fix scan. -/
-def evict (le : Bool) (c : Cache) (k : Nat) (now : Int64) : Dict :=
+mirrors flare/dns/cache.mojo#DnsCache._store sha=9d16d494cc92 at=3c870d6d (fixed, NET-03) -/
+def evict (c : Cache) (k : Nat) (now : Int64) : Dict :=
   if (lookup c.byHost k).isNone ∧ c.byHost.length ≥ c.maxEntries then
-    let oldest := oldestGo le now c.byHost Int64.maxValue none
+    let oldest := oldestGo now c.byHost Int64.maxValue none
     let L1 := c.byHost.filter (fun p => !(decide (p.2 ≤ now)))
     match oldest with
     | some o => if L1.length ≥ c.maxEntries then L1.filter (fun p => p.1 != o) else L1
@@ -84,35 +78,24 @@ def evict (le : Bool) (c : Cache) (k : Nat) (now : Int64) : Dict :=
   else c.byHost
 
 /-- `now + ttl`, saturating at `Int.MAX` (valid for `now ≥ 0`).
-mirrors flare/dns/cache.mojo:123-128 (fixed, NET-03) -/
+mirrors flare/dns/cache.mojo#DnsCache._store sha=9d16d494cc92 at=3c870d6d (fixed, NET-03) -/
 def satAdd (now ttl : Int64) : Int64 :=
   if ttl > Int64.maxValue - now then Int64.maxValue else now + ttl
 
 /-- `_store`: saturating expiry and the `<=` eviction scan.
-mirrors flare/dns/cache.mojo:97-128 (fixed, NET-03) -/
+mirrors flare/dns/cache.mojo#DnsCache._store sha=9d16d494cc92 at=3c870d6d (fixed, NET-03) -/
 def store (c : Cache) (k : Nat) (now : Int64) : Cache :=
-  { c with byHost := setKey (evict true c k now) k (satAdd now c.ttl) }
-
-/-- Pre-fix `_store`: wrapping `now + ttl_ms` and the strict-`<` scan
-(flare/dns/cache.mojo:96-119 @59bda50). -/
-def storeOld (c : Cache) (k : Nat) (now : Int64) : Cache :=
-  { c with byHost := setKey (evict false c k now) k (now + c.ttl) }
+  { c with byHost := setKey (evict c k now) k (satAdd now c.ttl) }
 
 /-- `resolve`: serve a fresh entry, else resolve and `_store`. Returns
 whether the lookup was a hit.
-mirrors flare/dns/cache.mojo:130-151 (fixed, NET-03) -/
-def resolveWith (st : Cache → Nat → Int64 → Cache) (c : Cache) (k : Nat) (now : Int64) :
-    Cache × Bool :=
+mirrors flare/dns/cache.mojo#DnsCache.resolve sha=af51a845f8d4 at=3c870d6d (fixed, NET-03) -/
+def resolve (c : Cache) (k : Nat) (now : Int64) : Cache × Bool :=
   match lookup c.byHost k with
   | some e =>
     if now < e then ({ c with hits := c.hits + 1 }, true)
-    else ({ st c k now with resolves := c.resolves + 1 }, false)
-  | none => ({ st c k now with resolves := c.resolves + 1 }, false)
-
-def resolve := resolveWith store
-/-- pre-fix `resolve` (with `storeOld`) -/
-def resolveOld := resolveWith storeOld
-
+    else ({ store c k now with resolves := c.resolves + 1 }, false)
+  | none => ({ store c k now with resolves := c.resolves + 1 }, false)
 /-! ## Lemmas -/
 
 theorem lookup_setKey (L : Dict) (k : Nat) (v : Int64) : lookup (setKey L k v) k = some v := by
@@ -159,29 +142,29 @@ theorem le_maxValue (x : Int64) : x ≤ Int64.maxValue := by
   rw [Int64.le_iff_toInt_le]; exact Int64.toInt_le x
 
 /-- the scan returns its accumulator or the key of a live entry -/
-theorem oldestGo_mem (le : Bool) (now : Int64) :
-    ∀ (L : Dict) best acc, oldestGo le now L best acc = acc ∨
-      ∃ o e, oldestGo le now L best acc = some o ∧ (o, e) ∈ L ∧ ¬ e ≤ now
+theorem oldestGo_mem (now : Int64) :
+    ∀ (L : Dict) best acc, oldestGo now L best acc = acc ∨
+      ∃ o e, oldestGo now L best acc = some o ∧ (o, e) ∈ L ∧ ¬ e ≤ now
   | [], _, _ => Or.inl rfl
   | (k, e) :: rest, best, acc => by
     simp only [oldestGo]
     split
-    · rcases oldestGo_mem le now rest best acc with h | ⟨o, e', h1, h2, h3⟩
+    · rcases oldestGo_mem now rest best acc with h | ⟨o, e', h1, h2, h3⟩
       · exact Or.inl h
       · exact Or.inr ⟨o, e', h1, List.mem_cons_of_mem _ h2, h3⟩
     · rename_i hlive
       split
-      · rcases oldestGo_mem le now rest e (some k) with h | ⟨o, e', h1, h2, h3⟩
+      · rcases oldestGo_mem now rest e (some k) with h | ⟨o, e', h1, h2, h3⟩
         · exact Or.inr ⟨k, e, h, List.mem_cons_self, hlive⟩
         · exact Or.inr ⟨o, e', h1, List.mem_cons_of_mem _ h2, h3⟩
-      · rcases oldestGo_mem le now rest best acc with h | ⟨o, e', h1, h2, h3⟩
+      · rcases oldestGo_mem now rest best acc with h | ⟨o, e', h1, h2, h3⟩
         · exact Or.inl h
         · exact Or.inr ⟨o, e', h1, List.mem_cons_of_mem _ h2, h3⟩
 
 /-- with `<=` the scan finds a live entry whenever one is at most `best` -/
 theorem oldestGo_le_finds (now : Int64) :
     ∀ (L : Dict) best acc, (∃ k e, (k, e) ∈ L ∧ ¬ e ≤ now ∧ e ≤ best) →
-      ∃ o e, oldestGo true now L best acc = some o ∧ (o, e) ∈ L ∧ ¬ e ≤ now
+      ∃ o e, oldestGo now L best acc = some o ∧ (o, e) ∈ L ∧ ¬ e ≤ now
   | [], _, _, ⟨_, _, h, _⟩ => by cases h
   | (k, e) :: rest, best, acc, ⟨k', e', hm, hl, hb⟩ => by
     simp only [oldestGo]
@@ -193,12 +176,12 @@ theorem oldestGo_le_finds (now : Int64) :
         exact ⟨o, e'', h1, List.mem_cons_of_mem _ h2, h3⟩
     · rename_i hlive
       split
-      · rcases oldestGo_mem true now rest e (some k) with h | ⟨o, e'', h1, h2, h3⟩
+      · rcases oldestGo_mem now rest e (some k) with h | ⟨o, e'', h1, h2, h3⟩
         · exact ⟨k, e, h, List.mem_cons_self, hlive⟩
         · exact ⟨o, e'', h1, List.mem_cons_of_mem _ h2, h3⟩
       · rename_i hnb
         rcases List.mem_cons.1 hm with heq | hm
-        · cases heq; exact absurd hb (by simpa [better] using hnb)
+        · cases heq; exact absurd hb (by simpa using hnb)
         · obtain ⟨o, e'', h1, h2, h3⟩ := oldestGo_le_finds now rest best acc ⟨k', e', hm, hl, hb⟩
           exact ⟨o, e'', h1, List.mem_cons_of_mem _ h2, h3⟩
 
@@ -280,35 +263,10 @@ theorem store_hits_within_ttl (c : Cache) (k : Nat) (now now' : Int64)
     (hn : 0 ≤ now.toInt) (_h1 : now.toInt ≤ now'.toInt)
     (h2 : now'.toInt < now.toInt + c.ttl.toInt) (h3 : now'.toInt < Int64.maxValue.toInt) :
     (resolve (store c k now) k now').2 = true := by
-  unfold resolve resolveWith store
+  unfold resolve store
   dsimp only
   rw [lookup_setKey]
   dsimp only
   rw [if_pos (by rw [Int64.lt_iff_toInt_lt, satAdd_toInt now c.ttl hn]; omega)]
-
-/-! ## The pre-fix store: the wrapping expiry -/
-
-/-- With `ttl = Int.MAX` and any clock reading `now ≥ 1`, the stored expiry
-`now + ttl` wraps negative, so no lookup at a non-negative time is ever a
-hit. -/
-theorem huge_ttl_expiry_wraps (now now' : Int64) (hn : 1 ≤ now.toInt) (hn' : 0 ≤ now'.toInt) :
-    ¬ now' < now + Int64.maxValue := by
-  rw [Int64.lt_iff_toInt_lt, Int64.toInt_add]
-  have hmax : Int64.maxValue.toInt = 2 ^ 63 - 1 := by decide
-  have := Int64.toInt_le now; rw [hmax] at this ⊢
-  rw [Int.bmod_def]
-  have : (now.toInt + (2 ^ 63 - 1)) % (2 ^ 64 : Nat) = now.toInt + (2 ^ 63 - 1) := by
-    apply Int.emod_eq_of_lt <;> omega
-  rw [this]
-  split <;> omega
-
-theorem resolve_store_miss (c : Cache) (k : Nat) (now now' : Int64)
-    (hn : 1 ≤ now.toInt) (hn' : 0 ≤ now'.toInt) (httl : c.ttl = Int64.maxValue) :
-    (resolveOld (storeOld c k now) k now').2 = false := by
-  unfold resolveOld resolveWith storeOld
-  dsimp only
-  rw [lookup_setKey]
-  dsimp only
-  rw [httl, if_neg (huge_ttl_expiry_wraps now now' hn hn')]
 
 end Flare.L2.DnsCache

@@ -50,7 +50,7 @@ structure Policy where
   maxBackoffMs : Int
 
 /-- The `while i < attempt` cap loop, `n` = remaining iterations.
-mirrors flare/http/reliability.mojo:182-190 @59bda50 -/
+mirrors flare/http/reliability.mojo#_backoff_sleep_ms sha=006df853502b at=59bda50f -/
 def capLoop (p : Policy) : Nat → Int → Int
   | 0, c => c
   | n + 1, c =>
@@ -58,7 +58,7 @@ def capLoop (p : Policy) : Nat → Int → Int
     if p.maxBackoffMs > 0 ∧ nx > p.maxBackoffMs then p.maxBackoffMs else capLoop p n nx
 
 /-- Un-jittered budget; `0` means "do not sleep".
-mirrors flare/http/reliability.mojo:180-194 @59bda50 -/
+mirrors flare/http/reliability.mojo#_backoff_sleep_ms sha=006df853502b at=59bda50f -/
 def budget (p : Policy) (attempt : Int) : Int :=
   if p.initialBackoffMs ≤ 0 ∨ attempt ≤ 1 then 0
   else
@@ -67,7 +67,7 @@ def budget (p : Policy) (attempt : Int) : Int :=
     if c ≤ 0 then 0 else c
 
 /-- Jittered sleep: `random_ui64(0, UInt64(capped))`, abstracted as `draw`.
-mirrors flare/http/reliability.mojo:164-195 @59bda50 -/
+mirrors flare/http/reliability.mojo#_backoff_sleep_ms sha=006df853502b at=59bda50f -/
 def sleep (p : Policy) (attempt : Int) (draw : Int → Int) : Int :=
   let b := budget p attempt
   if b ≤ 0 then 0 else draw b
@@ -209,7 +209,7 @@ def Outcome.failed : Outcome → Bool
 (1-based). Returns the propagated outcome and the number of inner calls.
 The `fuel = 0` exit corresponds to leaving `while attempt < max_attempts`,
 which `serve_fuel_unreachable` shows never happens.
-mirrors flare/http/reliability.mojo:244-271 @59bda50 -/
+mirrors flare/http/reliability.mojo#Retry.serve sha=6e91e8d4fede at=59bda50f -/
 def loop (outs : Nat → Outcome) (maxA : Nat) (attempt : Nat) : Nat → Outcome × Nat
   | 0 => (.err, attempt)
   | fuel + 1 =>
@@ -220,7 +220,7 @@ def loop (outs : Nat → Outcome) (maxA : Nat) (attempt : Nat) : Nat → Outcome
 
 /-- `Retry.serve`: a single call when retries are not allowed or
 `max_attempts <= 1`, otherwise the attempt loop.
-mirrors flare/http/reliability.mojo:233-271 @59bda50 -/
+mirrors flare/http/reliability.mojo#Retry.serve sha=6e91e8d4fede at=59bda50f -/
 def serve (outs : Nat → Outcome) (maxAttempts : Int) (allowRetry : Bool) : Outcome × Nat :=
   if !allowRetry ∨ maxAttempts ≤ 1 then (outs 1, 1)
   else loop outs maxAttempts.toNat 0 maxAttempts.toNat

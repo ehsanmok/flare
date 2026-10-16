@@ -29,7 +29,7 @@ namespace Flare.L1.Huffman
 
 set_option maxRecDepth 100000
 
-/-- mirrors flare/http/hpack_huffman.mojo:119-641 and :660 @59bda50 -/
+/-- mirrors flare/http/hpack_huffman.mojo#_hpack_table_code+_hpack_table_length sha=f5a7de56140b at=59bda50f -/
 def TBL : List (Nat × Nat) := [
   (0x1FF8, 13),
   (0x7FFFD8, 23),
@@ -337,14 +337,14 @@ def LEN_ASCII : List Nat := [
   49, 97, 49, 98, 49, 97, 49, 97, 49, 98, 49, 98, 49, 98, 49, 98, 49, 98, 49, 99, 49, 98, 49, 98,
   49, 98, 49, 98, 49, 98, 49, 97, 49, 101]
 
-/-- mirrors flare/http/hpack_huffman.mojo:670-678 @59bda50 -/
+/-- mirrors flare/http/hpack_huffman.mojo#_hex_digit_value sha=7fb806f56577 at=59bda50f -/
 def hexDigitValue (c : Nat) : Nat :=
   if 48 ≤ c ∧ c ≤ 57 then c - 48
   else if 97 ≤ c ∧ c ≤ 102 then c - 97 + 10
   else if 65 ≤ c ∧ c ≤ 70 then c - 65 + 10
   else 0
 
-/-- mirrors flare/http/hpack_huffman.mojo:643-667 @59bda50 -/
+/-- mirrors flare/http/hpack_huffman.mojo#_hpack_table_length sha=a171f00cc8f9 at=59bda50f -/
 def tableLengthImpl (s : Nat) : Nat :=
   if 256 < s then 30
   else hexDigitValue (LEN_ASCII.getD (2 * s) 0) * 16 + hexDigitValue (LEN_ASCII.getD (2 * s + 1) 0)

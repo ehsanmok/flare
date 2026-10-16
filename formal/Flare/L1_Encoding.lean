@@ -19,7 +19,3 @@ import Flare.L1_Encoding.Base64
 import Flare.L1_Encoding.HuffmanTable
 import Flare.L1_Encoding.HuffmanRfc
 import Flare.L1_Encoding.Huffman
-import Flare.Bugs.ENC_01
-import Flare.Bugs.ENC_02
-import Flare.Bugs.ENC_03
-import Flare.Bugs.ENC_04

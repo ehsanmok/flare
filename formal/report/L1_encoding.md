@@ -21,15 +21,18 @@ protocol. That means:
 - Mojo's `Int(String)` (the stdlib `atol`), which `HttpStatusError.parse`
   relies on.
 
-All flare references are to commit 59bda50. Mojo stdlib references are to
-the Mojo 1.1.0 compiler source at commit 8189361e (the version pinned by the
-pixi environment).
+The models track the shipped code: each implementation definition names the
+flare symbols it mirrors in a fidelity anchor checked by
+`formal/scripts/anchors.py`. File and line references in the findings are to
+commit 59bda50, where the audit was done. Mojo stdlib references are to the
+Mojo 1.1.0 compiler source at commit 8189361e (the version pinned by the pixi
+environment).
 
 Each model lives in `Flare/L1_Encoding/<Component>.lean`, in namespace
 `Flare.L1.<Component>`. The aggregate is `Flare/L1_Encoding.lean` and the axiom
 audit is `Flare/Audit/L1.lean`. Mojo `Int` is modelled as `Int64` (wrapping)
 wherever overflow matters: `ByteCursor`, `ProtoVarint`, `Address`,
-`CivilTime64`, `MojoAtol` and the Bugs files. Elsewhere it is unbounded
+`CivilTime64` and `MojoAtol`. Elsewhere it is unbounded
 `Int`/`Nat`; where that could hide an overflow, a 64-bit companion model
 proves it does not (or says exactly when it does). libc's
 `inet_pton`/`inet_ntop` is an environment input, stated as the explicit Prop
@@ -38,16 +41,13 @@ hypothesis `InetEnv.Valid`. Mojo's `Int(String)` is modelled from its source
 
 Totals:
 
-- Model files: 21, with 440 `theorem` declarations.
-- Bugs files: 4 (`ENC_01`..`ENC_04`), with 31 theorems.
+- Model files: 21, with 443 `theorem` declarations.
 - No `sorry`, `admit` or `axiom`.
-- The audit prints 111 headline theorems. Outside `Flare.Bugs` the footprint is
-  at most `propext`, `Quot.sound` and `Classical.choice`.
-- No model file uses `native_decide` or `bv_decide`. Bit-level goals use the
+- The audit prints 101 headline theorems. The footprint is at most
+  `propext`, `Quot.sound` and `Classical.choice`.
+- No file uses `native_decide` or `bv_decide`. Bit-level goals use the
   kernel-checked `bit_blast` macro in `Bits.lean`, which does a per-bit
   extensionality followed by `decide`.
-- `ENC_01`, `ENC_03` and `ENC_04` use `native_decide` for concrete traces, and
-  the audited ones show the auxiliary axiom.
 
 Every module elaborates in under 40 s. The slowest are `Huffman` (about
 35 s, the codec loops) and `HuffmanTable` (about 27 s, the 257-entry pairwise
@@ -61,7 +61,8 @@ and the rest a few seconds each.
 Model: `writeBytes` and `readBytes` are the per-byte `unsafe_write` and load
 loops. `le16/32/64` and `fromLE16/32/64` are the io_uring ABI store and load
 helpers.
-Mojo: flare/runtime/io_uring_abi.mojo:394-496.
+Mojo: flare/runtime/io_uring_abi.mojo (`_store_u16_le` … `_store_u64_le`,
+`_load_u16_le` … `_load_u64_le`).
 
 | Lean name | Statement | Status |
 |---|---|---|
@@ -76,7 +77,7 @@ modelled. Callers are assumed to stay inside the 64-byte SQE.
 ### Network byte order (`ByteOrder.lean`)
 
 Model: `htons`, `ntohs`, `htonl` as byte swaps.
-Mojo: flare/net/_libc.mojo:176-200.
+Mojo: flare/net/_libc.mojo (`_htons`, `_ntohs`, `_htonl`).
 
 | Lean name | Statement | Status |
 |---|---|---|
@@ -95,7 +96,8 @@ Model:
 - `render` is `SocketAddr.write_to`.
 - `dec` and `decVal` are the shortest decimal rendering and its value.
 
-Mojo: flare/net/address.mojo:54-150, 393-442, 463-473, 477-495.
+Mojo: flare/net/address.mojo (`IpAddr.parse`, `SocketAddr.parse`,
+`SocketAddr.write_to`, `_parse_port_strict`).
 
 | Lean name | Statement | Status |
 |---|---|---|
@@ -112,14 +114,19 @@ canonical text (POSIX, RFC 5952).
 ### IP predicates (`IpPredicates.lean`)
 
 Model: `isLoopback`, `isUnspecified`, `isPrivate`, `is172Private` and
-`isMulticast` operate on the stored text.
-Mojo: flare/net/address.mojo:198-302.
+`isMulticast` operate on the stored text. `isMulticast6` is the IPv6 branch
+of `is_multicast` (`startswith("ff")` and the first `:` at index 4), and `hex`
+is the RFC 5952 rendering of one group.
+Mojo: flare/net/address.mojo (`IpAddr.is_loopback`, `is_unspecified`,
+`is_private`, `is_multicast`, `_is_172_private`, `_find_char`).
 
 | Lean name | Statement | Status |
 |---|---|---|
 | `isLoopback_dotted`, `isPrivate_dotted`, `isMulticast_dotted`, `is172_dotted`, `isUnspecified_dotted` | on a canonical dotted quad, each string predicate equals the numeric RFC 1122 / 1918 / 5771 predicate | proved |
 | `dotted_inj` | the dotted-quad rendering is injective | proved |
-| `Bugs.ENC_01.counterexample` | the pre-fix IPv6 `is_multicast` (`isMulticastOld`) is true for `00ff::1` | counterexample (ENC-01) |
+| `isMulticast_v6` | the IPv6 branch of `isMulticast` is `isMulticast6` | proved |
+| `isMulticast6_correct` | for every first group `g` followed by `:`, `isMulticast6` holds iff the first byte is `0xff` (RFC 4291 §2.7, `ff00::/8`) | proved |
+| `isMulticast6_compressed` | text starting with `::` is not multicast | proved |
 
 Limitation: the IPv4 results cover canonical text only. See "Checked, not a
 bug".
@@ -128,9 +135,9 @@ bug".
 
 Model: `fillIn` and `fillIn6` write into an arbitrary initial buffer.
 `readPort` and `getFamily` are the decoders. The spec side (`kFamily`,
-`kPort`, `kLen`, `kByte`) is the kernel's view of the struct on macOS and
-Linux.
-Mojo: flare/net/_libc.mojo:209-321, 395-411.
+`kPort`, `kLen`) is the kernel's view of the struct on macOS and Linux.
+Mojo: flare/net/_libc.mojo (`_fill_sockaddr_in`, `_fill_sockaddr_in6`,
+`_read_port_from_sockaddr`, `_get_family_from_sockaddr`).
 
 | Lean name | Statement | Status |
 |---|---|---|
@@ -154,9 +161,9 @@ Model:
 
 Mojo:
 
-- flare/io/byte_cursor.mojo:52-107
-- flare/ws/frame.mojo:553-606
-- flare/http/proto/utf8.mojo:24-139
+- flare/io/byte_cursor.mojo (`_is_valid_utf8`)
+- flare/ws/frame.mojo (`_is_valid_utf8`)
+- flare/http/proto/utf8.mojo (`_is_cont`, `_step`, `utf8_lossy_string`)
 
 | Lean name | Statement | Status |
 |---|---|---|
@@ -178,33 +185,29 @@ practice exactly, for every byte string.
 
 Model: `Reader` holds `buf` plus an Int64 `pos`.
 
-- `Reader.need` is the shipped `_need` (`guardFixed`: `n > len - pos`, fixed,
-  ENC-04). `guard`, `needOld` and `skipOld` are the pre-fix `_need` with
-  wrapping `pos + n`.
+- `Reader.need` is `_need`: `guardFixed`, the check
+  `n < 0 or n > len - pos`, which cannot overflow.
 - The model covers the readers and writers for u8/u16/u32/u64 in both
   endiannesses, plus `read_bytes`, `read_utf8` and `skip`.
 - `PReader` is the gRPC `ProtoReader`: `_raw_varint`, `read_tag`, and the
-  length-delimited `read_bytes`/`skip`.
-- `guardFixed` is the shipped check in both readers. `PReader.skipLen` and
-  `PReader.readBytes` use it (fixed, ENC-03); `skipLenOld` and
-  `readBytesOld` keep the pre-fix wrapping check for the counterexample.
+  length-delimited `read_bytes`/`skip`. `PReader.skipLen` and
+  `PReader.readBytes` use the same `guardFixed` check.
 
 Mojo:
 
-- flare/io/byte_cursor.mojo:143-346
-- flare/grpc/proto.mojo:212-303
+- flare/io/byte_cursor.mojo (`ByteReader._need`, `read_u8` … `read_u64_le`,
+  `read_bytes`, `read_utf8`, `skip`; `ByteWriter.write_*`)
+- flare/grpc/proto.mojo (`ProtoReader._raw_varint`, `read_tag`, `has_more`,
+  `read_bytes`, `skip`)
 
 | Lean name | Statement | Status |
 |---|---|---|
-| `guard_iff` | the pre-fix `_need` accepts in-bounds requests and every request whose `pos + n` overflows | proved (characterises ENC-04) |
-| `guard_iff_of_small` | for `n < 2^63 - len` (all in-tree callers) the pre-fix `_need` was exact | proved |
-| `guardFixed_iff` | the shipped check is exact for every `n` | proved |
+| `guardFixed_iff` | the check is exact for every `n` | proved |
 | `readU16be_write` … `readU64le_write` | every `read_uN` returns the value `write_uN` wrote, advancing by N/8 | proved |
-| `skipOld_inv_of_small`, `skip_inv` | `0 ≤ pos ≤ len` is preserved (pre-fix, small `n`; shipped, any `n`) | proved |
-| `readBytes_spec` | shipped `read_bytes(n)` returns exactly `buf[pos:pos+n]` | proved |
+| `skip_inv` | `0 ≤ pos ≤ len` is preserved by `skip` for every `n` | proved |
+| `readBytes_spec` | `read_bytes(n)` returns exactly `buf[pos:pos+n]` and preserves the invariant | proved |
 | `readUtf8_wf` | `read_utf8` only returns well-formed UTF-8 | proved |
-| `rawVarint_inv`, `skipLen_inv`, `readBytes_inv` | the varint reader and the shipped (fixed) length skip and `read_bytes` preserve the invariant | proved |
-| `Bugs.ENC_03.counterexample`, `Bugs.ENC_04.counterexample` | the pre-fix checks (`skipLenOld`; `skipOld`) accept a length that moves `pos` negative | counterexample |
+| `rawVarint_inv`, `skipLen_inv`, `readBytes_inv` | the varint reader, the length skip and `read_bytes` preserve the invariant for every wire input | proved |
 
 The varint round trip is in `ProtoVarint.lean`, below.
 
@@ -213,7 +216,8 @@ The varint round trip is in `ProtoVarint.lean`, below.
 Model: `writeVarint` is `ProtoWriter._raw_varint` on `UInt64`. The reader is
 `PReader.rawVarint` from `ByteCursor.lean` (Int64 position, `UInt64`
 accumulator, shift checked against 64 before each byte).
-Mojo: flare/grpc/proto.mojo:108-117 (writer), 212-226 (reader).
+Mojo: flare/grpc/proto.mojo (`ProtoWriter._raw_varint`,
+`ProtoReader._raw_varint`).
 
 | Lean name | Statement | Status |
 |---|---|---|
@@ -235,19 +239,17 @@ Model: the spec is the proleptic Gregorian calendar:
 
 The impl defines `daysFromCivil`, `civilToUnix`, `civilFromDays` and
 `unixToCivil`, with Hinnant's era formulas evaluated with floor division (Mojo
-`//`, era `year // 400` and `days // 146097`; fixed, ENC-02). The pre-fix
-truncating-era forms are `daysFromCivilOld` and `civilFromDaysOld`.
-Mojo: flare/runtime/date_cache.mojo:71-174.
+`//`, era `year // 400` and `days // 146097`).
+Mojo: flare/runtime/date_cache.mojo (`civil_to_unix_seconds`,
+`unix_seconds_to_civil`).
 
 | Lean name | Statement | Status |
 |---|---|---|
 | `daysFloor_spec` | flare's forward function is the Gregorian day numbering | proved |
 | `civilFloor_daysFloor`, `daysFloor_civilFloor`, `civilFloor_valid` | flare's pair is a bijection between valid dates and all of `Int` | proved |
-| `daysFromCivilOld_eq`, `civilFromDaysOld_eq` | the pre-fix functions equal the shipped ones for March-based year ≥ 0 and day ≥ -719468 (0000-03-01) | proved |
 | `daysFromCivil_next` | flare's forward function steps by one per day for every valid date | proved |
 | `civilFromDays_daysFromCivil`, `daysFromCivil_civilFromDays` | flare's pair is mutually inverse on all of `Int` | proved |
 | `civilToUnix_unixToCivil`, `unixToCivil_civilToUnix`, `unixToCivil_fields` | the same at second resolution; h/m/s are in range | proved |
-| `Bugs.ENC_02.counterexample` | the pre-fix forward function is not a day numbering | counterexample (ENC-02, resolved) |
 
 ### Civil time on 64-bit `Int` (`CivilTime64.lean`)
 
@@ -255,8 +257,8 @@ Model: `W x` is two's-complement wrapping to 64 bits. `civilToUnix64`,
 `civilFromDays64` and `unixToCivil64` wrap every `+`, `-` and `*` of the Mojo
 code. `//` and `%` by positive constants cannot overflow and are floor
 division and modulus. `parseDigits` is the HTTP-date digit reader.
-Mojo: flare/runtime/date_cache.mojo:71-98, 130-174;
-flare/http/conditional.mojo:207-216.
+Mojo: flare/runtime/date_cache.mojo (`civil_to_unix_seconds`,
+`unix_seconds_to_civil`); flare/http/conditional.mojo (`_parse_int_at`).
 
 | Lean name | Statement | Status |
 |---|---|---|
@@ -269,13 +271,13 @@ flare/http/conditional.mojo:207-216.
 | `parseDigits_range`, `parseDigits_two`, `parseDigits_four` | the digit reader returns -1 or a value below 10^n | proved |
 | `unixToCivil64_eq` | the 64-bit inverse equals the unbounded model for every 64-bit input | proved |
 | `inverse_intermediate_wraps` | `days * 86400` does wrap near `-2^63`; the final result is still exact | proved |
-| `daysFromCivilOld_eq_of_year_nonneg` | before the fix, every non-negative civil year (including 0000-01 and 0000-02, March-based year -1) was already on the exact side of ENC-02 | proved |
 
 ### QUIC variable-length integer (`QuicVarint.lean`)
 
 Model: `encodedLength`, `encode` (None above 2^62 - 1), `tagLength` and
 `decode`.
-Mojo: flare/quic/varint.mojo:33-138.
+Mojo: flare/quic/varint.mojo (`VARINT_MAX`, `varint_encoded_length`,
+`encode_varint`, `decode_varint`).
 
 | Lean name | Statement | Status |
 |---|---|---|
@@ -289,7 +291,7 @@ Mojo: flare/quic/varint.mojo:33-138.
 
 Model: `decode` and its continuation loop `go`, and `encode` with `encRest`.
 `Nat` is used because values are capped at 2^31.
-Mojo: flare/http2/hpack.mojo:101-153.
+Mojo: flare/http2/hpack.mojo (`decode_integer`, `encode_integer`).
 
 | Lean name | Statement | Status |
 |---|---|---|
@@ -304,8 +306,10 @@ Model: `pack`, `unpackOp`, `unpackConn` (8-bit op, 56-bit connection id),
 
 Mojo:
 
-- flare/runtime/_uring_optag.mojo:57-90
-- flare/runtime/io_uring_sqe.mojo:932-982
+- flare/runtime/_uring_optag.mojo (`pack_user_data`, `unpack_op`,
+  `unpack_conn_id`)
+- flare/runtime/io_uring_sqe.mojo (`decode_cqe_at`, `IoUringCqe.errno`,
+  `IoUringCqe.buffer_id`)
 
 | Lean name | Statement | Status |
 |---|---|---|
@@ -325,7 +329,8 @@ status with an `atol` parameter. `MojoAtol.atol10` is Mojo's
 (string.mojo:2480-2634). The model covers the POSIX whitespace trim
 (codepoint.mojo:491-535), the sign (2637-2662), the digit loop with `_`
 separators (2574-2621) and the Int64 overflow check.
-Mojo: flare/errors.mojo:87, 217-273.
+Mojo: flare/errors.mojo (`HTTP_STATUS_ERROR_PREFIX`,
+`HttpStatusError.write_to`, `parse_status_error`).
 
 | Lean name | Statement | Status |
 |---|---|---|
@@ -335,7 +340,7 @@ Mojo: flare/errors.mojo:87, 217-273.
 | `parse_render`, `parse_render_of` | the same for any `atol` satisfying `AtolDec` (kept for callers) | proved |
 | `parse_status_range` | anything parse accepts has the prefix and a status in 100..599 | proved |
 
-Every row of `atol10_*` was checked against the Mojo runtime in this session
+Every row of `atol10_*` was checked against the Mojo runtime during the audit
 (including `"\t404\x1c"` giving 404); all agreed.
 
 ### Base64 (`Base64.lean`)
@@ -346,8 +351,8 @@ padding; they are identical and modelled as one `decode`.
 
 Mojo:
 
-- flare/crypto/base64.mojo:35-163
-- flare/crypto/hmac.mojo:146-205
+- flare/crypto/base64.mojo (`base64_encode`, `base64_decode`, `_decode_byte`)
+- flare/crypto/hmac.mojo (`base64url_encode`)
 
 | Lean name | Statement | Status |
 |---|---|---|
@@ -372,7 +377,11 @@ Model:
   `decodeSimdImpl` (256-entry root table, long-code walker and tail walker),
   and `decodeDispatch` (SIMD path from 32 bytes).
 
-Mojo: flare/http/hpack_huffman.mojo:119-880; flare/http/hpack_huffman_simd.mojo:110-276.
+Mojo: flare/http/hpack_huffman.mojo (`_hpack_table_code`,
+`_hpack_table_length`, `_make_canon_table`, `_make_canon_syms`,
+`_build_decode_lookup`, `huffman_encode`, `huffman_encoded_length`,
+`huffman_decode`); flare/http/hpack_huffman_simd.mojo (`_make_root_table`,
+`huffman_decode_simd`, `huffman_decode_dispatch`).
 
 | Lean name | Statement | Status |
 |---|---|---|
@@ -389,14 +398,13 @@ Mojo: flare/http/hpack_huffman.mojo:119-880; flare/http/hpack_huffman_simd.mojo:
 | `decode_encode`, `decodeImpl_encodeImpl` | decode ∘ encode = id, for the spec and for the Mojo loops | proved |
 | `decodeBits_eos`, `decodeBits_padding_too_long`, `decodeBits_padding_eos`, `decodeBits_invalid_padding` | each RFC 7541 §5.2 violation (EOS in the string, padding over 7 bits, padding that is not an EOS prefix) yields its error | proved |
 
-The API for other layers is described in `formal/.lake/notes/huffman_api.md`.
-
 ## Findings
 
-Repro status below is from runs on macOS arm64 in this session. "Flip" means
+Repro status below is from runs on macOS arm64 during the audit. "Flip" means
 the minimal fix was applied to the single flare file and the repro rerun.
 The file was then restored with `git checkout`, and `git status --short flare/`
-was empty after each flip.
+was empty after each flip. The repros and the `Flare.Bugs.ENC_*`
+counterexamples cited below are kept at the git tag `formal-audit-0.12`.
 
 ### ENC-01: `IpAddr.is_multicast` misclassifies IPv6 addresses with a short first group
 
@@ -408,18 +416,20 @@ Spec: RFC 4291 §2.7 says IPv6 multicast is `ff00::/8`, i.e. the first byte is
 What goes wrong: flare/net/address.mojo:232-240 @59bda50 tested
 `self._addr.startswith("ff")` on the `inet_ntop` text. RFC 5952 §4.1 drops
 leading zeros, so `00ff::1` is stored as `ff::1` and reported as multicast.
-Lean: `Flare.Bugs.ENC_01.counterexample`.
-Fix: also require that the first `:` is at index 4. `isMulticast6Fixed_correct`
-proves the fix equals the RFC predicate for every first group.
+Lean: `Flare.Bugs.ENC_01.counterexample` (at tag `formal-audit-0.12`).
+Fix: also require that the first `:` is at index 4.
+`Flare.L1.IpPredicates.isMulticast6_correct` proves the fixed predicate equals
+the RFC predicate for every first group, and `isMulticast6_compressed` covers
+text that starts with `::`.
 Repro: `formal/repro/ENC-01_ipv6_multicast_short_group.mojo`, observed
 `BUG REPRODUCED: is_multicast() is True for non-ff00::/8 addresses: 00ff::1 (stored as ff::1); fff:: (stored as fff::); ff0:1:: (stored as ff0:1::); `.
 Flip: `OK: is_multicast() is False for 00ff::1, fff::, ff0:1:: and True for ff02::1`, exit 0.
-Status: resolved. `IpAddr.is_multicast` now requires `startswith("ff")` and the first `:` at index 4; `Flare.L1.IpPredicates.isMulticast` mirrors it (the pre-fix predicate is `Bugs.ENC_01.isMulticastOld`, `isMulticast_v6` ties the shipped one to `isMulticast6Fixed`). Tests: `tests/net/test_net.mojo::test_ip_addr_multicast_v6_exact_ff00_8`, `::test_ip_addr_multicast_v4_unchanged`.
+Status: resolved. `IpAddr.is_multicast` now requires `startswith("ff")` and the first `:` at index 4; `Flare.L1.IpPredicates.isMulticast` mirrors it, and `isMulticast_v6` ties its IPv6 branch to `isMulticast6`. Tests: `tests/net/test_net.mojo::test_ip_addr_multicast_v6_exact_ff00_8`, `::test_ip_addr_multicast_v4_unchanged`.
 
 ### ENC-02: civil-time conversion is one day off before 0000-03-01
 
-Severity: low. In-tree inputs are HTTP-dates with a 4-digit year, which are
-exact (`daysFromCivilOld_eq`), and clock seconds after 1970. The defect is
+Severity: low. In-tree inputs are HTTP-dates with a 4-digit year, which were
+exact before the fix too, and clock seconds after 1970. The defect is
 inside the public helpers' documented domain: the comments say "exact across
 the proleptic Gregorian calendar" (date_cache.mojo:69-70) and "negative is
 fine" (:138).
@@ -433,20 +443,21 @@ for truncating division; Mojo `//` floors. The consequences:
 - The inverse is wrong for every day before 0000-03-01 except 29 February of
   years divisible by 400.
 
-Lean:
+Lean (at tag `formal-audit-0.12`):
 
 - `Flare.Bugs.ENC_02.counterexample`: before the fix -1-02-28 and -1-03-01
-  map to -719836 and -719834 (`daysFromCivilOld`).
+  map to -719836 and -719834.
 - `inverse_counterexample`: the true day number of -1-03-01 decodes as
-  -1-03-02 (`civilFromDaysOld`).
+  -1-03-02.
 
-Fix: `era = year // 400` and `era = days // 146097`. `fixed_spec`,
-`fixed_left_inverse` and `fixed_right_inverse` prove the shipped pair is the
-Gregorian numbering and a bijection on all of `Int`.
+Fix: `era = year // 400` and `era = days // 146097`.
+`Flare.L1.CivilTime.daysFloor_spec`, `civilFromDays_daysFromCivil` and
+`daysFromCivil_civilFromDays` prove the shipped pair is the Gregorian
+numbering and a bijection on all of `Int`.
 Repro: `formal/repro/ENC-02_civil_time_negative_years.mojo`, observed
 `BUG REPRODUCED: civil_to_unix_seconds(-1-02-28 -> -1-03-01) gap = 172800 s (want 86400); unix_seconds_to_civil(-719834 days) = -1 3 2 (want -1 3 1)`.
 Flip (both lines): `OK: consecutive days before year 0 differ by 86400 s and round-trip`, exit 0.
-Status: resolved. `civil_to_unix_seconds` and `unix_seconds_to_civil` now use the floor era (`year // 400`, `days // 146097`); `Flare.L1.CivilTime.daysFromCivil` / `civilFromDays` mirror the shipped code (the pre-fix forms are `daysFromCivilOld` / `civilFromDaysOld`, used by `Bugs.ENC_02.counterexample`), and the 64-bit mirrors `civilToUnix64` / `civilFromDays64` lost their sign branch. Tests: `tests/runtime/test_date_cache.mojo::test_civil_known_days_before_year_zero`, `::test_civil_day_walk_matches_calendar_across_year_zero`.
+Status: resolved. `civil_to_unix_seconds` and `unix_seconds_to_civil` now use the floor era (`year // 400`, `days // 146097`); `Flare.L1.CivilTime.daysFromCivil` / `civilFromDays` mirror the shipped code, and the 64-bit mirrors `civilToUnix64` / `civilFromDays64` lost their sign branch. Tests: `tests/runtime/test_date_cache.mojo::test_civil_known_days_before_year_zero`, `::test_civil_day_walk_matches_calendar_across_year_zero`.
 
 ### ENC-03: `ProtoReader` length check overflows; one gRPC health request crashes the server
 
@@ -462,40 +473,42 @@ What goes wrong: flare/grpc/proto.mojo:282-283 and :299-300 check
 `n = 2^63 - 1` the sum is negative, so the check passes and `pos` becomes
 `-9223372036854775799` while `has_more()` stays true.
 `decode_health_request` (grpc/health.mojo:44-55, called at :110 and :150) runs
-this loop on the request body. Earlier in this session the decoder itself
+this loop on the request body. During the audit the decoder itself
 aborted with `Assert Error: index -9223372036854775799 is out of bounds, valid range is 0 to 10`
 (proto.mojo:223).
-Lean: `Flare.Bugs.ENC_03.counterexample`. From a reader satisfying the
-invariant, `skipLen` succeeds, breaks the invariant, and leaves `hasMore`
-true.
+Lean: `Flare.Bugs.ENC_03.counterexample` (at tag `formal-audit-0.12`). From a
+reader satisfying the invariant, the pre-fix `skipLen` succeeds, breaks the
+invariant, and leaves `hasMore` true.
 Fix: `if n < 0 or n > len(self.data) - self.pos` at both sites.
-`fixed_preserves_inv` proves the fixed check keeps the invariant for every
-input, and `fixed_rejects` proves it rejects the trace.
+`Flare.L1.ByteCursor.skipLen_inv` and `readBytes_inv` prove the fixed reader
+keeps the invariant for every wire input.
 Repro: `formal/repro/ENC-03_proto_length_overflow.mojo`, observed
 `BUG REPRODUCED: skip() accepted a length of 2^63-1 in an 11-byte message; pos = -9223372036854775799 has_more() = True`.
 Flip (both sites): `OK: skip() rejects a length-delimited field longer than the message`, exit 0.
-Status: resolved. Both sites in `flare/grpc/proto.mojo` now test `n > len(self.data) - self.pos`; the model's `PReader.skipLen` / `readBytes` mirror the fixed code (the old ones are `skipLenOld` / `readBytesOld`, used by `Bugs.ENC_03.counterexample`). Tests: `tests/grpc/test_grpc_proto.mojo::test_skip_rejects_length_beyond_message`, `::test_read_bytes_rejects_length_beyond_message`, `::test_skip_len_exact_remaining_ok` and `tests/grpc/test_grpc_interceptor_health.mojo::test_health_request_huge_length_raises`.
+Status: resolved. Both sites in `flare/grpc/proto.mojo` now test `n > len(self.data) - self.pos`; the model's `PReader.skipLen` / `readBytes` mirror the fixed code. Tests: `tests/grpc/test_grpc_proto.mojo::test_skip_rejects_length_beyond_message`, `::test_read_bytes_rejects_length_beyond_message`, `::test_skip_len_exact_remaining_ok` and `tests/grpc/test_grpc_interceptor_health.mojo::test_health_request_huge_length_raises`.
 
 ### ENC-04: `ByteReader._need` overflows; `skip`/`read_bytes` accept a huge length
 
 Severity: medium for the public API, not reachable in-tree. The module promises
 "every read is bounds-checked". In-tree callers pass `Int(u32)` lengths, for
-which `guard_iff_of_small` proves the check exact. A caller that forwards a
-64-bit length from the wire gets the same failure as ENC-03.
+which the pre-fix check was exact (`guard_iff_of_small`, at tag
+`formal-audit-0.12`). A caller that forwards a 64-bit length from the wire
+gets the same failure as ENC-03.
 Spec: byte_cursor.mojo:1-8 and 114-119 say a short buffer raises and
 `0 ≤ pos ≤ len(buf)`.
 What goes wrong: byte_cursor.mojo:144-155 checks `self.pos + n > len(self.buf)`
 with wrapping `Int`. After one `read_u8()` on a 4-byte buffer,
-`skip(Int.MAX)` succeeds and sets `pos = -2^63`. `guard_iff` characterises
-exactly which requests are wrongly accepted.
-Lean: `Flare.Bugs.ENC_04.counterexample`.
-Fix: `if n < 0 or n > len(self.buf) - self.pos`. `fixed_preserves_inv` and
-`fixed_rejects` cover it, and `guardFixed_iff` shows the fixed check is exact
-for every `n`.
+`skip(Int.MAX)` succeeds and sets `pos = -2^63`. The pre-fix check accepted
+exactly the in-bounds requests plus every request whose `pos + n` overflows.
+Lean: `Flare.Bugs.ENC_04.counterexample` and `guard_iff` (at tag
+`formal-audit-0.12`).
+Fix: `if n < 0 or n > len(self.buf) - self.pos`.
+`Flare.L1.ByteCursor.guardFixed_iff` shows the fixed check is exact for every
+`n`, and `skip_inv` that `skip` keeps `0 ≤ pos ≤ len`.
 Repro: `formal/repro/ENC-04_byte_reader_need_overflow.mojo`, observed
 `BUG REPRODUCED: skip(Int.MAX) on a 4-byte buffer succeeded; pos = -9223372036854775808 remaining() = -9223372036854775804`.
 Flip: `OK: skip(Int.MAX) raises; pos stays 1`, exit 0.
-Status: resolved. `ByteReader._need` now tests `n > len(self.buf) - self.pos`; the model's `Reader.need`/`skip`/`readBytes` mirror it (old: `needOld`, `skipOld`; shipped: `skip_inv`, `readBytes_spec`). Tests: `tests/io/test_byte_cursor.mojo::test_huge_length_rejected_without_moving_cursor`, `::test_exact_remaining_length_accepted`.
+Status: resolved. `ByteReader._need` now tests `n > len(self.buf) - self.pos`; the model's `Reader.need`/`skip`/`readBytes` mirror it (`skip_inv`, `readBytes_spec`). Tests: `tests/io/test_byte_cursor.mojo::test_huge_length_rejected_without_moving_cursor`, `::test_exact_remaining_length_accepted`.
 
 ## Checked, not a bug
 
@@ -557,37 +570,37 @@ Status: resolved. `ByteReader._need` now tests `n > len(self.buf) - self.pos`; t
 
 ## Traceability
 
-| Lean definition | Mojo file:line @59bda50 | Theorems | Status |
+| Lean definition | Mojo code | Theorems | Status |
 |---|---|---|---|
-| `Flare.L1.Buf.writeBytes`, `readBytes` | flare/runtime/io_uring_abi.mojo:407-408, 425-428, 445-446, 462-463, 477-479, 495-496 | `readBytes_writeBytes`, `readBytes_writeBytes_disjoint` | proved |
-| `Flare.L1.Buf.le16/32/64`, `fromLE16/32/64` | flare/runtime/io_uring_abi.mojo:394-496 | `fromLE64_le64`, `le32_fromLE32` | proved |
-| `Flare.L1.ByteOrder.htons`, `ntohs`, `htonl` | flare/net/_libc.mojo:176-200 | `htons_involutive`, `htonl_involutive`, `htonl_bytes` | proved |
-| `Flare.L1.Address.parsePortStrict` | flare/net/address.mojo:477-495 | `parsePortStrict_eq_spec`, `parsePortStrict_dec` | proved |
-| `Flare.L1.Address.parseIp`, `parseSock`, `render` | flare/net/address.mojo:54-150, 393-442, 463-473 | `parseIp_canonical`, `parseSock_render` | proved |
-| `Flare.L1.IpPredicates.isLoopback`, `isUnspecified`, `isPrivate`, `is172Private`, `isMulticast` | flare/net/address.mojo:198-302 | `*_dotted`, `Bugs.ENC_01.counterexample` | proved; counterexample (ENC-01) |
-| `Flare.L1.Sockaddr.fillIn`, `fillIn6`, `readPort`, `getFamily` | flare/net/_libc.mojo:209-321, 395-411 | `readPort_fillIn`, `addr_fillIn6`, `getFamily_eq_kFamily` | proved |
-| `Flare.L1.Utf8.validFrom`, `isValidUtf8` | flare/io/byte_cursor.mojo:52-107; flare/ws/frame.mojo:553-606 | `isValidUtf8_iff` | proved |
-| `Flare.L1.Utf8.step`, `scan`, `fix`, `lossy` | flare/http/proto/utf8.mojo:24-139 | `scan_none_iff_valid`, `lossy_wf`, `lossy_eq_self_iff` | proved |
-| `Flare.L1.ByteCursor.guard`, `Reader.*` | flare/io/byte_cursor.mojo:143-268 | `guard_iff`, `guard_iff_of_small`, `guardFixed_iff`, `readU64le_write`, `readUtf8_wf`, `skip_inv`, `Bugs.ENC_04.counterexample` | proved; counterexample (ENC-04) |
-| `Flare.L1.ByteCursor.writeU16be` … `writeU64le` | flare/io/byte_cursor.mojo:307-340 | `readU16be_write` … `readU64le_write` | proved |
-| `Flare.L1.ByteCursor.PReader.*` | flare/grpc/proto.mojo:212-303 | `rawVarint_inv`, `skipLen_inv`, `readBytes_inv`, `Bugs.ENC_03.counterexample` | proved; counterexample (ENC-03) |
-| `Flare.L1.ProtoVarint.writeVarint` | flare/grpc/proto.mojo:108-117 | `writeVarint_length`, `writeVarint_canonical`, `rawVarint_writeVarint` | proved |
-| `Flare.L1.ByteCursor.PReader.rawVarint` | flare/grpc/proto.mojo:212-226 | `rawVarint_writeVarint`, `rawVarint_eleven`, `tenth_byte_truncates` | proved |
-| `Flare.L1.CivilTime.daysFromCivil`, `civilToUnix` | flare/runtime/date_cache.mojo:71-98 | `daysFloor_spec`, `daysFromCivil_next`, `Bugs.ENC_02.counterexample` | proved (all years; ENC-02 resolved) |
-| `Flare.L1.CivilTime.civilFromDays`, `unixToCivil` | flare/runtime/date_cache.mojo:130-174 | `civilFromDays_daysFromCivil`, `civilToUnix_unixToCivil`, `Bugs.ENC_02.inverse_counterexample` | proved (all of `Int`; ENC-02 resolved) |
-| `Flare.L1.CivilTime.civilToUnix64` | flare/runtime/date_cache.mojo:71-98 | `civilToUnix64_eq`, `civilToUnix64_exact`, `jan1_inRange_iff`, `httpdate_exact` | proved |
-| `Flare.L1.CivilTime.civilFromDays64`, `unixToCivil64` | flare/runtime/date_cache.mojo:130-174 | `civilFromDays64_eq`, `unixToCivil64_eq` | proved |
-| `Flare.L1.CivilTime.parseDigits` | flare/http/conditional.mojo:207-216 | `parseDigits_range`, `parseDigits_four` | proved |
-| `Flare.L1.QuicVarint.encode`, `decode`, `tagLength` | flare/quic/varint.mojo:33-138 | `decode_encode`, `encode_minimal`, `decode_le_max` | proved |
-| `Flare.L1.HpackInt.encode`, `decode`, `go` | flare/http2/hpack.mojo:101-153 | `decode_encode`, `decode_bounds` | proved |
-| `Flare.L1.UringTag.pack`, `unpackOp`, `unpackConn`, `connAssert` | flare/runtime/_uring_optag.mojo:57-90 | `unpack_pack`, `pack_unpack`, `connAssert_fails_open` | proved |
-| `Flare.L1.UringTag.cqeRes`, `errno`, `bufferId` | flare/runtime/io_uring_sqe.mojo:932-982 | `cqeRes_eq_toInt32`, `errno_range`, `bufferId_range` | proved |
-| `Flare.L1.StatusError.render`, `parse` | flare/errors.mojo:87, 217-273 | `parse_render_mojo`, `parse_render`, `parse_status_range` | proved |
+| `Flare.L1.Buf.writeBytes`, `readBytes` | flare/runtime/io_uring_abi.mojo (the byte loops of `_store_u16_le` … `_load_u64_le`) | `readBytes_writeBytes`, `readBytes_writeBytes_disjoint` | proved |
+| `Flare.L1.Buf.le16/32/64`, `fromLE16/32/64` | flare/runtime/io_uring_abi.mojo (`_store_u16_le`, `_store_u32_le`, `_store_u64_le`, `_load_u16_le`, `_load_u32_le`, `_load_u64_le`) | `fromLE64_le64`, `le32_fromLE32` | proved |
+| `Flare.L1.ByteOrder.htons`, `ntohs`, `htonl` | flare/net/_libc.mojo (`_htons`, `_ntohs`, `_htonl`) | `htons_involutive`, `htonl_involutive`, `htonl_bytes` | proved |
+| `Flare.L1.Address.parsePortStrict` | flare/net/address.mojo (`_parse_port_strict`) | `parsePortStrict_eq_spec`, `parsePortStrict_dec` | proved |
+| `Flare.L1.Address.parseIp`, `parseSock`, `render` | flare/net/address.mojo (`IpAddr.parse`, `SocketAddr.parse`, `SocketAddr.write_to`) | `parseIp_canonical`, `parseSock_render` | proved |
+| `Flare.L1.IpPredicates.isLoopback`, `isUnspecified`, `isPrivate`, `is172Private`, `isMulticast` | flare/net/address.mojo (`IpAddr.is_loopback`, `is_unspecified`, `is_private`, `is_multicast`, `_is_172_private`) | `*_dotted`, `isMulticast_v6`, `isMulticast6_correct`, `isMulticast6_compressed` | proved |
+| `Flare.L1.Sockaddr.fillIn`, `fillIn6`, `readPort`, `getFamily` | flare/net/_libc.mojo (`_fill_sockaddr_in`, `_fill_sockaddr_in6`, `_read_port_from_sockaddr`, `_get_family_from_sockaddr`) | `readPort_fillIn`, `addr_fillIn6`, `getFamily_eq_kFamily` | proved |
+| `Flare.L1.Utf8.validFrom`, `isValidUtf8` | flare/io/byte_cursor.mojo and flare/ws/frame.mojo (`_is_valid_utf8`) | `isValidUtf8_iff` | proved |
+| `Flare.L1.Utf8.step`, `scan`, `fix`, `lossy` | flare/http/proto/utf8.mojo (`_step`, `utf8_lossy_string`) | `scan_none_iff_valid`, `lossy_wf`, `lossy_eq_self_iff`, `lossy_eq_iff_subst` | proved |
+| `Flare.L1.ByteCursor.guardFixed`, `Reader.*` | flare/io/byte_cursor.mojo (`ByteReader._need`, `read_*`, `skip`) | `guardFixed_iff`, `readU64le_write`, `readUtf8_wf`, `skip_inv`, `readBytes_spec` | proved |
+| `Flare.L1.ByteCursor.writeU16be` … `writeU64le` | flare/io/byte_cursor.mojo (`ByteWriter.write_*`) | `readU16be_write` … `readU64le_write` | proved |
+| `Flare.L1.ByteCursor.PReader.*` | flare/grpc/proto.mojo (`ProtoReader`) | `rawVarint_inv`, `skipLen_inv`, `readBytes_inv` | proved |
+| `Flare.L1.ProtoVarint.writeVarint` | flare/grpc/proto.mojo (`ProtoWriter._raw_varint`) | `writeVarint_length`, `writeVarint_canonical`, `rawVarint_writeVarint` | proved |
+| `Flare.L1.ByteCursor.PReader.rawVarint` | flare/grpc/proto.mojo (`ProtoReader._raw_varint`) | `rawVarint_writeVarint`, `rawVarint_eleven`, `tenth_byte_truncates` | proved |
+| `Flare.L1.CivilTime.daysFromCivil`, `civilToUnix` | flare/runtime/date_cache.mojo (`civil_to_unix_seconds`) | `daysFloor_spec`, `daysFromCivil_next` | proved (all years) |
+| `Flare.L1.CivilTime.civilFromDays`, `unixToCivil` | flare/runtime/date_cache.mojo (`unix_seconds_to_civil`) | `civilFromDays_daysFromCivil`, `civilToUnix_unixToCivil` | proved (all of `Int`) |
+| `Flare.L1.CivilTime.civilToUnix64` | flare/runtime/date_cache.mojo (`civil_to_unix_seconds`) | `civilToUnix64_eq`, `civilToUnix64_exact`, `jan1_inRange_iff`, `httpdate_exact` | proved |
+| `Flare.L1.CivilTime.civilFromDays64`, `unixToCivil64` | flare/runtime/date_cache.mojo (`unix_seconds_to_civil`) | `civilFromDays64_eq`, `unixToCivil64_eq` | proved |
+| `Flare.L1.CivilTime.parseDigits` | flare/http/conditional.mojo (`_parse_int_at`) | `parseDigits_range`, `parseDigits_four` | proved |
+| `Flare.L1.QuicVarint.encode`, `decode`, `tagLength` | flare/quic/varint.mojo (`encode_varint`, `decode_varint`, `varint_encoded_length`) | `decode_encode`, `encode_minimal`, `decode_le_max` | proved |
+| `Flare.L1.HpackInt.encode`, `decode`, `go` | flare/http2/hpack.mojo (`encode_integer`, `decode_integer`) | `decode_encode`, `decode_bounds` | proved |
+| `Flare.L1.UringTag.pack`, `unpackOp`, `unpackConn`, `connAssert` | flare/runtime/_uring_optag.mojo (`pack_user_data`, `unpack_op`, `unpack_conn_id`) | `unpack_pack`, `pack_unpack`, `connAssert_fails_open` | proved |
+| `Flare.L1.UringTag.cqeRes`, `errno`, `bufferId` | flare/runtime/io_uring_sqe.mojo (`decode_cqe_at`, `IoUringCqe.errno`, `IoUringCqe.buffer_id`) | `cqeRes_eq_toInt32`, `errno_range`, `bufferId_range` | proved |
+| `Flare.L1.StatusError.render`, `parse` | flare/errors.mojo (`HttpStatusError.write_to`, `parse_status_error`) | `parse_render_mojo`, `parse_render`, `parse_status_range` | proved |
 | `Flare.L1.MojoAtol.isPosixSpace`, `trimSign`, `digits`, `atol10` | Mojo std/collections/string/codepoint.mojo:491-535, string.mojo:2480-2662 @8189361e | `atol10_dec`, `atol10_rejects`, `atol10_min` | proved |
-| `Flare.L1.Base64.encodeStd`, `decode` | flare/crypto/base64.mojo:35-163 | `decode_encodeStd`, `decode_canonical`, `decode_padding` | proved |
-| `Flare.L1.Base64.encodeUrl`, `decode` | flare/crypto/hmac.mojo:146-205 | `decode_encodeUrl` | proved |
-| `Flare.L1.Huffman.TBL` | flare/http/hpack_huffman.mojo:119-641, 643-667 | `TBL_eq_rfc`, `kraft`, `prefix_free`, `padding_not_code` | proved |
-| `Flare.L1.Huffman.canonTableImpl`, `canonSymsImpl`, `lookupImpl` | flare/http/hpack_huffman.mojo:744-807 | `canonSyms_eq`, `canon_covers`, `lookupImpl_spec` | proved |
-| `Flare.L1.Huffman.encodeImpl`, `encodedLengthImpl` | flare/http/hpack_huffman.mojo:684-737 | `encodeImpl_eq`, `encodedLengthImpl_eq` | proved |
-| `Flare.L1.Huffman.decodeImpl` | flare/http/hpack_huffman.mojo:820-880 | `decodeImpl_eq`, `decodeImpl_encodeImpl`, `okOnly_decodeImpl` | proved |
-| `Flare.L1.Huffman.decodeSimdImpl`, `decodeDispatch` | flare/http/hpack_huffman_simd.mojo:110-276 | `decodeSimdImpl_eq`, `decodeSimdImpl_eq_decodeImpl`, `decodeDispatch_eq`, `okOnly_decodeDispatch` | proved |
+| `Flare.L1.Base64.encodeStd`, `decode` | flare/crypto/base64.mojo (`base64_encode`, `base64_decode`) | `decode_encodeStd`, `decode_canonical`, `decode_padding` | proved |
+| `Flare.L1.Base64.encodeUrl`, `decode` | flare/crypto/hmac.mojo (`base64url_encode`) | `decode_encodeUrl` | proved |
+| `Flare.L1.Huffman.TBL` | flare/http/hpack_huffman.mojo (`_hpack_table_code`, `_hpack_table_length`) | `TBL_eq_rfc`, `kraft`, `prefix_free`, `padding_not_code` | proved |
+| `Flare.L1.Huffman.canonTableImpl`, `canonSymsImpl`, `lookupImpl` | flare/http/hpack_huffman.mojo (`_make_canon_table`, `_make_canon_syms`, `_build_decode_lookup`) | `canonSyms_eq`, `canon_covers`, `lookupImpl_spec` | proved |
+| `Flare.L1.Huffman.encodeImpl`, `encodedLengthImpl` | flare/http/hpack_huffman.mojo (`huffman_encode`, `huffman_encoded_length`) | `encodeImpl_eq`, `encodedLengthImpl_eq` | proved |
+| `Flare.L1.Huffman.decodeImpl` | flare/http/hpack_huffman.mojo (`huffman_decode`) | `decodeImpl_eq`, `decodeImpl_encodeImpl`, `okOnly_decodeImpl` | proved |
+| `Flare.L1.Huffman.decodeSimdImpl`, `decodeDispatch` | flare/http/hpack_huffman_simd.mojo (`_make_root_table`, `huffman_decode_simd`, `huffman_decode_dispatch`) | `decodeSimdImpl_eq`, `decodeSimdImpl_eq_decodeImpl`, `decodeDispatch_eq`, `okOnly_decodeDispatch` | proved |

@@ -55,7 +55,7 @@ theorem W_mul_W (a c : Int) : W (W a * c) = W (a * c) := by
 
 /-- `civil_to_unix_seconds` on 64-bit `Int`: every `+`, `-` and `*` wraps;
 `//` by a positive constant cannot overflow.
-mirrors flare/runtime/date_cache.mojo:71-98 (fixed, ENC-02) -/
+mirrors flare/runtime/date_cache.mojo#civil_to_unix_seconds sha=4b7a508fbf16 at=5a85e66a (fixed, ENC-02) -/
 def civilToUnix64 (y m d hh mm ss : Int) : Int :=
   let year := W (y - (if m ≤ 2 then 1 else 0))
   let era := year / 400
@@ -127,7 +127,7 @@ theorem httpdate_exact (y mon d hh mm ss : Int) (hy : 0 ≤ y ∧ y ≤ 9999) (h
   civilToUnix64_exact _ _ _ _ _ _ (by omega) (by omega) (by omega) (by omega) (by omega) (by omega)
 
 /-- Day-number to date part of `unix_seconds_to_civil` on 64-bit `Int`.
-mirrors flare/runtime/date_cache.mojo:152-163 (fixed, ENC-02) -/
+mirrors flare/runtime/date_cache.mojo#unix_seconds_to_civil sha=92712c862792 at=5a85e66a (fixed, ENC-02) -/
 def civilFromDays64 (z : Int) : Int × Int × Int :=
   let days := W (z + 719468)
   let era := days / 146097
@@ -141,7 +141,7 @@ def civilFromDays64 (z : Int) : Int × Int × Int :=
   (if m ≤ 2 then W (y + 1) else y, m, d)
 
 /-- `unix_seconds_to_civil` on 64-bit `Int`.
-mirrors flare/runtime/date_cache.mojo:130-174 (fixed, ENC-02) -/
+mirrors flare/runtime/date_cache.mojo#unix_seconds_to_civil sha=92712c862792 at=5a85e66a (fixed, ENC-02) -/
 def unixToCivil64 (s : Int) : Civil :=
   let days := s / 86400
   let sod := W (s - W (days * 86400))
@@ -190,25 +190,8 @@ theorem unixToCivil64_eq (s : Int) (hs : InRange s) : unixToCivil64 s = unixToCi
 theorem inverse_intermediate_wraps : ¬ InRange ((-2 ^ 63) / 86400 * 86400) := by
   unfold InRange; omega
 
-/-- Before the ENC-02 fix, any non-negative civil year (so every HTTP-date
-year, including 0000-01/02 whose March-based year is -1) was already on the
-exact side: the pre-fix day count equals the shipped one. -/
-theorem daysFromCivilOld_eq_of_year_nonneg (y m d : Int) (hy : 0 ≤ y) :
-    daysFromCivilOld y m d = daysFromCivil y m d := by
-  by_cases hs : 0 ≤ shiftYear y m
-  · exact daysFromCivilOld_eq _ _ _ hs
-  have hm : m ≤ 2 := by
-    by_cases hm : m ≤ 2
-    · exact hm
-    · simp only [shiftYear, hm, ↓reduceIte] at hs; omega
-  have hy0 : y = 0 := by simp only [shiftYear, hm, ↓reduceIte] at hs; omega
-  subst hy0
-  simp only [daysFromCivilOld, daysFromCivil, shiftYear, hm, ↓reduceIte, startOf]
-  rw [if_neg (by decide)]
-  omega
-
 /-- The digit loop of `_parse_int_at` over the bytes `p[off:off+length]`.
-mirrors flare/http/conditional.mojo:207-216 @59bda50 -/
+mirrors flare/http/conditional.mojo#_parse_int_at sha=534a0c5121dd at=59bda50f -/
 def parseDigits (v : Int) : List UInt8 → Int
   | [] => v
   | c :: cs => if c.toNat < 48 ∨ c.toNat > 57 then -1 else parseDigits (v * 10 + (c.toNat - 48 : Nat)) cs

@@ -26,7 +26,7 @@ set_option linter.unusedSimpArgs false
 
 def maxPrefix (N : Nat) : Nat := 2 ^ N - 1
 
-/-- Continuation loop. mirrors flare/http2/hpack.mojo:119-131 @59bda50 -/
+/-- Continuation loop. mirrors flare/http2/hpack.mojo#decode_integer sha=2fc694db686d at=59bda50f -/
 def go (buf : Bytes) (off value m : Nat) : Option (Nat × Nat) :=
   if off ≥ buf.length then none
   else
@@ -39,7 +39,7 @@ def go (buf : Bytes) (off value m : Nat) : Option (Nat × Nat) :=
 termination_by 35 - m
 decreasing_by omega
 
-/-- mirrors flare/http2/hpack.mojo:101-118 @59bda50 -/
+/-- mirrors flare/http2/hpack.mojo#decode_integer sha=2fc694db686d at=59bda50f -/
 def decode (buf : Bytes) (off N : Nat) : Option (Nat × Nat) :=
   if off ≥ buf.length then none
   else
@@ -47,14 +47,14 @@ def decode (buf : Bytes) (off N : Nat) : Option (Nat × Nat) :=
     if b0 < maxPrefix N then some (b0, off + 1)
     else go buf (off + 1) b0 0
 
-/-- Continuation bytes. mirrors flare/http2/hpack.mojo:150-153 @59bda50 -/
+/-- Continuation bytes. mirrors flare/http2/hpack.mojo#encode_integer sha=b2be2107e99e at=59bda50f -/
 def encRest (v : Nat) : Bytes :=
   if v ≥ 128 then UInt8.ofNat (0x80 ||| (v &&& 0x7F)) :: encRest (v >>> 7)
   else [UInt8.ofNat v]
 termination_by v
 decreasing_by rw [Nat.shiftRight_eq_div_pow]; omega
 
-/-- mirrors flare/http2/hpack.mojo:134-153 @59bda50 -/
+/-- mirrors flare/http2/hpack.mojo#encode_integer sha=b2be2107e99e at=59bda50f -/
 def encode (value N : Nat) (flags : UInt8) : Bytes :=
   let mp := maxPrefix N
   if value < mp then [(flags &&& UInt8.ofNat (0xFF - mp)) ||| UInt8.ofNat value]

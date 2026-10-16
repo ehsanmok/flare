@@ -1,6 +1,6 @@
 # Fixes
 
-One commit per finding (138 in all), as `git log` records them. Each commit changes `flare/`, adds a regression test, updates the docs, updates the Lean model and marks the repro resolved.
+One commit per finding (138 in all), as `git log` records them. Each commit changed `flare/`, added a regression test in `tests/`, updated the docs and the Lean model, and marked the finding's Mojo repro resolved; the repros and the per-finding Lean counterexamples are kept at the git tag `formal-audit-0.12`.
 
 | ID | Severity | Commit | Subject |
 |---|---|---|---|

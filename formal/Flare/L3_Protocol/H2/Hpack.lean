@@ -4,8 +4,7 @@ import Flare.L3_Protocol.H2.HpackSync
 # HPACK header-block decoder and encoder (RFC 7541 §6)
 
 `decodeLoop` transliterates `HpackDecoder.decode` (`hpack.mojo:356-441`,
-shipped: every field is charged to the budget, HPACK-02 fixed);
-`decodeLoopOld` is the version at @59bda50, kept for `Flare.Bugs.HPACK_02`.
+every field is charged to the budget).
 `encode` transliterates `HpackEncoder.encode` with
 `allow_huffman = False` (`hpack.mojo:480-512`, the default).
 
@@ -18,11 +17,8 @@ Results:
   `_octets_to_string` unchanged (now every header, `octetsToString_id`) and
   whose strings are shorter than `2^31`, decoding flare's own encoding
   returns the same list and leaves the dynamic table untouched.
-* `decode_budget_impl`: the exact bound the pre-fix (@59bda50) budget check gives:
-  the sizes of all fields *but the last* are within the budget.
-  `Flare.Bugs.HPACK_02` shows the last field is never counted.
-* `decode_budget_fixed`: shipped, the check runs after each field, so the whole
-  decoded list is within the budget.
+* `decode_budget_fixed` / `decode_budget`: the check runs after each field,
+  so the whole decoded list, the last field included, is within the budget.
 * `decode_table_inv`: decoding preserves the table invariant.
 -/
 namespace Flare.L3.H2.Hpack
@@ -152,27 +148,9 @@ def acct (budget : Nat) (hs : List Entry) (decoded : Nat) : Nat :=
 def overBudget (budget : Nat) (hs : List Entry) (d : Nat) : Bool :=
   decide (budget > 0 ∧ hs ≠ [] ∧ d > budget)
 
-/-- The decode loop at @59bda50 (before HPACK-02). The budget check runs
-*before* each field and accounts the previously decoded one.
-mirrors flare/http2/hpack.mojo:356-441 @59bda50 -/
-def decodeLoopOld (C : Codec) (ah : Bool) (budget : Nat) :
-    Nat → Table → List Entry → Nat → Bytes → Except DErr (Table × List Entry)
-  | _, t, hs, _, [] => .ok (t, hs)
-  | 0, _, _, _, _ :: _ => .error .fuel
-  | fuel + 1, t, hs, decoded, l@(_ :: _) =>
-    if overBudget budget hs (acct budget hs decoded) then .error .budget
-    else match decodeOne C ah t hs.length l with
-      | .error e => .error e
-      | .ok (t', oh, rest) =>
-        decodeLoopOld C ah budget fuel t' (hs ++ oh.toList) (acct budget hs decoded) rest
-
-def decodeOld (C : Codec) (ah : Bool) (t : Table) (buf : Bytes) (budget : Nat) :
-    Except DErr (Table × List Entry) :=
-  decodeLoopOld C ah budget buf.length t [] 0 buf
-
 /-- The decode loop, shipped (HPACK-02 fixed): each field is accounted right
 after it is decoded.
-mirrors flare/http2/hpack.mojo:362-460 (`decode`; fixed, HPACK-02) -/
+mirrors flare/http2/hpack.mojo#HpackDecoder._decode_string+HpackDecoder.decode sha=a8c434e2f963 at=937e9462 (`decode`; fixed, HPACK-02) -/
 def decodeLoop (C : Codec) (ah : Bool) (budget : Nat) :
     Nat → Table → List Entry → Nat → Bytes → Except DErr (Table × List Entry)
   | _, t, hs, _, [] => .ok (t, hs)
@@ -228,51 +206,6 @@ theorem decodeOne_none (C : Codec) (ah : Bool) (t : Table) (n : Nat) (l : Bytes)
     split at h; · cases h
     cases h
 
-/-- Exact guarantee of the shipped check: with a positive budget, every
-field but the last is accounted for and within budget. -/
-theorem decode_budget_impl (C : Codec) (ah : Bool) (budget : Nat) (hb : 0 < budget) :
-    ∀ fuel t hs decoded l t' hs',
-    decoded = tsize hs.dropLast → decoded ≤ budget →
-    decodeLoopOld C ah budget fuel t hs decoded l = .ok (t', hs') →
-    tsize hs'.dropLast ≤ budget := by
-  intro fuel
-  induction fuel with
-  | zero =>
-    intro t hs decoded l t' hs' hd hle h
-    cases l with
-    | nil => simp [decodeLoopOld] at h; obtain ⟨_, rfl⟩ := h; omega
-    | cons _ _ => simp [decodeLoopOld] at h
-  | succ fuel ih =>
-    intro t hs decoded l t' hs' hd hle h
-    cases l with
-    | nil => simp [decodeLoopOld] at h; obtain ⟨_, rfl⟩ := h; omega
-    | cons b bs =>
-      simp only [decodeLoopOld] at h
-      split at h
-      · cases h
-      rename_i hnb
-      split at h
-      · cases h
-      rename_i t1 oh rest hd1
-      -- the accounted value is the size of everything decoded so far
-      have hacc : acct budget hs decoded = tsize hs := by
-        unfold acct
-        by_cases hne : hs = []
-        · subst hne; simp [tsize] at hd ⊢; exact hd
-        · rw [if_pos ⟨hb, hne⟩, tsize_dropLast_add hs, hd]
-      have hle' : acct budget hs decoded ≤ budget := by
-        unfold overBudget at hnb
-        by_cases hne : hs = []
-        · subst hne; rw [hacc]; simp [tsize]
-        · simp only [decide_eq_true_eq, not_and] at hnb; have := hnb hb hne; omega
-      refine ih _ _ _ _ _ _ ?_ hle' h
-      cases oh with
-      | none =>
-        have := decodeOne_none C ah t _ _ _ _ hd1
-        have hnil : hs = [] := List.length_eq_zero_iff.mp this
-        subst hnil; simp [tsize] at hd; simp [acct, tsize, hd]
-      | some e => simp [hacc]
-
 /-- Shipped: every decoded field is within budget. -/
 theorem decode_budget_fixed (C : Codec) (ah : Bool) (budget : Nat) (hb : 0 < budget) :
     ∀ fuel t hs decoded l t' hs',
@@ -299,6 +232,13 @@ theorem decode_budget_fixed (C : Codec) (ah : Bool) (budget : Nat) (hb : 0 < bud
         · cases h
         · rename_i hn
           exact ih _ _ _ _ _ _ (by rw [tsize_append]; omega) (by omega) h
+
+/-- RFC 7541 §4.1 / RFC 9113 §10.5.1: every field of a decoded block, the
+last included, counts against the budget. -/
+theorem decode_budget (C : Codec) (ah : Bool) (budget : Nat) (hb : 0 < budget) (t : Table) (buf : Bytes)
+    (t' : Table) (hs : List Entry) (h : decode C ah t buf budget = .ok (t', hs)) :
+    tsize hs ≤ budget :=
+  decode_budget_fixed C ah budget hb _ t [] 0 buf t' hs rfl (Nat.zero_le _) h
 
 /-! ## Table invariant across a block -/
 
@@ -356,7 +296,7 @@ def findStatic (name : Bytes) : Nat :=
 /-- `_encode_string` with `allow_huffman = False` (`hpack.mojo:480-492`). -/
 def encodeString (C : Codec) (s : Bytes) : Bytes := C.encInt 7 s.length 0 ++ s
 
-/-- mirrors flare/http2/hpack.mojo:494-512 @59bda50 -/
+/-- mirrors flare/http2/hpack.mojo#HpackEncoder.encode sha=808b595ad5e7 at=59bda50f -/
 def encodeField (C : Codec) (h : Entry) : Bytes :=
   let j := findStatic h.name
   C.encInt 4 j 0 ++ (if j = 0 then encodeString C h.name else []) ++ encodeString C h.value

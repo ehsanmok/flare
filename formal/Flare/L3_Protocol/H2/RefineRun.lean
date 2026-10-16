@@ -1,10 +1,10 @@
 import Flare.L3_Protocol.H2.RefineLocal
 
 /-!
-# §5.1 refinement: whole runs of the fixed model
+# §5.1 refinement: whole runs of the model
 
 `fixed_step` combines `fixed_frame` (inbound frames) and `fixed_local`
-(admissible local actions): each step of the fixed model `F` is matched by
+(admissible local actions): each step of the model is matched by
 a run of the §5.1 spec LTS (`StreamSpec.lts`) from the abstraction of the
 old connection, ending in the abstraction of the new one, or in the spec's
 dead state `none` when the reply carries a GOAWAY.
@@ -42,7 +42,7 @@ theorem gaCode_some_of {o : List Out} (h : hasGoaway o = true) : ∃ e, gaCode o
            · exact ih h
 
 theorem local_noGoaway (dec : Dec) (c : Conn) (e : Ev) (r : Conn × List Out)
-    (he : ∀ f, e ≠ .frame f) (h : step F dec c e = .ok r) : hasGoaway r.2 = false := by
+    (he : ∀ f, e ≠ .frame f) (h : step dec c e = .ok r) : hasGoaway r.2 = false := by
   cases e with
   | frame f => exact absurd rfl (he f)
   | release n =>
@@ -58,16 +58,16 @@ theorem local_noGoaway (dec : Dec) (c : Conn) (e : Ev) (r : Conn × List Out)
     all_goals rfl
   | openLocal k es => simp only [step, Except.ok.injEq] at h; subst h; rfl
   | pop k => simp only [step, Except.ok.injEq] at h; subst h; rfl
-  | endLocal k em => simp only [step, Except.ok.injEq] at h; subst h; rfl
+  | endLocal k => simp only [step, Except.ok.injEq] at h; subst h; rfl
   | stream k => simp only [step, Except.ok.injEq] at h; subst h; rfl
   | drain k =>
     simp only [step, Except.ok.injEq] at h; subst h
     unfold drain; repeat' split
     all_goals rfl
 
-/-- One step of the fixed model refines the §5.1 spec. -/
+/-- One step of the model refines the §5.1 spec. -/
 theorem fixed_step (dec : Dec) (c : Conn) (e : Ev) (hI : Inv c) (hok : LocalOK c e) :
-    ∃ r, step F dec c e = .ok r ∧
+    ∃ r, step dec c e = .ok r ∧
       (hasGoaway r.2 = true → ∃ ls, (StreamSpec.lts c.isClient).Run (some (abs c)) ls none) ∧
       (hasGoaway r.2 = false → Inv r.1 ∧ r.1.isClient = c.isClient ∧ ∃ ls, SRun c.isClient (abs c) ls (abs r.1)) := by
   cases e with
@@ -84,7 +84,7 @@ theorem fixed_step (dec : Dec) (c : Conn) (e : Ev) (hI : Inv c) (hok : LocalOK c
     · intro hga
       have hn := gaCode_none_of hga
       have hcl : r.1.isClient = c.isClient := by
-        rcases seq_step F dec c f r hI.ga (Or.inl rfl) hr with h | h
+        rcases seq_step dec c f r hI.ga hr with h | h
         · rw [hga] at h; cases h
         · exact h.2.2
       unfold SGood at hs
@@ -106,24 +106,24 @@ theorem fixed_step (dec : Dec) (c : Conn) (e : Ev) (hI : Inv c) (hok : LocalOK c
     · intro hga
       rw [local_noGoaway dec c _ _ (fun _ h => by cases h) hr] at hga; cases hga
     · intro _
-      exact ⟨hI', (hb_local F dec c _ _ (fun _ h => by cases h) hr).2.2.2.2, ls, hrun⟩
+      exact ⟨hI', (hb_local dec c _ _ (fun _ h => by cases h) hr).2.2.2.2, ls, hrun⟩
 
-/-- The fixed model on a trace, stopping at the first reply that carries a
+/-- The model on a trace, stopping at the first reply that carries a
 GOAWAY (`true` in the second component); `none` if a step raises. -/
 def runG (dec : Dec) : Conn → List Ev → Option (Conn × Bool)
   | c, [] => some (c, false)
   | c, e :: es =>
-    match step F dec c e with
+    match step dec c e with
     | .error _ => none
     | .ok (c', o) => if hasGoaway o then some (c', true) else runG dec c' es
 
 /-- Every local action in the trace meets its contract when it is taken. -/
 def Adm (dec : Dec) : Conn → List Ev → Prop
   | _, [] => True
-  | c, e :: es => LocalOK c e ∧ ∀ r, step F dec c e = .ok r → hasGoaway r.2 = false → Adm dec r.1 es
+  | c, e :: es => LocalOK c e ∧ ∀ r, step dec c e = .ok r → hasGoaway r.2 = false → Adm dec r.1 es
 
 /-- **Run refinement.** From any connection satisfying `Inv`, an admissible
-trace never raises in the fixed model and is matched by a run of the §5.1
+trace never raises and is matched by a run of the §5.1
 spec: to the abstraction of the final connection (which again satisfies
 `Inv`), or to the spec's dead state if the run stopped at a GOAWAY. -/
 theorem fixed_run (dec : Dec) :
@@ -178,10 +178,10 @@ theorem inv_fresh {c : Conn} (h : Fresh0 c) : Inv c := by
 theorem abs_fresh {c : Conn} (h : Fresh0 c) : abs c = fun _ => .idle := by
   funext k
   rw [abs_none (fresh_get h k)]
-  unfold idleAbs; rw [h.lastPeer, h.maxLocalSid]
+  unfold isIdleId; rw [h.lastPeer, h.maxLocalSid]
   cases c.isClient <;> by_cases hk : k = 0 <;> simp [hk] <;> omega
 
-/-- **§5.1 refinement of the fixed model.** From a fresh connection, every
+/-- **§5.1 refinement.** From a fresh connection, every
 admissible trace is matched by a run of the §5.1 spec LTS starting in its
 initial state. -/
 theorem fixed_refines (dec : Dec) (c : Conn) (es : List Ev) (hf : Conn.Fresh c) (hadm : Adm dec c es) :

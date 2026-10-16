@@ -8,10 +8,9 @@ with characters on ASCII input):
 
 * `parse`: `Url.parse` (flare/http/url.mojo:73-197) including userinfo
   stripping, IPv6 brackets, default ports and `_parse_port`.
-* `resolveLocation`: `_resolve_location` (redirect_policy.mojo:191-250); `resolveLocationOld`
-  is the pre-fix code at 59bda50.
-* `sameOrigin`: `_same_origin` (redirect_policy.mojo:253-266); `sameOriginOld` is the
-  pre-fix code at 59bda50.
+* `resolveLocation`: `_resolve_location` (redirect_policy.mojo:191-250), with
+  `removeDotSegments` (RFC 3986 §5.2.4; `rdsAux_no_dots`).
+* `sameOrigin`: `_same_origin` (redirect_policy.mojo:253-266).
 * `decideR`: `RedirectPolicy.decide` (redirect_policy.mojo:271-354).
 * `sendLoop`: the redirect-following loop of `HttpClient._send_once`
   (client.mojo:2196-2281), over an arbitrary server (a function from
@@ -40,7 +39,7 @@ Results: `decide_follow_lt_max`, `sendLoop_terminates` (general),
 `sendLoop_proxy_confined`, `sendLoop_auth_monotone` (general, every server),
 `decide_method_rfc` (general) and `decide_301_delete_is_get` (a documented
 deviation: the `RedirectDecision` docstring says "POST/PUT/PATCH -> GET on
-301/302/303"). Resolution and origin bugs: `Flare.Bugs.APP_43..45`.
+301/302/303").
 -/
 namespace Flare.L4.Redirect
 
@@ -80,10 +79,10 @@ structure Url where
   fragment : Str
   deriving DecidableEq, Repr
 
-/-- mirrors flare/http/url.mojo:264-269 @59bda50 -/
+/-- mirrors flare/http/url.mojo#_default_port sha=09b1173414dd at=59bda50f -/
 def defaultPort (scheme : Str) : Nat := if scheme = "https".toList then 443 else 80
 
-/-- mirrors flare/http/url.mojo:272-299 @59bda50 -/
+/-- mirrors flare/http/url.mojo#_parse_port sha=06e203c840cc at=59bda50f -/
 def parsePort (s : Str) : Option Nat :=
   if s = [] then none
   else if s.length > 5 then none
@@ -92,7 +91,7 @@ def parsePort (s : Str) : Option Nat :=
     if v < 1 ∨ v > 65535 then none else some v
   else none
 
-/-- mirrors flare/http/url.mojo:73-197 @59bda50 -/
+/-- mirrors flare/http/url.mojo#Url.parse sha=8f83d2e2e03d at=59bda50f -/
 def parse (raw : Str) : Option Url := do
   let se ← findSub raw "://".toList
   let scheme := raw.take se
@@ -127,37 +126,26 @@ def parse (raw : Str) : Option Url := do
   if host = [] then none
   pure ⟨scheme, host, port, path, query, fragment⟩
 
-/-- mirrors flare/http/url.mojo:199-207 @59bda50 -/
+/-- mirrors flare/http/url.mojo#Url.request_target sha=50ed52f26cf0 at=59bda50f -/
 def Url.requestTarget (u : Url) : Str := if u.query = [] then u.path else u.path ++ '?' :: u.query
 
 /-! ## `_resolve_location` and `_same_origin` -/
 
 def originStr (u : Url) : Str := u.scheme ++ "://".toList ++ u.host ++ [':'] ++ digitsOf u.port
 
-/-- Directory part of a path (or, in the pre-fix code, of the request
-target): up to and including the last `/` (the whole string when there is
-none).
-mirrors flare/http/redirect_policy.mojo:239-250 (fixed, APP-45) -/
+/-- Directory part of a path: up to and including the last `/` (the whole
+string when there is none).
+mirrors flare/http/redirect_policy.mojo#_resolve_location sha=ec5c3ab3ceea at=fe624697 (fixed, APP-45) -/
 def dirOf (target : Str) : Str :=
   match rfindChar target '/' with
   | some i => target.take (i + 1)
   | none => target
 
-/-- The pre-fix `_resolve_location` (59bda50, before APP-43). -/
-def resolveLocationOld (base loc : Str) : Option Str := do
-  if loc = [] then none
-  if "http://".toList.isPrefixOf loc ∨ "https://".toList.isPrefixOf loc then return loc
-  let b ← parse base
-  let origin := originStr b
-  match loc with
-  | '/' :: _ => return origin ++ loc
-  | _ => return origin ++ dirOf b.requestTarget ++ loc
-
 /-- Stack step of `_remove_dot_segments` (the stack is kept reversed, top
 first): `.` is dropped, `..` pops, anything else (including an empty segment)
 is pushed. The last segment, when it is `.` or `..`, also leaves a trailing
 empty segment (so the path ends in `/`).
-mirrors flare/http/redirect_policy.mojo:154-188 (fixed, APP-45) -/
+mirrors flare/http/redirect_policy.mojo#_remove_dot_segments sha=13ffc9de698e at=fe624697 (fixed, APP-45) -/
 def rdsAux : List Str → List Str → List Str
   | [], st => st
   | [s], st =>
@@ -168,9 +156,52 @@ def rdsAux : List Str → List Str → List Str
     rdsAux rest (if s = ".".toList then st else if s = "..".toList then st.tail else s :: st)
 
 /-- RFC 3986 §5.2.4 on an absolute path (it starts with `/`).
-mirrors flare/http/redirect_policy.mojo:154-188 (fixed, APP-45) -/
+mirrors flare/http/redirect_policy.mojo#_remove_dot_segments sha=13ffc9de698e at=fe624697 (fixed, APP-45) -/
 def removeDotSegments (p : Str) : Str :=
   '/' :: List.intercalate ['/'] (rdsAux (List.splitOn '/' p.tail) []).reverse
+
+/-- RFC 3986 §5.2.4: the stack walk never leaves a `.` or `..` segment in
+its output, whatever it starts from (as long as the stack holds none). -/
+theorem rdsAux_no_dots (segs st : List Str)
+    (h : ∀ x ∈ st, x ≠ ".".toList ∧ x ≠ "..".toList) :
+    ∀ x ∈ rdsAux segs st, x ≠ ".".toList ∧ x ≠ "..".toList := by
+  induction segs generalizing st with
+  | nil => simpa [rdsAux] using h
+  | cons s rest ih =>
+    cases rest with
+    | nil =>
+      intro x hx
+      simp only [rdsAux] at hx
+      by_cases h1 : s = ".".toList
+      · rw [if_pos h1] at hx
+        rcases List.mem_cons.mp hx with hx | hx
+        · subst hx; simp
+        · exact h x hx
+      · rw [if_neg h1] at hx
+        by_cases h2 : s = "..".toList
+        · rw [if_pos h2] at hx
+          rcases List.mem_cons.mp hx with hx | hx
+          · subst hx; simp
+          · exact h x (List.mem_of_mem_tail hx)
+        · rw [if_neg h2] at hx
+          rcases List.mem_cons.mp hx with hx | hx
+          · subst hx; exact ⟨h1, h2⟩
+          · exact h x hx
+    | cons t rest' =>
+      simp only [rdsAux]
+      apply ih
+      by_cases h1 : s = ".".toList
+      · rw [if_pos h1]; exact h
+      · rw [if_neg h1]
+        by_cases h2 : s = "..".toList
+        · rw [if_pos h2]
+          intro x hx
+          exact h x (List.mem_of_mem_tail hx)
+        · rw [if_neg h2]
+          intro x hx
+          rcases List.mem_cons.mp hx with hx | hx
+          · subst hx; exact ⟨h1, h2⟩
+          · exact h x hx
 
 /-- Split a reference at its first `?` or `#`: (path, query-and-fragment). -/
 def cutRef (l : Str) : Str × Str :=
@@ -178,7 +209,7 @@ def cutRef (l : Str) : Str × Str :=
 
 /-- The shipped `_resolve_location`: APP-43 (network-path), and APP-45 (query-only and fragment-only references keep the base path, the
 merge uses the base *path*, and dot segments are removed) are fixed.
-mirrors flare/http/redirect_policy.mojo:191-250 (fixed, APP-43, APP-45) -/
+mirrors flare/http/redirect_policy.mojo#_resolve_location sha=ec5c3ab3ceea at=fe624697 (fixed, APP-43, APP-45) -/
 def resolveLocation (base loc : Str) : Option Str := do
   if loc = [] then none
   if "http://".toList.isPrefixOf loc ∨ "https://".toList.isPrefixOf loc then return loc
@@ -199,15 +230,8 @@ def lowerStr (s : Str) : Str := s.map Char.toLower
 def originOf (u : Str) : Option (Str × Str × Nat) :=
   (parse u).map fun v => (v.scheme, lowerStr v.host, v.port)
 
-/-- The pre-fix `_same_origin` (59bda50, before APP-44): the host compared
-case-sensitively. -/
-def sameOriginOld (a b : Str) : Option Bool := do
-  let u ← parse a
-  let v ← parse b
-  return (u.scheme = v.scheme ∧ u.host = v.host ∧ u.port = v.port : Bool)
-
 /-- The shipped `_same_origin`: APP-44 is fixed (hosts compare lowercased).
-mirrors flare/http/redirect_policy.mojo:253-266 (fixed, APP-44) -/
+mirrors flare/http/redirect_policy.mojo#_same_origin sha=9563d74c1671 at=fe624697 (fixed, APP-44) -/
 def sameOrigin (a b : Str) : Option Bool := do
   let u ← parse a
   let v ← parse b
@@ -246,7 +270,7 @@ structure Decision where
   fwdAuth : Bool
   deriving DecidableEq, Repr
 
-/-- mirrors flare/http/redirect_policy.mojo:271-354 @59bda50 -/
+/-- mirrors flare/http/redirect_policy.mojo#RedirectPolicy.decide sha=d441fd2b0191 at=59bda50f -/
 def decideR (p : Policy) (cur method : Str) (status : Int) (loc : Str) (hops : Int) :
     Option Decision := do
   if loc = [] then return ⟨.stop, [], [], false, true⟩
@@ -371,7 +395,7 @@ def Out.trace : Out → List Hop
 /-- `srv url method = (status, Location)`. `_resolve_url` is the identity
 on absolute URLs, which every hop URL is (the request URL is resolved by
 the caller and `decide` returns absolute URLs).
-mirrors flare/http/client.mojo:2196-2281 @59bda50 -/
+mirrors flare/http/client.mojo#HttpClient._send_once sha=02745a99ea87 at=59bda50f -/
 def sendLoop (p : Policy) (srv : Str → Str → Int × Str) :
     Nat → Str → Str → Bool → Bool → Bool → Bool → Int → Out
   | 0, _, _, _, _, _, _, _ => .fuelOut

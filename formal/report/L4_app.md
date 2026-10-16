@@ -14,45 +14,42 @@ the server side these are:
 - the h2c upgrade hand-off to the HTTP/2 driver and the WebSocket upgrade branch.
 
 On the client side these are `Url.parse`, the redirect policy and loop, and
-the idle-connection pool, including how `HttpClient` leases pooled fds. All models are against flare at commit 59bda50,
-written in core Lean 4.33 (no Mathlib).
+the idle-connection pool, including how `HttpClient` leases pooled fds.
 
-The build covers 22 model modules (`Flare.L4_App.*`) and 25 issue files
-(`Flare.Bugs.APP_*`). The aggregate `Flare.L4_App` imports all of them and
-builds cleanly. The modules contain no `sorry`, `admit` or `axiom`, and
-`native_decide` appears only in `Flare/Bugs/`. `Flare/Audit/L4.lean` prints
-the axiom footprint of 160 headline theorems. Outside `Flare.Bugs` the
-footprint is a subset of `propext`, `Quot.sound` and `Classical.choice`. The
-counterexamples that use `native_decide` add one auxiliary axiom each
-(`<thm>._native.native_decide.ax_*`).
+A last module, `Flare.L4.Policies`, proves five documented promises about
+error logging, entry points, sessions and TLS resumption (section 20).
 
-Theorem count: 446 in the model modules and 112 in the issue files. Unless a
-row says otherwise, a theorem is general: it is quantified over all inputs
-or over every reachable state.
+The models describe the shipped code and are written in core Lean 4.33 (no
+Mathlib). Each implementation definition carries a symbol-based anchor to
+the Mojo function it mirrors, checked by `formal/scripts/anchors.py`.
+
+The build covers 23 model modules (`Flare.L4_App.*`). The aggregate
+`Flare.L4_App` imports all of them and builds cleanly. The modules contain
+no `sorry`, `admit`, `axiom` or `native_decide`. `Flare/Audit/L4.lean`
+prints the axiom footprint of 120 headline theorems; the footprint is a
+subset of `propext`, `Quot.sound` and `Classical.choice`.
+
+Theorem count: 444 in the model modules. Unless a row says otherwise, a
+theorem is general: it is quantified over all inputs or over every
+reachable state.
 
 ## Components
 
 ### 1. HTTP/1.1 connection state machine (`Flare.L4.ConnSM`)
 
 **Model.** The model is a labelled transition system over socket events:
-`arrive bytes`, `readable eof late`, `writable n`, `timeout` and `ioError`.
-It mirrors these parts of `flare/http/_reactor/conn_handle.mojo`:
-
-| Mojo function | Lines |
-|---|---|
-| `on_readable` | 760-916 |
-| `_check_request_complete` | 579-695 |
-| `_apply_keepalive_policy` | 697-715 |
-| `_finalise_response` | 718-756 |
-| `_queue_error` | 1576-1580 |
-| `on_writable` | 1262-1375 |
-| `on_timeout` | 1403-1411 |
+`arrive bytes`, `fin`, `readable late`, `writable n`, `timeout` and `ioError`.
+It mirrors these methods of `ConnHandle` in
+`flare/http/_reactor/conn_handle.mojo`: `on_readable`,
+`_check_request_complete`, `_apply_keepalive_policy`, `_finalise_response`,
+`_queue_error`, `on_writable` and `on_timeout`.
 
 Several inputs are parameters instead of being modelled here:
 
 - HTTP framing is an abstract oracle `frame : Bytes -> needMore | complete r n | error s`. `Oracle.WF` requires that a complete request occupies `0 < n <= len` bytes and is determined by those bytes. The framing itself belongs to L3.
 - Serialisation, the handler outcome, the per-request close verdict and the WebSocket version check are also parameters.
-- A flag `fix` selects the APP-01 fix (`fix = true` is the shipped code, `fix = false` the pre-fix code).
+
+The machine is the shipped code, including the APP-01 fix.
 
 The invariant `Inv` has nine clauses:
 
@@ -64,8 +61,9 @@ The invariant `Inv` has nine clauses:
 - two keep-alive bounds.
 
 The submodule `Framing` models the body and `Content-Length` decisions of
-`serialize_response_into` (`flare/http/_reactor/write_path.mojo:222-235`) and
-the static fast path (`conn_handle.mojo:1174-1211`).
+`serialize_response_into` (`flare/http/_reactor/write_path.mojo`), the HEAD
+flag passed on the handler and error paths, and the static fast path
+(`on_readable_static`).
 
 | Lean name | Statement | Status |
 |---|---|---|
@@ -76,10 +74,9 @@ the static fast path (`conn_handle.mojo:1174-1211`).
 | `Flare.L4.ConnSM.timeout_closes` | `on_timeout` always yields CLOSING with `should_close` and `done` | proved |
 | `Flare.L4.ConnSM.segs_frozen`, `run_segs_frozen` | once `should_close` is set, no later step or run dispatches another request | proved |
 | `Flare.L4.ConnSM.ka_bound` | `keepalive_count <= max_keepalive_requests` in every reachable state, when `max_keepalive_requests >= 1` (which `ServerConfig.check` enforces) | proved |
-| `Flare.L4.ConnSM.closeHonoured_step`, `fixed_no_request_after_close_header` | with the APP-01 fix (shipped): once a `Connection: close` response is queued, no further request is ever dispatched | proved (shipped machine) |
-| `Flare.Bugs.APP_01.violates_spec` | in the pre-fix machine (`ltsOld`), a reachable state violates `CloseHonoured` | counterexample |
+| `Flare.L4.ConnSM.closeHonoured_step`, `no_request_after_close_header` | once a `Connection: close` response is queued, no further request is ever dispatched (APP-01) | proved |
 | `Flare.L4.ConnSM.Framing.serialize_spec` | no body for HEAD, 1xx, 204 or 304; no `Content-Length` on 1xx or 204; otherwise the body is sent with its length | proved |
-| `Flare.L4.ConnSM.Framing.headFlag_spec`, `staticBytesFixed_spec` | with the APP-05 and APP-04 fixes, every response to HEAD has no body | proved (fixed) |
+| `Flare.L4.ConnSM.Framing.headFlag_spec`, `staticBytes_spec` | on the handler path, the error path (APP-05) and the static fast path (APP-04), every response to HEAD has no body | proved |
 
 The original plan asked for six properties:
 
@@ -87,8 +84,8 @@ The original plan asked for six properties:
 - Timeout reaching CLOSING is covered by `timeout_closes`.
 - No read after `should_close` is covered by `run_segs_frozen`.
 - The keep-alive bound is covered by `ka_bound`.
-- Bodyless HEAD, 1xx, 204 and 304 responses hold only for `serialize_response_into`. On two paths HEAD does get a body: the static path (APP-04) and the error path (APP-05).
-- "A close response implies close" was false for the pre-fix code (APP-01). It holds for the shipped machine (`fix = true`).
+- Bodyless HEAD, 1xx, 204 and 304 responses are covered by `serialize_spec`; for HEAD on the static and error paths (APP-04, APP-05) by `staticBytes_spec` and `headFlag_spec`.
+- "A close response implies close" (APP-01) is covered by `no_request_after_close_header`.
 
 `closeHonoured_parse` needed an extra hypothesis, `should_close -> peer_eof`, which `closeHonoured_step` carries as part of its induction.
 
@@ -103,15 +100,10 @@ The original plan asked for six properties:
 
 ### 2. Connection header and keep-alive verdicts (`Flare.L4.KeepAlive`)
 
-**Model.** Byte-level transliterations of four functions in
-`flare/http/_reactor/keepalive_scan.mojo`:
-
-| Mojo function | Lines |
-|---|---|
-| `_is_keepalive_fast` | 206-236 |
-| `_is_close_fast` | 239-259 |
-| `_compute_close_after` | 350-390 |
-| `_wants_close` | 393-484 |
+**Model.** Byte-level transliterations of the `Connection`-header functions
+in `flare/http/_reactor/keepalive_scan.mojo`: the fast checks
+`_connection_is_keepalive` and `_connection_is_close`, the option-list
+reader `_conn_token_mask`, `_compute_close_after` and `_wants_close`.
 
 Every byte constant is spelled out as a list, so no `String` reaches the
 kernel. The spec is RFC 9110 §7.6.1 / RFC 9112 §9.6. The `Connection` value
@@ -120,10 +112,9 @@ is a comma list of tokens, trimmed of OWS and compared case-insensitively.
 
 | Lean name | Statement | Status |
 |---|---|---|
-| `Flare.L4.KeepAlive.computeCloseAfter_eq_spec` | the shipped token-splitting `_compute_close_after` (fixed, APP-03) equals the spec for every header value and version | proved |
-| `Flare.L4.KeepAlive.computeCloseAfterOld_single` | when the value is a single token, the pre-fix function already equals the spec | proved |
-| `Flare.L4.KeepAlive.wantsClose_spec` | the shipped line-start, scan-all `_wants_close` (fixed, APP-02) returns true whenever some header line is `Connection` with a close verdict | proved |
-| `Flare.L4.KeepAlive.wantsClose_sound_close`, `wantsCloseOld_sound_close` | on an HTTP/1.1 request line the shipped scan reports close only for a `Connection` line at a line start with a close verdict; the pre-fix scan only for some `connection:` match | proved |
+| `Flare.L4.KeepAlive.computeCloseAfter_eq_spec` | the token-splitting `_compute_close_after` (APP-03) equals the spec for every header value and version | proved |
+| `Flare.L4.KeepAlive.wantsClose_spec` | the line-start, scan-all `_wants_close` (APP-02) returns true whenever some header line is `Connection` with a close verdict | proved |
+| `Flare.L4.KeepAlive.wantsClose_sound_close` | on an HTTP/1.1 request line the scan reports close only for a `Connection` line at a line start with a close verdict | proved |
 
 **Limitations.** `_wants_close` is modelled on the raw request bytes. The
 claim that the fast paths reach it was checked against the Mojo call sites,
@@ -131,10 +122,11 @@ not modelled.
 
 ### 3. Server configuration and deadlines (`Flare.L4.ServerConfig`)
 
-**Model.** `ServerConfig.check` (`flare/http/_server/config.mojo:276-329`)
+**Model.** `ServerConfig.check` (`flare/http/_server/config.mojo`)
 becomes a decidable predicate. The model also covers the timer instructions
-that `conn_handle.mojo` issues (614-620, 667-691, 1314-1320, 1370-1375) and
-the read-buffer size cap (448-453).
+that `conn_handle.mojo` issues (`_check_request_complete`, `on_writable`)
+and the read-buffer size cap (`_drain_recv`, `_drain_recv_tls`,
+`_append_pre_recv_bytes`).
 
 | Lean name | Statement | Status |
 |---|---|---|
@@ -143,23 +135,18 @@ the read-buffer size cap (448-453).
 | `Flare.L4.ServerConfig.body_timer_le_request` | under `check`, the body timer is at most `request_timeout_ms` when both are enabled | proved |
 | `Flare.L4.ServerConfig.closeTime_le` | given a monotone clock (`Flare.Assumptions.MonotoneClock`), one request's read phase ends by `t0 + R + T` | proved |
 | `Flare.L4.ServerConfig.head_timer_unordered` | `check` accepts configs whose idle (head) timer exceeds `request_timeout_ms` | proved (observation) |
-| `Flare.L4.ServerConfig.overCapImpl_eq_spec` | the subtraction form of the size cap equals the exact-arithmetic spec for all non-negative `Int64` inputs | proved |
+| `Flare.L4.ServerConfig.overCapImpl_eq_spec` | the subtraction form of the size cap (APP-06) equals the exact-arithmetic spec whenever the length and header cap are non-negative, for every `Int64` body cap | proved |
 
 ### 4. Runtime router (`Flare.L4.Router`) and comptime router (`Flare.L4.ComptimeRouter`)
 
 **Model.** The runtime router models these parts of `flare/http/router.mojo`:
-
-| Mojo function | Lines |
-|---|---|
-| `_split_path` | 111-133 |
-| `_compile_segments` | 136-156 |
-| `_match` | 838-873 |
-| `Router.serve` precedence | 675-776 |
-| `_MountedRouter.serve` | 800-823 |
+`_split_path`, `_compile_segments`, `_match`, the precedence of
+`Router.serve`, and `_MountedRouter.serve`.
 
 `Router.serve` tries direct routes in registration order, then mounts, then
 405, then the fallback, then 404. Paths are `List Char`; every byte the
-router inspects is ASCII. The comptime model covers `routes.mojo:66-284`.
+router inspects is ASCII. The comptime model covers `ComptimeRoute`,
+`_match_one` and `ComptimeRouter.serve` in `flare/http/routes.mojo`.
 
 | Lean name | Statement | Status |
 |---|---|---|
@@ -172,9 +159,8 @@ router inspects is ASCII. The comptime model covers `routes.mojo:66-284`.
 | `Flare.L4.Router.mount_boundary` | `/api` does not claim `/apix` | proved |
 | `Flare.L4.Router.splitPath_idem`, `route_ignores_query` | path splitting computes a normal form, and the query never affects routing | proved |
 | `Flare.L4.ComptimeRouter.serveCT_eq_serve` | on any table of valid patterns, ComptimeRouter answers like the runtime router with the same routes | proved |
-| `Flare.L4.ComptimeRouter.matchOne_eq_spec`, `matchOne_nonfinal_wild` | the shipped `_match_one` (fixed, APP-10) meets the matching spec on every pattern, and a non-final `*` matches nothing | proved |
+| `Flare.L4.ComptimeRouter.matchOne_eq_spec`, `matchOne_nonfinal_wild` | `_match_one` (APP-10) meets the matching spec on every pattern, and a non-final `*` matches nothing | proved |
 | `Flare.L4.ComptimeRouter.router_equiv_comptime` | on valid patterns, registering the table succeeds and both routers agree on every request | proved |
-| `Flare.Bugs.APP_10.matchOne_violates_spec` | the pre-fix ComptimeRouter matched `/files/a` against the invalid pattern `/files/*/meta` | counterexample (resolved) |
 
 The Router module has 61 theorems, of which the table lists the headline
 ones. The rest are lemmas about splitting, compilation and stripping.
@@ -182,18 +168,12 @@ ones. The rest are lemmas about splitting, compilation and stripping.
 ### 5. Generic middleware (`Flare.L4.Middleware`)
 
 **Model.** A handler is `Req -> Except String Resp`, where a Mojo `raise` is
-`.error`. Header maps mirror `HeaderMap` (`flare/http/headers.mojo:139-213`):
+`.error`. Header maps mirror `HeaderMap` (`flare/http/headers.mojo`):
 an ordered list with case-insensitive names. `set` replaces the first match or
 appends, `append` always appends, and `get` returns the first match.
 
-The model covers these structs in `flare/http/middleware.mojo`:
-
-| Mojo struct | Lines |
-|---|---|
-| `Logger` | 61-86 |
-| `RequestId` | 105-111 |
-| `Compress.serve` | 345-382 |
-| `CatchPanic` | 397-404 |
+The model covers the `serve` methods of `Logger`, `RequestId`, `Compress`
+and `CatchPanic` in `flare/http/middleware.mojo`.
 
 Logger's printing is dropped. RequestId's generated id
 (`perf_counter_ns`) is a parameter. Compress takes the negotiated pick and
@@ -208,19 +188,20 @@ the encoder as parameters; negotiation itself is component 6.
 | `Flare.L4.Middleware.catchPanic_outside_requestId_error` | `CatchPanic(RequestId(h))` returns the bare 500 (no id) when `h` raises: stacking order matters | proved |
 | `Flare.L4.Middleware.compress_skips_encoded` | a response that already has `Content-Encoding` is untouched | proved |
 | `Flare.L4.Middleware.compress_content_length`, `compress_vary_when_encoded` | when Compress changes the body, `Content-Length` equals the encoded length; whenever it changes a response, `Vary: Accept-Encoding` is present | proved |
-| `Flare.Bugs.APP_26.violates_spec`, `APP_27.violates_spec` | a 206 is re-encoded; the identity variant lacks `Vary` | counterexample |
-| `Flare.L4.Middleware.compress_partial` | the shipped Compress passes every 206 / `Content-Range` response through unchanged | proved (fixed) |
-| `Flare.L4.Middleware.compress_vary`, `compress_agrees` | the shipped Compress meets the APP-27 spec (`VarySpec`), and agrees with the pre-fix `compressNoVary` whenever that one changes a response | proved (fixed) |
+| `Flare.L4.Middleware.compress_partial` | Compress passes every 206 / `Content-Range` response through unchanged (APP-26, spec `PartialSpec`) | proved |
+| `Flare.L4.Middleware.compress_vary`, `compress_agrees` | Compress meets the APP-27 spec (`VarySpec`); it agrees with `compressNoVary` (the same code without the identity-branch `Vary`) whenever that one changes a response, so the APP-27 fix only adds `Vary` | proved |
 
 **Limitations.** The model does not check the header-injection test of
 `HeaderMap.set`. A value read from a parsed request cannot contain CR or LF.
 
 ### 6. Content-coding negotiation (`Flare.L4.Negotiate`)
 
-**Model.** The model has two layers over `flare/http/middleware.mojo:131-260`.
-The byte layer covers `_parse_q`, splitting, stripping, lowercasing and the
-`q=` search. The decision layer is the loop body at 236-252 and the final
-choice at 253-260. The spec follows RFC 9110 §12.5.3:
+**Model.** The model has two layers over `_parse_q` and `negotiate_encoding`
+in `flare/http/middleware.mojo`. The byte layer covers `_parse_q`,
+splitting, stripping, lowercasing and the `q=` search. The decision layer,
+`decide'`, is the loop that collects the per-coding maxima and the `*`
+weight (`stepFixed`), followed by the final choice. The spec follows RFC
+9110 §12.5.3:
 
 - each coding's effective weight is its explicit maximum, else the `*` weight;
 - the pick is the highest non-zero weight;
@@ -231,26 +212,19 @@ choice at 253-260. The spec follows RFC 9110 §12.5.3:
 |---|---|---|
 | `Flare.L4.Negotiate.parseQ_le`, `parseQ_zero_dot`, `parseQ_failOpen` | weights lie in 0..1000; `0.DDD` is read exactly; a weight not starting with `0` reads as 1000 | proved |
 | `Flare.L4.Negotiate.classify_upper` | coding names are case-insensitive | proved |
-| `Flare.L4.Negotiate.decideOld_eq_spec_of_noStar`, `negotiateOld_eq_spec_of_noStar` | without `*`, the pre-fix loop returned exactly the spec pick, at the entry level and at the byte level | proved |
-| `Flare.L4.Negotiate.specPick_perm`, `decide'_perm` | the spec, and the shipped decision (with `*`), do not depend on entry order | proved |
-| `Flare.L4.Negotiate.decideOld_br_imp` | br is chosen only when brotli is linkable (pre-fix loop; the shipped one also reads br through the spec) | proved |
-| `Flare.L4.Negotiate.decide'_eq_spec`, `negotiate_eq_spec`, `decide'_refused_identity` | the shipped decision (fixed, APP-20) equals the spec on every entry list and header; an explicitly refused identity is never served unless nothing is acceptable | proved |
-| `Flare.L4.Negotiate.parseHeaderMojo_eq`, `negotiateOldMojo_eq` | a byte-level model of Mojo's own comma splitter (`parseHeaderMojo`, which emits no trailing empty segment) parses every header to the same entry list as the model's splitter, so the negotiation results are equal on every input | proved |
+| `Flare.L4.Negotiate.specPick_perm`, `decide'_perm` | the spec and the decision (with or without `*`) do not depend on entry order | proved |
+| `Flare.L4.Negotiate.decide'_eq_spec`, `negotiate_eq_spec`, `decide'_refused_identity` | the decision (APP-20) equals the spec on every entry list and header, so br is picked only when brotli is linkable; an explicitly refused identity is never served unless nothing is acceptable | proved |
+| `Flare.L4.Negotiate.parseHeaderMojo_eq` | a byte-level model of Mojo's own comma splitter (`parseHeaderMojo`, which emits no trailing empty segment) parses every header to the same entry list as the model's splitter, so the negotiation results are equal on every input | proved |
 
-**Limitations.** None beyond the L3 framing boundary. The earlier gap (Mojo's
-splitter does not emit a trailing empty segment, the model's does) is closed
-by `parseHeaderMojo_eq`.
+**Limitations.** None beyond the L3 framing boundary. Mojo's splitter does
+not emit a trailing empty segment and the model's does; `parseHeaderMojo_eq`
+shows the difference never changes the entry list.
 
 ### 7. CORS (`Flare.L4.Cors`)
 
-**Model.** The model covers four Mojo functions:
-
-| Mojo function | Lines in `flare/http/cors.mojo` |
-|---|---|
-| `_origin_allowed` | 89-98 |
-| `_join` | 101-107 |
-| `_attach_origin` | 121-150 |
-| `Cors.serve` | 152-197 |
+**Model.** The model covers five functions in `flare/http/cors.mojo`:
+`_origin_allowed`, `_join`, `Cors._attach_origin`, `_ensure_vary_origin`
+and `Cors.serve`.
 
 Header names are a normalised inductive type. The spec is WHATWG Fetch
 §3.2. Allowed origins form a set, and `*` never authorises a credentialed
@@ -260,22 +234,19 @@ depends on `Origin`, every response carries `Vary: Origin`.
 | Lean name | Statement | Status |
 |---|---|---|
 | `Flare.L4.Cors.originAllowed_sound` | flare never admits an origin the spec rejects (fail-closed) | proved |
-| `Flare.L4.Cors.originAllowed_iff`, `originAllowed_eq_spec_noCreds`, `originAllowed_perm` | the shipped check (fixed, APP-21) equals the spec for every configuration, credentials or not, and does not depend on list order | proved |
+| `Flare.L4.Cors.originAllowed_iff`, `originAllowed_eq_spec_noCreds`, `originAllowed_perm` | the check (APP-21) equals the spec for every configuration, credentials or not, and does not depend on list order | proved |
 | `Flare.L4.Cors.acao_not_star_with_creds`, `acao_origin_or_star` | with credentials, ACAO is never `*` and equals the request origin | proved |
 | `Flare.L4.Cors.attach_has_vary` | every response the middleware stamps carries `Vary: Origin` | proved |
 | `Flare.L4.Cors.preflight_ignores_inner` | an allowed preflight is a 204 that does not call the inner handler | proved |
-| `Flare.L4.Cors.serve_vary` | the shipped `serve` (fixed, APP-22) puts `Vary: Origin` on every response | proved |
+| `Flare.L4.Cors.serve_vary` | `serve` (APP-22) puts `Vary: Origin` on every response | proved |
 
 ### 8. Cookies (`Flare.L4.Cookie`)
 
 **Model.** Byte-level models of four parts of `flare/http/cookie.mojo`:
-
-| Mojo function | Lines |
-|---|---|
-| `Cookie.to_set_cookie_header` and its validation | 89-136, 168-212 |
-| `parse_cookie_header` | not mapped to lines |
-| `CookieJar.to_request_header` | not mapped to lines |
-| `_parse_max_age` | 146-165 |
+`Cookie.to_set_cookie_header` and its validation helpers (`_is_token_byte`,
+`_all_token`, `_is_cookie_value`, `_is_av_value`), `parse_cookie_header`,
+`CookieJar.to_request_header` and `_parse_max_age`. Only
+`to_set_cookie_header`, its helpers and `_parse_max_age` carry anchors.
 
 The spec covers RFC 6265 §4.1.1, §4.2.1 and §5.2.2.
 
@@ -291,36 +262,30 @@ The spec covers RFC 6265 §4.1.1, §4.2.1 and §5.2.2.
 ### 9. Form codec (`Flare.L4.Form`)
 
 **Model.** Byte-level models of five functions in `flare/http/form.mojo`:
-
-| Mojo function | Lines |
-|---|---|
-| `_hex_nibble` | 28-47 |
-| `urldecode` | 50-95 (byte loop `urldecodeBytes`, then the UTF-8 check) |
-| `urlencode` | 90-129 |
-| `FormData.to_urlencoded` | 199-213 |
-| `parse_form_urlencoded` | 216-264 |
+`_hex_nibble`, `urldecode` (the byte loop `urldecodeBytes`, then the UTF-8
+check added for APP-24), `urlencode`, `FormData.to_urlencoded` and
+`parse_form_urlencoded`.
 
 The spec covers WHATWG URL §5.1-5.2. It also requires RFC 3629 well-formed
-UTF-8 for anything passed to `String(unsafe_from_utf8=...)`.
+UTF-8 for anything passed to a Mojo `String`.
 
 | Lean name | Statement | Status |
 |---|---|---|
 | `Flare.L4.Form.urldecodeBytes_urlencode` | the byte loop inverts `urlencode` for every byte string | proved |
-| `Flare.L4.Form.urldecode_urlencode` | the shipped `urldecode (urlencode s) = s` for every well-formed UTF-8 string | proved |
 | `Flare.L4.Form.urlencode_noSep` | encoded bytes contain no `&`, `;` or `=` | proved |
-| `Flare.L4.Form.parseFormOld_toUrlencoded` | the pre-fix parser round-trips every list of byte-string pairs (including ill-formed ones) | proved |
-| `Flare.L4.Form.parseForm_toUrlencoded` | the shipped `parse_form_urlencoded (to_urlencoded fd) = fd` for every list of well-formed UTF-8 pairs | proved |
-| `Flare.L4.Form.urldecode_valid`, `urldecode_urlencode` | the shipped decode only returns well-formed UTF-8 and keeps the round trip on valid input | proved |
-| `Flare.Bugs.APP_24.urldecode_violates_spec` | the pre-fix `urldecode("%F0")` returned the lone byte `0xF0` | counterexample |
-| `Flare.Bugs.APP_24.parseForm_rejects_F0` | the shipped `parse_form_urlencoded("a=%F0")` is rejected | proved (fixed) |
+| `Flare.L4.Form.parseFormWith_toUrlencoded` | for any decoder that inverts `urlencode` on the components that occur, the parser round-trips `to_urlencoded` | proved |
+| `Flare.L4.Form.parseForm_toUrlencoded` | `parse_form_urlencoded (to_urlencoded fd) = fd` for every list of well-formed UTF-8 pairs | proved |
+| `Flare.L4.Form.urldecode_valid`, `urldecode_urlencode` | `urldecode` only returns well-formed UTF-8 (APP-24), and `urldecode (urlencode s) = s` for every well-formed UTF-8 string | proved |
+| `Flare.L4.Form.urldecode_sub` | the UTF-8 check only rejects; it never changes a successful decode of the byte loop | proved |
 
 ### 10. URL parser (`Flare.L4.Url`)
 
-**Model.** A byte-level model of `Url.parse` (`flare/http/url.mojo:73-197`),
-`_find` / `_rfind` (218-261), `_default_port` (264-269) and `_parse_port`
-(272-299). One combinator, `parseWith`, is parameterised by the three
-splitting steps, so the shipped parser and the fixed parsers share every
-other line. The spec is RFC 3986 §3.2:
+**Model.** A byte-level model of `Url.parse` (`flare/http/url.mojo`),
+`_find` / `_rfind`, `_default_port` and `_parse_port`. One combinator,
+`parseWith`, is parameterised by the three splitting steps; `parse`
+instantiates it with the first-`#` fragment split, the `/`-or-`?`
+authority split (APP-23) and the last-`@` userinfo strip (APP-25). The
+spec is RFC 3986 §3.2:
 
 - the authority ends at the first `/`, `?` or `#`;
 - the host is a piece of the authority and contains no `@`;
@@ -331,36 +296,44 @@ other line. The spec is RFC 3986 §3.2:
 | `Flare.L4.Url.parsePort_iff`, `parsePort_fits` | `_parse_port` accepts exactly 1-5 digits with value 1..65535, and the accumulator cannot overflow | proved |
 | `Flare.L4.Url.parse_port` | every successful parse has `1 <= port <= 65535` | proved |
 | `Flare.L4.Url.hostPort_ipv6_port`, `hostPort_regname` | IPv6 brackets are stripped; a plain `host:port` is recovered exactly | proved |
-| `Flare.L4.Url.parse_spec` | the shipped parser meets both host specs for all inputs | proved |
-| `Flare.L4.Url.parseOld_eq_parse_of_clean` | the pre-fix parser (`parseOld`) equals the shipped one on inputs with no `?`, no `#` and at most one `@` | proved |
-| `Flare.Bugs.APP_23.host_confusion`, `APP_25.host_has_at` | host-confusion witnesses | counterexample |
+| `Flare.L4.Url.parseWith_fixedSplit_hostInAuthority`, `parseWith_fixedStrip_noAt` | with the first-`#` fragment split and the `/`-or-`?` authority split, the host lies inside the RFC authority for any userinfo strip that returns a piece of its input; with the last-`@` strip, the host contains no `@` whatever the other steps are | proved |
+| `Flare.L4.Url.parse_spec` | `parse` meets both host specs for all inputs | proved |
 
 ### 11. Reliability: RateLimit, CircuitBreaker, Retry
 
-**RateLimit** (`Flare.L4.RateLimit`, `reliability.mojo:361-404`). One locked
-read-modify-write per request, with wrapping `Int64` arithmetic. The spec is
-an exact-arithmetic token bucket. `step` is the shipped code, with `elapsed`
-clamped to `maxElapsed` (APP-40); `stepOld` is the pre-fix code.
+**RateLimit** (`Flare.L4.RateLimit`, `RateLimit.serve` in
+`reliability.mojo`). One locked read-modify-write per request, with
+wrapping `Int64` arithmetic. The spec is an exact-arithmetic token bucket.
+`step` is the shipped code, with `elapsed` clamped to `maxElapsed`
+(APP-40). `stepUnclamped` is the same step without the clamp; it agrees
+with `step` whenever `elapsed` is within the clamp, which is how the proof
+of `step_eq_spec` uses it.
 
-**CircuitBreaker** (`Flare.L4.CircuitBreaker`, `reliability.mojo:413-485`).
-The model is an LTS whose labels are request arrivals and completions, so any
-number of requests can be in flight at once. The entry check and the outcome
-bookkeeping are separate atomic steps. This is coarser than the Mojo code, so
-each counterexample trace of the model is also a trace of the code. Two flags
-select the APP-41 and APP-42 fixes.
+**CircuitBreaker** (`Flare.L4.CircuitBreaker`, `CircuitBreaker.serve` and
+`_record_failure` in `reliability.mojo`). The model is an LTS whose labels
+are request arrivals and completions, so any number of requests can be in
+flight at once. The entry check and the outcome bookkeeping are separate
+atomic steps. This is coarser than the Mojo code, so every trace of the
+model is also a trace of the code, given that the OPEN -> HALF_OPEN claim
+is a compare-and-swap. `step` is the shipped code: opened-at is stamped with
+the completion time (APP-41), and arrivals fast-fail while half-open
+(APP-42).
 
-**Retry** (`Flare.L4.Retry`, `reliability.mojo:164-271`). Covers
-`_backoff_sleep_ms` with wrapping multiplication, and the attempt loop over an
-arbitrary sequence of outcomes.
+**Retry** (`Flare.L4.Retry`, `_backoff_sleep_ms` and `Retry.serve` in
+`reliability.mojo`). Covers `_backoff_sleep_ms` with wrapping
+multiplication, and the attempt loop over an arbitrary sequence of
+outcomes.
 
 | Lean name | Statement | Status |
 |---|---|---|
-| `Flare.L4.RateLimit.step_eq_spec`, `step_inv` | for any idle time (sane rate and burst, no overflow hypothesis) the shipped `step` computes exactly the spec tokens and decision, and keeps `0 <= tokens <= cap` | proved |
+| `Flare.L4.RateLimit.step_eq_spec`, `step_inv` | for any idle time (sane rate and burst, no overflow hypothesis) `step` computes exactly the spec tokens and decision, and keeps `0 <= tokens <= cap` | proved |
 | `Flare.L4.RateLimit.step_last_ok` | the clock carry never runs ahead of `now` or backwards, and leaves under one milli-token period uncredited | proved |
-| `Flare.L4.RateLimit.stepOld_eq_spec`, `stepOld_inv`, `stepOld_last_ok` | the same for the pre-fix `stepOld`, but only while `elapsed * rate` fits in `Int64` | proved |
-| `Flare.L4.RateLimit.overflow_iff`, `threshold_rate_*` | the exact wrap threshold `elapsed > (2^63-1)/rate`, instantiated for several rates | proved |
-| `Flare.L4.CircuitBreaker.counts_inductive`, `step_counts_inv`, `step_counts_inv_shipped` | failure counts are consistent with the state in every reachable state | proved |
+| `Flare.L4.RateLimit.stepUnclamped_eq_spec`, `stepUnclamped_inv`, `stepUnclamped_last_ok` | the same for `stepUnclamped`, under the extra hypothesis that `elapsed * rate` fits in `Int64` | proved |
+| `Flare.L4.RateLimit.overflow_iff`, `threshold_rate_1e6`, `threshold_rate_1e5`, `threshold_rate_1e3` | the exact wrap threshold `elapsed > (2^63-1)/rate` of the unclamped product, instantiated for several rates | proved |
+| `Flare.L4.CircuitBreaker.counts_inductive`, `step_counts_inv` | failure counts are consistent with the state in every reachable state | proved |
 | `Flare.L4.CircuitBreaker.step_open_rejects`, `step_success_closes`, `step_failure_reopens` | the sequential transition rules | proved |
+| `Flare.L4.CircuitBreaker.cooldown_respected` | every OPEN -> HALF_OPEN transition is an arrival at least `cooldown` after the breaker (re)opened (APP-41) | proved |
+| `Flare.L4.CircuitBreaker.single_probe` | while half-open, at most one request has been admitted since the breaker entered half-open (APP-42) | proved |
 | `Flare.L4.Retry.budget_eq_spec`, `budget_le_max`, `budget_mono` | for a sane policy the backoff is `min(initial * m^(N-2), max)`, non-decreasing and capped | proved |
 | `Flare.L4.Retry.sleep_bounds` | the jittered sleep lies in `[0, budget]`, assuming `random_ui64` stays in range (hypothesis `DrawOk`) | proved |
 | `Flare.L4.Retry.serve_calls_bounded`, `serve_result_is_last`, `serve_retry_only_on_failure`, `serve_failure_exhausts` | between 1 and `max_attempts` calls; returns the last outcome; retries only after failure | proved |
@@ -371,17 +344,19 @@ arbitrary sequence of outcomes.
 **Model.** The model has four parts:
 
 - `Url.parse`;
-- `_resolve_location` (`redirect_policy.mojo:154-185`);
-- `_same_origin` (188-198);
-- `RedirectPolicy.decide` (271-354).
+- `_resolve_location` with `_remove_dot_segments` (`redirect_policy.mojo`;
+  APP-43, APP-45);
+- `_same_origin`, which compares lowercased hosts (APP-44);
+- `RedirectPolicy.decide`.
 
 It also covers the redirect loop of `HttpClient._send_once`
-(`client.mojo:2196-2281`). That loop runs over an arbitrary server and
-tracks which credentials each hop carries.
+(`client.mojo`). That loop runs over an arbitrary server and tracks which
+credentials each hop carries.
 
 | Lean name | Statement | Status |
 |---|---|---|
 | `Flare.L4.Redirect.decide_follow_lt_max`, `sendLoop_terminates` | at most `max_redirects` redirects are followed | proved |
+| `Flare.L4.Redirect.rdsAux_no_dots` | the stack walk of `_remove_dot_segments` (RFC 3986 §5.2.4) never leaves a `.` or `..` segment in its output, from any stack that holds none | proved |
 | `Flare.L4.Redirect.sendLoop_confined` | with `forward_auth_cross_origin = False`, every hop that carries `Authorization`, a caller `Cookie` or `Proxy-Authorization` targets the original origin, for every server | proved |
 | `Flare.L4.Redirect.sendLoop_auth_monotone`, `sendLoop_cookie_proxy_monotone` | once dropped, a credential is never re-added, even if a later hop returns to the original origin | proved |
 | `Flare.L4.Redirect.decide_method_rfc` | 307/308 keep the method and body; 303 turns all but HEAD into GET | proved |
@@ -389,8 +364,8 @@ tracks which credentials each hop carries.
 
 ### 13. Client connection pool (`Flare.L4.ClientPool`)
 
-**Model.** Per-origin LIFO deques of idle fds, as in
-`flare/http/client_pool.mojo:203-293`:
+**Model.** Per-origin LIFO deques of idle fds, as in `ClientPool.release`
+and `ClientPool.acquire` (`flare/http/client_pool.mojo`):
 
 - `release` closes the fd when pooling is off, the total cap is reached or the
   host's deque is full; otherwise it appends.
@@ -420,32 +395,31 @@ values.
 
 ### 14. Single-worker drain (`Flare.L4.Drain`)
 
-**Model.** `HttpServer.drain(timeout_ms)` (`flare/http/server.mojo:1694-1755`)
-closes the listener, sets `_stopping`, and returns a `ShutdownReport` of
-zeros. A response still being written when the reactor sees the flag
-(`lag ≤ pollCap` = 100 ms later) is cut: the bytes delivered are
-`min pending (rate * (stopDelay + lag))`, where `stopDelay` is the time from
-the `drain` call to the flag (`delivered`, mirrors the loop exit at
-`_unified_reactor_impl.mojo:1103-1170` and the close-all at 1000-1046).
+**Model.** `HttpServer.drain(timeout_ms)` (`flare/http/server.mojo`)
+closes the listener, waits out `timeout_ms` (negative clamps to 0), then
+sets `_stopping` (APP-46). The reactor sees the flag at most
+`pollCap` = 100 ms later (`_poll_timeout_ms`) and closes every live
+connection. A response still being written then is cut: the bytes
+delivered are `min pending (rate * (stopDelay + lag))`, where `stopDelay`
+is the time from the `drain` call to the flag and `lag ≤ pollCap`
+(`delivered`, which mirrors the loop exit of `_run_unified_loop_for_fd` and
+the close-all in `_drain_remaining_conns_unified`). The `ShutdownReport`
+counts are not modelled.
 
 | Lean name | Statement | Status |
 |---|---|---|
-| `Flare.L4.Drain.drain_ignores_timeout` | the result does not depend on `timeout_ms` | proved (APP-46) |
-| `Flare.L4.Drain.drain_report_zero`, `drain_stops` | the report is all zeros; the listener is closed and `_stopping` set | proved |
-| `Flare.L4.Drain.delivered_le_pollCap` | whatever the timeout, at most `rate * pollCap` more bytes go out | proved (APP-46) |
-| `Flare.L4.Drain.fixed_graceful` | waiting out `timeout_ms` before setting the flag delivers every response the peer can absorb within the timeout | proved |
-| `Flare.L4.Drain.fixed_zero_is_hard_stop` | under the fix, `drain(0)` is still the hard stop | proved |
+| `Flare.L4.Drain.graceful` | `stopDelay` meets `GracefulSpec`: a response the peer can absorb within `timeout_ms` is delivered in full, whatever the poll lag | proved |
+| `Flare.L4.Drain.stopDelay_nonpos` | `drain(t)` with `t <= 0` sets the flag at once, so `drain(0)` is the hard stop of `close()` | proved |
 
-The zero counts are documented (see "Documentation gaps"); the ignored
-timeout is APP-46. The multi-worker `Scheduler.drain` belongs to L5.
+The multi-worker `Scheduler.drain` belongs to L5.
 
 ### 15. `HttpClient` pool leases (`Flare.L4.ClientLease`)
 
-**Model.** `_send_h1_pooled` (`flare/http/client.mojo:2509-2593`) is the
+**Model.** `HttpClient._send_h1_pooled` (`flare/http/client.mojo`) is the
 only caller of `ClientPool.acquire` and `release`. `sendPooled` covers every
 path through it, with an oracle choosing which call raises
 (`_arm_read_timeout`, `write_all`, the framed read, `release`, `_may_replay`,
-the fresh dial). Across requests, `Client` composes the pool with the set of
+the fresh dial). Across requests, `client` composes the pool with the set of
 fds held by requests; that the kernel never returns an fd number that is
 still open is the guard of `dial`. The TLS and QUIC pools hold values that
 are moved into `release` and are not `Copyable`, so a second release is a
@@ -461,35 +435,35 @@ compile-time error; they are not modelled.
 ### 16. Connection extensions: h2c hand-off and WebSocket over TLS (`Flare.L4.ConnExt`)
 
 **Model.** `H2c` keeps the connection kind, whether an upgrade is pending,
-the bytes of the 101 still queued and whether write interest is armed. A
-writable edge on a `KIND_H1` connection goes to `_drive_h1_writable`
-(`_unified_reactor_impl.mojo:812-855`, `243-258`), which ignores the
-`h2c_upgrade` cue that `on_writable` keeps reporting once the 101 has
-flushed (`conn_handle.mojo:1353-1362`); only `_drive_h1` (174-215)
-migrates. After the upgrade request the client waits for the server
-preface (RFC 7540 §3.2), so the only events are writable edges, which keep
-coming while write interest is armed. `Ws` is the WebSocket branch of
-`on_readable` (`conn_handle.mojo:838-885`) and where `_handle_ws_upgrade`
-writes (the detached raw fd, 1476-1574).
+the bytes of the 101 still queued and whether write interest is armed.
+Only `_drive_h1` (`flare/http/_unified_reactor_impl.mojo`) acts on the
+`h2c_upgrade` cue that `on_writable` reports once the 101 has flushed, by
+migrating the connection; `_drive_h1_writable` applies the step without
+migrating. `route` mirrors the routing in `_unified_handle_conn_event`: a
+writable edge on a `KIND_H1` connection goes to `_drive_h1` while an
+upgrade is pending (APP-47), otherwise to `_drive_h1_writable`. After the
+upgrade request the client waits for the server preface (RFC 7540 §3.2),
+so the only events are writable edges, which keep coming while write
+interest is armed. `Ws` is the WebSocket branch of `on_readable`, guarded
+by `not self.tls` (APP-48), and where `_handle_ws_upgrade` writes (the
+detached raw fd).
 
 | Lean name | Statement | Status |
 |---|---|---|
-| `Flare.L4.ConnExt.H2c.impl_spins` | with the 101 queued behind a full send buffer, after any number of writable edges the connection is still `KIND_H1` and write-armed | proved (APP-47) |
-| `Flare.L4.ConnExt.H2c.fixed_spec` | routing the edge to `_drive_h1` while an upgrade is pending migrates on the first writable edge, and the connection stays HTTP/2 | proved |
-| `Flare.L4.ConnExt.Ws.old_violates` | before the fix (`wireOld`), a valid handshake on a TLS connection with a WebSocket handler is answered in cleartext | proved (APP-48, resolved) |
-| `Flare.L4.ConnExt.Ws.spec`, `cleartext_same` | the shipped branch (`not self.tls`) keeps TLS connections inside TLS and changes nothing on cleartext ones | proved |
+| `Flare.L4.ConnExt.H2c.run_spec` | with the 101 queued behind a full send buffer, the first writable edge migrates the connection, and it stays HTTP/2 after any number of further edges | proved |
+| `Flare.L4.ConnExt.Ws.spec` | a TLS connection never writes in cleartext, whether or not a WebSocket handler is configured and the request is a handshake | proved |
 
 ### 17. Liveness of the connection machine (`Flare.L4.ConnLive`)
 
 **Model.** `ConnLive` runs `ConnSM.step` over an infinite event sequence
-`σ` (`trace fix P s0 σ n` is the state after `n` events) from any state
+`σ` (`trace P s0 σ n` is the state after `n` events) from any state
 satisfying `ConnSM.Inv`. It adds two hypotheses.
 
 - `Fair` is about the reactor and the kernel. While the handle is reading
   and the kernel holds data, a FIN is pending, or `read_buf` already holds a
   whole request, a readable event is eventually delivered. The last case is
   the reactor's re-drive of pipelined requests via `has_buffered_request()`
-  (`_unified_reactor_impl.mojo:220-235, 832-855`). While the handle is
+  (in `_drive_h1` and `_unified_handle_conn_event`). While the handle is
   writing, a writable event with room for at least one byte is eventually
   delivered, which is the kernel draining towards a reading peer.
 - `Oracle.Ext` says that bytes appended behind a complete request do not
@@ -507,20 +481,20 @@ every whole request the peer sends is answered, in order, unless the
 connection closes for one of the reasons in `done_reason`.
 
 **Limitations.** Fairness is a hypothesis, not proved from the reactor
-loop. The pipelined re-drive was checked by reading the cited lines.
+loop. The pipelined re-drive was checked by reading the reactor code.
 
 ### 18. Streaming bodies and TLS cross-interest (`Flare.L4.ConnStream`)
 
 **Streaming model (`Stream`).** A handler that returns a streaming response
 leaves the chunked head in `write_buf` and the source in `body_src`
-(`_finalise_response`, `conn_handle.mojo:731-743`). The source is a list of
+(`_finalise_response` in `conn_handle.mojo`). The source is a list of
 poll results (data, end of stream, or a raise), one per `next()` call; an
-empty data chunk is an idle poll. `batch` mirrors `_stream_refill`
-(1621-1642): at most `STREAM_BATCH_CHUNKS` chunks or `STREAM_BATCH_BYTES`
-bytes, an empty chunk ends the batch, end of stream appends the terminator
-and drops the source, a raise closes the connection. `wloop` mirrors the
-flush and refill passes of `on_writable` (1286-1351), at most
-`STREAM_EDGE_PASSES` per writable edge, and `finish` the tail (1364-1375).
+empty data chunk is an idle poll. `batch` mirrors `_stream_refill`: at
+most `STREAM_BATCH_CHUNKS` chunks or `STREAM_BATCH_BYTES` bytes, an empty
+chunk ends the batch, end of stream appends the terminator and drops the
+source, a raise closes the connection. `wloop` mirrors the flush and
+refill passes of `on_writable`, at most `STREAM_EDGE_PASSES` per writable
+edge, and `finish` the tail of `on_writable`.
 Chunk framing and the terminator are parameters (L3). The kernel takes at
 most `k` bytes per writable edge.
 
@@ -532,12 +506,13 @@ most `k` bytes per writable edge.
 | `Flare.L4.ConnStream.Stream.interest` | still writing and not done means write interest only; back to reading means read interest; done means `should_close`; never write interest outside STATE_WRITING | proved |
 
 **TLS model (`Tls`).** `SSL_read` may stop on `SSL_IO_WANT_WRITE`
-(`conn_handle.mojo:501-507`) and `SSL_write` on `SSL_IO_WANT_READ`
-(1231-1235); both set `tls_cross_interest` and arm read and write. The
-reactor clears the flag and sends readable edges, and writable edges while
-the flag is set, to the read driver (`_unified_reactor_impl.mojo:812-831`);
-in STATE_WRITING the read driver's `on_readable` asks for writability and
-the inline cycle runs `on_writable` (174-190). The TLS layer is an oracle:
+(`_drain_recv_tls`) and `SSL_write` on `SSL_IO_WANT_READ`
+(`_flush_write_buf_tls`); both set `tls_cross_interest` and arm read and
+write. The reactor (`_unified_handle_conn_event`) clears the flag and sends
+readable edges, and writable edges while the flag is set, to the read
+driver; in STATE_WRITING the read driver's `on_readable` asks for
+writability and the inline cycle of `_drive_h1` runs `on_writable`. The TLS
+layer is an oracle:
 each edge carries what `SSL_read` returns before it stops and why, and how
 many bytes `SSL_write` takes before it stops and why.
 
@@ -554,29 +529,62 @@ not a bug".
 
 ### 19. Interim `100 Continue` (`Flare.L4.Continue`)
 
-**Model.** `_maybe_send_continue` (`conn_handle.mojo:544-576`) writes
+**Model.** `_maybe_send_continue` (`conn_handle.mojo`) writes
 `HTTP/1.1 100 Continue\r\n\r\n` once, from STATE_READING, with one
-non-blocking write whose result it drops. The final response is then
-serialised into a cleared `write_buf` and flushed from offset 0. `Plain`
-takes the kernel's count `k` for the one `send` as an oracle. `Tls` models
-`SSL_write` under flare's SSL modes (none are set in
-`flare/tls/ffi/openssl_wrapper.cpp`). It returns the full length or a WANT
-sentinel, never a short count. After a WANT the record stays pending, and a
-later `SSL_write` from a different buffer fails with
-`SSL_R_BAD_WRITE_RETRY`.
+non-blocking write. Whatever of it the write does not take is kept in
+`continue_pending` and sent before the final response (APP-49). The spec
+(RFC 9112 §2.1 and §4, RFC 9110 §15.2): after the earlier responses the
+wire is the final response `R`, or the whole interim `I` and then `R`, and
+the connection is not torn down.
+
+`Plain` takes the kernel's count `k` for the one `send` as an oracle; the
+unsent tail of a short send goes in front of the response in
+`_transition_to_writing`. `Tls` models `SSL_write` under flare's SSL modes
+(none are set in `flare/tls/ffi/openssl_wrapper.cpp`). It returns the full
+length or a WANT sentinel, never a short count. After a WANT the record
+stays pending, and a later `SSL_write` from a different buffer fails with
+`SSL_R_BAD_WRITE_RETRY`. flare sends the interim from the connection-owned
+buffer and retries it from there at the start of `_flush_write_buf_tls`.
 
 | Lean name | Statement | Status |
 |---|---|---|
-| `Flare.L4.Continue.Plain.violates` | for every `0 < k < 25`, the wire after the previous responses is `I.take k ++ R`, neither `R` nor `I ++ R` | proved (APP-49) |
-| `Flare.L4.Continue.Plain.fixed_spec` | keeping the unsent tail and prepending it to `write_buf` gives `R` or `I ++ R` for every `k` | proved |
-| `Flare.L4.Continue.Tls.violates` | if the interim record does not go out whole, the response's `SSL_write` fails and the connection closes with `R` unsent | proved (APP-49) |
-| `Flare.L4.Continue.Tls.fixed_spec` | retrying the interim from a buffer the connection keeps, before the response, meets the spec in both outcomes | proved |
+| `Flare.L4.Continue.Plain.run_spec` | keeping the unsent tail and putting it in front of the response gives `R` or `I ++ R` for every `k` | proved |
+| `Flare.L4.Continue.Tls.run_spec` | retrying the interim from the connection's own buffer, before the response, meets the spec whether or not the interim record went out whole | proved |
+
+### 20. Documented policies (`Flare.L4.Policies`)
+
+**Model.** Five small models, one per documented promise (DOC-04 to
+DOC-08, see the documentation chapter). Each abstracts one code path to the
+values the promise talks about and proves the promise for the shipped
+code.
+
+- `ErrorLog`: the handler-error path (`log_handler_error` in
+  `flare/errors.mojo`) and the extractor-error path (`Extracted.serve` and
+  `_bad_request_from_error` in `flare/http/extract.mojo`).
+- `EntryPoints`: the single-listener entry points of `HttpServer`: their
+  inline TLS check and `_reject_extra_listeners` (`flare/http/server.mojo`).
+- `Session`: `CookieSessionStore.encode_at` / `load_at` and
+  `BackedSessionStore` with `DEFAULT_SESSION_TTL_S` (`flare/http/session.mojo`).
+- `TlsReload`: `TlsAcceptor.reload` (`flare/tls/acceptor.mojo`), as a fresh
+  context with a new ticket key and an empty session cache.
+- `Tickets`: `TlsServerConfig.enable_session_tickets` and
+  `TlsAcceptor.__init__` (`flare/tls/acceptor.mojo`).
+
+| Lean name | Statement | Status |
+|---|---|---|
+| `Flare.L4.Policies.ErrorLog.policy` | a handler error answers 500 `Internal Server Error` and an extractor error 400 `Bad Request`; both log a line carrying the full message and the request id | proved |
+| `Flare.L4.Policies.EntryPoints.entry_spec` | an entry point raises when a TLS context or extra listeners are bound, and never runs a loop that silently ignores a bound listener | proved |
+| `Flare.L4.Policies.Session.expires` | a session issued at time `i` is refused from `i + DEFAULT_SESSION_TTL_S` on, for the signed-cookie store and for the backed store with its default TTL | proved |
+| `Flare.L4.Policies.TlsReload.rotates`, `reload_new_ticket` | after `reload`, no ticket or cached session issued before it resumes; tickets issued after it do | proved |
+| `Flare.L4.Policies.Tickets.opt_in` | session tickets are off by default, and off disables both issuing and resuming | proved |
 
 ## Findings
 
 Every repro below was run from the repository root with
-`pixi run mojo -I . formal/repro/<file>.mojo`. The quoted `BUG REPRODUCED`
-line is the output observed in this run, with exit status 1.
+`pixi run mojo -I . formal/repro/<file>.mojo`; the repro files and the
+`Flare.Bugs.APP_*` counterexamples are kept at the git tag
+`formal-audit-0.12`. The quoted `BUG REPRODUCED` line is the output
+observed in that run, with exit status 1.
 
 For each finding, the minimal fix was applied temporarily to the single flare
 file named. The repro then printed the quoted `OK` line and exited 0. The
@@ -599,7 +607,7 @@ so its flip was not repeated. All other flips were re-run for this report.
 Every repro except APP-49 is `# PLATFORM: any`. APP-49 is `# PLATFORM:
 linux`: it is run with `formal/repro/linux.sh` in the Linux container, and
 its flip was done in the container's copy of the repo, which the next synced
-run restores. All findings are status OPEN.
+run restores.
 
 ### APP-01: 426 response says `Connection: close` but the connection stays open
 
@@ -615,19 +623,20 @@ mismatch with a 426 through `_finalise_response(r426^, True)`. That function
 only uses `close_after` for the header and never sets `should_close`. After
 the flush, `on_writable` returns to READING, and the next request is served.
 
-**Lean.** `Flare.Bugs.APP_01.ws426_close_header_but_kept_open` and
-`violates_spec` give a reachable state with a close-header response and
-`should_close = false` in the pre-fix machine. The shipped machine is
-proved to satisfy the spec by `Flare.L4.ConnSM.fixed_no_request_after_close_header`.
+**Lean.** The counterexamples `Flare.Bugs.APP_01.ws426_close_header_but_kept_open`
+and `violates_spec` (at tag `formal-audit-0.12`) give a reachable state of
+the pre-fix machine with a close-header response and `should_close = false`.
+The shipped machine satisfies the spec:
+`Flare.L4.ConnSM.no_request_after_close_header`.
 
 **Fix.** Set `self.should_close = True` before the `return`.
 
-**Repro.** `formal/repro/APP-01_ws426_keeps_connection_open.mojo`
+**Repro.** `formal/repro/APP-01_ws426_keeps_connection_open.mojo` (at tag `formal-audit-0.12`)
 
 - Observed: `BUG REPRODUCED: 426 sent 'Connection: close' but on_writable returned done=False, want_read= True state_reading= True`
 - Flip: `OK: the 426 response closes the connection (done=True)`
 
-Status: resolved. The 426 branch of on_readable sets `should_close = True` before `_finalise_response`, so the flush ends the connection and a pipelined request behind the 426 is never served. Test: `tests/http/test_server_reactor_state.mojo::test_ws_426_closes_connection` (deterministic: Reactor readiness wait, no sleeps). The model flag `fix = true` is the shipped machine.
+Status: resolved. The 426 branch of on_readable sets `should_close = True` before `_finalise_response`, so the flush ends the connection and a pipelined request behind the 426 is never served. Test: `tests/http/test_server_reactor_state.mojo::test_ws_426_closes_connection` (deterministic: Reactor readiness wait, no sleeps). The model `Flare.L4.ConnSM.lts` is the shipped machine.
 
 ### APP-02: `_wants_close` matches `connection:` mid-line and stops at the first hit
 
@@ -642,20 +651,20 @@ and it `break`s after the first match. The real `Connection: close` line is
 never read. The static and short-request fast paths then reply
 `Connection: keep-alive`.
 
-**Lean.** `Flare.Bugs.APP_02.wantsClose_misses_close` and `violates_spec`
-use the 63-byte request with `X-Connection` at offset 27 (they are about the
-pre-fix `wantsCloseOld`). The shipped `wantsClose` is proved to meet the spec
-by `wantsCloseFixed_meets_spec`, which is general (via
-`Flare.L4.KeepAlive.wantsClose_spec`).
+**Lean.** The counterexamples `Flare.Bugs.APP_02.wantsClose_misses_close`
+and `violates_spec` (at tag `formal-audit-0.12`) use the 63-byte request
+with `X-Connection` at offset 27 against the pre-fix scan. The shipped
+`wantsClose` meets the spec for every request:
+`Flare.L4.KeepAlive.wantsClose_spec`.
 
 **Fix.** Match only at line starts and OR the verdicts of all matching lines.
 
-**Repro.** `formal/repro/APP-02_wants_close_substring_match.mojo`
+**Repro.** `formal/repro/APP-02_wants_close_substring_match.mojo` (at tag `formal-audit-0.12`)
 
 - Observed: `BUG REPRODUCED: _wants_close returned False for a request carrying 'Connection: close' after an 'X-Connection' header`
 - Flip: `OK: _wants_close honours 'Connection: close' after X-Connection`
 
-Status: resolved. `_wants_close` tests `connection:` only at a line start (so `X-Connection:` no longer matches) and ORs the verdicts of every `Connection` line instead of breaking at the first match. Tests: `tests/http/test_connection_keepalive_fastpath.mojo::test_wants_close_after_x_connection_header`, `::test_wants_close_ignores_connection_inside_other_header_names`, `::test_wants_close_ors_every_connection_line`. The model `wantsClose` mirrors the fix; `wantsCloseOld` is the pre-fix scan.
+Status: resolved. `_wants_close` tests `connection:` only at a line start (so `X-Connection:` no longer matches) and ORs the verdicts of every `Connection` line instead of breaking at the first match. Tests: `tests/http/test_connection_keepalive_fastpath.mojo::test_wants_close_after_x_connection_header`, `::test_wants_close_ignores_connection_inside_other_header_names`, `::test_wants_close_ors_every_connection_line`. The model `wantsClose` mirrors the fix.
 
 ### APP-03: `close` inside a `Connection` token list is ignored
 
@@ -669,18 +678,19 @@ compares the whole value with `close` and `keep-alive`. The values
 `keep-alive, close` and `TE, close` match neither, and HTTP/1.1 defaults to
 keep-alive.
 
-**Lean.** `Flare.Bugs.APP_03.computeCloseAfterOld_misses_close` and
-`violates_spec` (about the pre-fix function). The shipped function is proved
-to meet the spec by `computeCloseAfterFixed_meets_spec`, which is general.
+**Lean.** The counterexamples `Flare.Bugs.APP_03.computeCloseAfterOld_misses_close`
+and `violates_spec` (at tag `formal-audit-0.12`) are about the pre-fix
+function. The shipped function meets the spec for every value and version:
+`Flare.L4.KeepAlive.computeCloseAfter_eq_spec`.
 
 **Fix.** Split on `,`, trim OWS, lowercase, and test each token.
 
-**Repro.** `formal/repro/APP-03_connection_close_token_list.mojo`
+**Repro.** `formal/repro/APP-03_connection_close_token_list.mojo` (at tag `formal-audit-0.12`)
 
 - Observed: `BUG REPRODUCED: _compute_close_after kept the connection alive for Connection: 'keep-alive, close' -> False and 'TE, close' -> False`
 - Flip: `OK: a close token inside a Connection list closes the connection`
 
-Status: resolved. `_compute_close_after` (slow path) and `_wants_close` now read the `Connection` value as a comma-separated option list (`_conn_token_mask`: split on `,`, trim OWS, case-fold), so `keep-alive, close` and `TE, close` close the connection; HTTP/1.0 stays open only with a `keep-alive` option. Tests: `tests/http/test_connection_keepalive_fastpath.mojo::test_compute_close_after_close_inside_option_list`, `::test_compute_close_after_option_list_without_close`, `::test_wants_close_option_list`. The model `computeCloseAfter`/`verdict` mirror the fix; `computeCloseAfterOld`/`verdictOld` are the pre-fix ones.
+Status: resolved. `_compute_close_after` (slow path) and `_wants_close` now read the `Connection` value as a comma-separated option list (`_conn_token_mask`: split on `,`, trim OWS, case-fold), so `keep-alive, close` and `TE, close` close the connection; HTTP/1.0 stays open only with a `keep-alive` option. Tests: `tests/http/test_connection_keepalive_fastpath.mojo::test_compute_close_after_close_inside_option_list`, `::test_compute_close_after_option_list_without_close`, `::test_wants_close_option_list`. The model `computeCloseAfter`/`verdict` mirror the fix.
 
 ### APP-04: the static fast path sends the body in reply to HEAD
 
@@ -695,19 +705,19 @@ response to HEAD. RFC 9112 §6.3.
 never inspects the method. It queues the whole pre-encoded GET response
 with `Connection: keep-alive`.
 
-**Lean.** `Flare.Bugs.APP_04.static_head_emits_body` (about the pre-fix
-`staticBytesOld`). The shipped fix is proved to meet the spec by
-`staticFixed_head_no_body` (via `Flare.L4.ConnSM.Framing.staticBytes_spec`).
+**Lean.** The counterexample `Flare.Bugs.APP_04.static_head_emits_body`
+(at tag `formal-audit-0.12`) is about the pre-fix static path. The shipped
+path meets the spec: `Flare.L4.ConnSM.Framing.staticBytes_spec`.
 
 **Fix.** For a request line starting with `HEAD `, queue only the bytes up to
 the first CRLFCRLF.
 
-**Repro.** `formal/repro/APP-04_static_head_sends_body.mojo`
+**Repro.** `formal/repro/APP-04_static_head_sends_body.mojo` (at tag `formal-audit-0.12`)
 
 - Observed: `BUG REPRODUCED: HEAD on the static path queued 13 body bytes after the headers; keep-alive= True`
 - Flip: `OK: HEAD on the static path queues the head only`
 
-Status: resolved. The static fast path now queues only the head (up to the first CRLFCRLF) of the pre-encoded bytes for a request line starting with `HEAD `. Test: `tests/http/test_server_reactor_state.mojo::test_static_head_queues_head_only`. The model `staticBytes` mirrors the fix; `staticBytesOld` is the pre-fix code.
+Status: resolved. The static fast path now queues only the head (up to the first CRLFCRLF) of the pre-encoded bytes for a request line starting with `HEAD `. Test: `tests/http/test_server_reactor_state.mojo::test_static_head_queues_head_only`. The model `staticBytes` mirrors the fix.
 
 ### APP-05: an error response to HEAD carries a body
 
@@ -720,18 +730,19 @@ desynchronise a later response.
 leads to `_serialize_response` (`conn_handle.mojo:1576-1594`). That calls
 `serialize_response_into` without `head_request`, so the body is serialised.
 
-**Lean.** `Flare.Bugs.APP_05.handler_error_head_emits_body` (status 500,
-25-byte body; about the pre-fix `headFlagOld`). The shipped `headFlag` is
-proved to meet the spec by `errorFixed_head_no_body`.
+**Lean.** The counterexample `Flare.Bugs.APP_05.handler_error_head_emits_body`
+(status 500, 25-byte body; at tag `formal-audit-0.12`) is about the pre-fix
+flag. The shipped `headFlag` meets the spec on both paths:
+`Flare.L4.ConnSM.Framing.headFlag_spec`.
 
 **Fix.** Pass `self.head_request`.
 
-**Repro.** `formal/repro/APP-05_error_reply_to_head_has_body.mojo`
+**Repro.** `formal/repro/APP-05_error_reply_to_head_has_body.mojo` (at tag `formal-audit-0.12`)
 
 - Observed: `BUG REPRODUCED: error response to HEAD carries 25 body bytes: '500 Internal Server Error'`
 - Flip: `OK: the error response to HEAD has no body`
 
-Status: resolved. `_serialize_response` (used by `_queue_error`) now passes `self.head_request`, and errors raised before the request is parsed (408, 413, 431, 400 ...) take the flag from the buffered `HEAD ` prefix via `_note_head_from_buf`, so an error response to HEAD has no body (the stale flag of an earlier HEAD no longer leaks into a later request). Tests: `tests/http/test_server_reactor_state.mojo::test_handler_error_for_head_has_no_body`, `::test_parse_errors_for_head_have_no_body`, `::test_error_after_head_on_keepalive_conn_keeps_body`. The model `headFlag` is the shipped flag; `headFlagOld` is the pre-fix one.
+Status: resolved. `_serialize_response` (used by `_queue_error`) now passes `self.head_request`, and errors raised before the request is parsed (408, 413, 431, 400 ...) take the flag from the buffered `HEAD ` prefix via `_note_head_from_buf`, so an error response to HEAD has no body (the stale flag of an earlier HEAD no longer leaks into a later request). Tests: `tests/http/test_server_reactor_state.mojo::test_handler_error_for_head_has_no_body`, `::test_parse_errors_for_head_have_no_body`, `::test_error_after_head_on_keepalive_conn_keeps_body`. The model `headFlag` is the shipped flag.
 
 ### APP-06: the size cap `max_header_size + max_body_size` wraps
 
@@ -744,19 +755,19 @@ Status: resolved. `_serialize_response` (used by `_queue_error`) now passes `sel
 computes `8192 + Int.MAX`, which wraps negative, so every non-empty buffer
 gets 413.
 
-**Lean.** `Flare.Bugs.APP_06.check_accepts`, `overflow_cap_rejects_one_byte`
-and `violates_spec` (about the pre-fix `overCapOld`). The shipped `overCapImpl`
-is proved to meet the spec by `capFixed_spec` (via
-`Flare.L4.ServerConfig.overCapImpl_eq_spec`).
+**Lean.** The counterexamples `Flare.Bugs.APP_06.check_accepts`,
+`overflow_cap_rejects_one_byte` and `violates_spec` (at tag
+`formal-audit-0.12`) are about the pre-fix sum. The shipped `overCapImpl`
+meets the spec: `Flare.L4.ServerConfig.overCapImpl_eq_spec`.
 
 **Fix.** Use `len - max_header_size > max_body_size` at all three sites.
 
-**Repro.** `formal/repro/APP-06_size_cap_int_overflow.mojo`
+**Repro.** `formal/repro/APP-06_size_cap_int_overflow.mojo` (at tag `formal-audit-0.12`)
 
 - Observed: `BUG REPRODUCED: a 27 byte GET was answered 413 with max_body_size=Int.MAX`
 - Flip: `OK: the GET is served with max_body_size=Int.MAX`
 
-Status: resolved. The three read-buffer cap checks in `conn_handle.mojo` (and the legacy `_parse_http_request`) now test `len - max_header_size > max_body_size`, so the sum is never formed and `max_body_size = Int.MAX` serves requests. Tests: `tests/http/test_server_reactor_state.mojo::test_unlimited_body_cap_serves_request`, `::test_unlimited_body_cap_bufring_path`, `::test_body_cap_still_rejects_oversized_input`. The model `overCapImpl` is the shipped test; `overCapOld` is the pre-fix one.
+Status: resolved. The three read-buffer cap checks in `conn_handle.mojo` (and the legacy `_parse_http_request`) now test `len - max_header_size > max_body_size`, so the sum is never formed and `max_body_size = Int.MAX` serves requests. Tests: `tests/http/test_server_reactor_state.mojo::test_unlimited_body_cap_serves_request`, `::test_unlimited_body_cap_bufring_path`, `::test_body_cap_still_rejects_oversized_input`. The model `overCapImpl` is the shipped test.
 
 ### APP-10: ComptimeRouter accepts a non-final `*` and ignores the rest of the pattern
 
@@ -768,19 +779,20 @@ rejects.
 **What goes wrong.** `_match_one` (`routes.mojo:264-274`) treats a middle `*`
 as a tail wildcard. `/files/*/meta` then matches `GET /files/a`.
 
-**Lean.** `Flare.Bugs.APP_10.router_rejects`, `comptime_misroutes` and
-`matchOne_violates_spec` (about the pre-fix `matchOneOld` / `serveCTOld`). The
-shipped `matchOne` is proved to meet the spec by `fixed_meets_spec`, which is
-general (via `Flare.L4.ComptimeRouter.matchOne_eq_spec`).
+**Lean.** The counterexamples `Flare.Bugs.APP_10.router_rejects`,
+`comptime_misroutes` and `matchOne_violates_spec` (at tag
+`formal-audit-0.12`) are about the pre-fix matcher. The shipped `matchOne`
+meets the spec on every pattern: `Flare.L4.ComptimeRouter.matchOne_eq_spec`
+and `matchOne_nonfinal_wild`.
 
 **Fix.** Return false when the wildcard is not the last segment.
 
-**Repro.** `formal/repro/APP-10_comptime_router_nonfinal_wildcard.mojo`
+**Repro.** `formal/repro/APP-10_comptime_router_nonfinal_wildcard.mojo` (at tag `formal-audit-0.12`)
 
 - Observed: `BUG REPRODUCED: pattern /files/*/meta matched GET /files/a with status 200 body meta:a`
 - Flip: `OK: GET /files/a is 404 for pattern /files/*/meta`
 
-Status: resolved. `_match_one` returns `False` for a `*` that is not the last pattern segment (`if j != len(pat_segs) - 1`), so a pattern like `/files/*/meta` matches nothing instead of capturing the tail. Tests: `tests/http/test_routes_comptime.mojo::test_non_final_wildcard_matches_nothing`, `::test_final_wildcard_still_captures_rest`. The model `matchOne`/`scanCT`/`serveCT` are the shipped ones; `matchOneOld`/`scanCTOld`/`serveCTOld` the pre-fix ones.
+Status: resolved. `_match_one` returns `False` for a `*` that is not the last pattern segment (`if j != len(pat_segs) - 1`), so a pattern like `/files/*/meta` matches nothing instead of capturing the tail. Tests: `tests/http/test_routes_comptime.mojo::test_non_final_wildcard_matches_nothing`, `::test_final_wildcard_still_captures_rest`. The model `matchOne`/`scanCT`/`serveCT` are the shipped ones.
 
 ### APP-20: `negotiate_encoding` mishandles `*`
 
@@ -797,19 +809,20 @@ the problem:
 - `*, gzip;q=0.5` gives identity, so the result depends on entry order.
 - `identity;q=0, *` gives identity, an encoding the client refused.
 
-**Lean.** `Flare.Bugs.APP_20.negotiate_violates_spec` (about the pre-fix
-`negotiateOld`). The shipped `decide'` is proved to meet the spec by
-`fixed_meets_spec`, which is general.
+**Lean.** The counterexample `Flare.Bugs.APP_20.negotiate_violates_spec`
+(at tag `formal-audit-0.12`) is about the pre-fix loop. The shipped
+decision meets the spec on every header: `Flare.L4.Negotiate.decide'_eq_spec`
+and `negotiate_eq_spec`.
 
 **Fix.** Track the `*` weight and the per-coding maxima, then pick after the
 loop.
 
-**Repro.** `formal/repro/APP-20_negotiate_wildcard.mojo`
+**Repro.** `formal/repro/APP-20_negotiate_wildcard.mojo` (at tag `formal-audit-0.12`)
 
 - Observed: `BUG REPRODUCED: 'gzip;q=0.5, *' -> gzip / '*, gzip;q=0.5' -> identity (brotli on, expected br for both); 'identity;q=0, *' -> identity (expected gzip)`
 - Flip: `OK: wildcard weights honoured: br br gzip`
 
-Status: resolved. `negotiate_encoding` records the largest weight per coding (br, gzip, identity) and for `*`, gives every coding without its own entry the `*` weight, then picks the highest non-zero weight (ties br > gzip > identity). Tests: `tests/http/test_middleware.mojo::test_negotiate_wildcard_weight_applies_to_unlisted_codings`, `::test_negotiate_wildcard_is_order_independent`, `::test_negotiate_identity_refused_with_wildcard`, `::test_negotiate_wildcard_alone_selects_best_available_coding` (replaces `test_negotiate_wildcard_falls_back_to_identity`, which pinned the pre-fix bare-`*` -> identity answer). The model `decide'`/`negotiate` are the shipped ones; `decideOld`/`negotiateOld` the pre-fix loop.
+Status: resolved. `negotiate_encoding` records the largest weight per coding (br, gzip, identity) and for `*`, gives every coding without its own entry the `*` weight, then picks the highest non-zero weight (ties br > gzip > identity). Tests: `tests/http/test_middleware.mojo::test_negotiate_wildcard_weight_applies_to_unlisted_codings`, `::test_negotiate_wildcard_is_order_independent`, `::test_negotiate_identity_refused_with_wildcard`, `::test_negotiate_wildcard_alone_selects_best_available_coding` (replaces `test_negotiate_wildcard_falls_back_to_identity`, which pinned the pre-fix bare-`*` -> identity answer). The model `decide'`/`negotiate` are the shipped ones.
 
 ### APP-21: the CORS allowlist is order dependent under credentials
 
@@ -821,18 +834,19 @@ Status: resolved. `negotiate_encoding` records the largest weight per coding (br
 first `*`. With credentials on, `["*", origin]` therefore rejects a listed
 origin.
 
-**Lean.** `Flare.Bugs.APP_21.violates_spec` (about the pre-fix
-`originAllowedOld`). The shipped `originAllowed` is proved to meet the spec by
-`fixed_meets_spec`, which is general.
+**Lean.** The counterexample `Flare.Bugs.APP_21.violates_spec` (at tag
+`formal-audit-0.12`) is about the pre-fix check. The shipped `originAllowed`
+meets the spec for every configuration: `Flare.L4.Cors.originAllowed_iff`
+and `originAllowed_perm`.
 
 **Fix.** On `*` with credentials, `continue` instead of returning.
 
-**Repro.** `formal/repro/APP-21_cors_credentials_order.mojo`
+**Repro.** `formal/repro/APP-21_cors_credentials_order.mojo` (at tag `formal-audit-0.12`)
 
 - Observed: `BUG REPRODUCED: with credentials, ['*', origin] gives ACAO '' but [origin, '*'] gives 'https://app.example.com'`
 - Flip: `OK: listed origin allowed in both orders: https://app.example.com https://app.example.com`
 
-Status: resolved. `_origin_allowed` now `continue`s past a `*` entry when credentials are on (and still returns True for `*` without credentials), so the allowlist is order independent. Tests: `tests/http/test_cors.mojo::test_credentials_allowlist_is_order_independent`, `::test_wildcard_without_credentials_still_first_match`. The model `originAllowed` is the shipped check; `originAllowedOld` the pre-fix one.
+Status: resolved. `_origin_allowed` now `continue`s past a `*` entry when credentials are on (and still returns True for `*` without credentials), so the allowlist is order independent. Tests: `tests/http/test_cors.mojo::test_credentials_allowlist_is_order_independent`, `::test_wildcard_without_credentials_still_first_match`. The model `originAllowed` is the shipped check.
 
 ### APP-22: `Vary: Origin` is missing on responses the CORS middleware does not stamp
 
@@ -843,18 +857,19 @@ Status: resolved. `_origin_allowed` now `continue`s past a `*` entry when creden
 **What goes wrong.** `cors.mojo:160-171` returns the inner response unchanged
 when `Origin` is absent or rejected, without adding `Vary`.
 
-**Lean.** `Flare.Bugs.APP_22.missing_vary` and `violates_spec` (about the
-pre-fix `serveOld`). The shipped `serve` is proved to meet the spec by
-`fixed_meets_spec`.
+**Lean.** The counterexamples `Flare.Bugs.APP_22.missing_vary` and
+`violates_spec` (at tag `formal-audit-0.12`) are about the pre-fix `serve`.
+The shipped `serve` puts `Vary: Origin` on every response:
+`Flare.L4.Cors.serve_vary`.
 
 **Fix.** Append `Vary: Origin` on every path.
 
-**Repro.** `formal/repro/APP-22_cors_missing_vary.mojo`
+**Repro.** `formal/repro/APP-22_cors_missing_vary.mojo` (at tag `formal-audit-0.12`)
 
 - Observed: `BUG REPRODUCED: ACAO varies with Origin ('https://a.example' for https://a.example, absent otherwise) but Vary: Origin is missing on the no-Origin response (False) / rejected-origin response (False)`
 - Flip: `OK: Vary: Origin present on all responses`
 
-Status: resolved. The pass-through paths of `Cors.serve` (no `Origin`, rejected origin, rejected preflight 403) now go through `_ensure_vary_origin`, which appends `Vary: Origin` unless the response already has it, so every response carries it. Tests: `tests/http/test_cors.mojo::test_vary_origin_on_response_without_origin`, `::test_vary_origin_on_rejected_origin_and_preflight`, `::test_vary_origin_single_on_allowed_and_not_duplicated`. The model `serve` is the shipped one; `serveOld` the pre-fix one.
+Status: resolved. The pass-through paths of `Cors.serve` (no `Origin`, rejected origin, rejected preflight 403) now go through `_ensure_vary_origin`, which appends `Vary: Origin` unless the response already has it, so every response carries it. Tests: `tests/http/test_cors.mojo::test_vary_origin_on_response_without_origin`, `::test_vary_origin_on_rejected_origin_and_preflight`, `::test_vary_origin_single_on_allowed_and_not_duplicated`. The model `serve` is the shipped one.
 
 ### APP-23: `Url.parse` does not end the authority at `?` (host confusion)
 
@@ -869,18 +884,19 @@ takes the fragment at the last `#`.
 - `http://evil.com?@good.com/` gives host `good.com`.
 - `http://good.com?x=/y` gives host `good.com?x=`.
 
-**Lean.** `Flare.Bugs.APP_23.host_confusion` (about the pre-fix `parseOld`).
-The shipped `parse` is proved to meet the spec by `implFixed_meets_spec` and
-`Flare.L4.Url.parseWith_fixedSplit_hostInAuthority`.
+**Lean.** The counterexample `Flare.Bugs.APP_23.host_confusion` (at tag
+`formal-audit-0.12`) is about the pre-fix parser. The shipped `parse` meets
+the spec: `Flare.L4.Url.parseWith_fixedSplit_hostInAuthority` and
+`parse_spec`.
 
 **Fix.** Find the first `#`, and end the authority at the first `/` or `?`.
 
-**Repro.** `formal/repro/APP-23_url_authority_query_host_confusion.mojo`
+**Repro.** `formal/repro/APP-23_url_authority_query_host_confusion.mojo` (at tag `formal-audit-0.12`)
 
 - Observed: `BUG REPRODUCED: Url.parse('http://evil.com?@good.com/').host = 'good.com' (query ''), Url.parse('http://good.com?x=/y').host = 'good.com?x='; RFC 3986 hosts are 'evil.com' and 'good.com'`
 - Flip: `OK: authority ends at '?': hosts evil.com and good.com query @good.com/`
 
-Status: resolved. Url.parse takes the fragment at the first `#` and ends the authority at the first `/` or `?` (an authority ending at `?` gets path `/`). Tests: `tests/http/test_http.mojo::test_url_authority_ends_at_query`, `::test_url_fragment_starts_at_first_hash`. The model `parse` mirrors the fix; `parseOld` is the pre-fix pipeline.
+Status: resolved. Url.parse takes the fragment at the first `#` and ends the authority at the first `/` or `?` (an authority ending at `?` gets path `/`). Tests: `tests/http/test_http.mojo::test_url_authority_ends_at_query`, `::test_url_fragment_starts_at_first_hash`. The model `parse` mirrors the fix.
 
 ### APP-24: `urldecode` returns a `String` holding ill-formed UTF-8
 
@@ -897,14 +913,15 @@ observed here.
 **What goes wrong.** `form.mojo:87` wraps the decoded bytes with
 `unsafe_from_utf8`. As a result, `%F0` yields the single byte `0xF0`.
 
-**Lean.** `Flare.Bugs.APP_24.urldecode_violates_spec` and `parseForm_F0`.
-The shipped fix (about the pre-fix `urldecodeOld`) is proved to meet the
-spec by `urldecodeFixed_meets_spec` and `urldecodeFixed_roundtrip`;
-`parseForm_rejects_F0` shows the form path rejects `a=%F0`.
+**Lean.** The counterexamples `Flare.Bugs.APP_24.urldecode_violates_spec`
+and `parseForm_F0` (at tag `formal-audit-0.12`) are about the pre-fix
+decoder. The shipped `urldecode` only returns well-formed UTF-8 and keeps
+the round trip on valid input: `Flare.L4.Form.urldecode_valid` and
+`urldecode_urlencode`.
 
 **Fix.** Use `String(from_utf8=...)` (which raises) or the lossy decode.
 
-**Repro.** `formal/repro/APP-24_urldecode_invalid_utf8.mojo`
+**Repro.** `formal/repro/APP-24_urldecode_invalid_utf8.mojo` (at tag `formal-audit-0.12`)
 
 - Observed: `BUG REPRODUCED: urldecode('%F0') / parse_form_urlencoded('a=%F0') produced a String that is not valid UTF-8 (direct: True , form: True )`
 - Flip: `OK: urldecode never yields ill-formed UTF-8 for '%F0'`
@@ -921,12 +938,13 @@ differs from the one WHATWG and curl pick.
 **What goes wrong.** `url.mojo:143-148` (before the fix) split at the first `@`, so
 `http://a@evil.com@good.com/` gives host `evil.com@good.com`.
 
-**Lean.** `Flare.Bugs.APP_25.host_has_at` (on `stripUserinfoOld`). The fix is proved sufficient by
-`implFixed_meets_spec` and `Flare.L4.Url.parseWith_fixedStrip_noAt`.
+**Lean.** The counterexample `Flare.Bugs.APP_25.host_has_at` (at tag
+`formal-audit-0.12`) is about the pre-fix userinfo strip. The shipped strip
+meets the spec: `Flare.L4.Url.parseWith_fixedStrip_noAt` and `parse_spec`.
 
 **Fix.** Use `_rfind(authority, "@")`.
 
-**Repro.** `formal/repro/APP-25_url_userinfo_first_at.mojo`
+**Repro.** `formal/repro/APP-25_url_userinfo_first_at.mojo` (at tag `formal-audit-0.12`)
 
 - Observed: `BUG REPRODUCED: Url.parse('http://a@evil.com@good.com/').host = 'evil.com@good.com' contains '@' (WHATWG/curl host: 'good.com')`
 - Flip: `OK: host has no '@': good.com`
@@ -949,24 +967,24 @@ an existing `Content-Encoding`, but not the status or `Content-Range`. The
 2048 identity bytes are gzipped to 35 bytes. `Content-Length` is rewritten,
 while `Content-Range: bytes 0-2047/10000` stays.
 
-**Lean.** `Flare.Bugs.APP_26.partial_reencoded` and `violates_spec` (about
-the pre-fix `compressOld`), against the spec `PartialSpec` ("a partial
-response passes through unchanged"). `partial_body_replaced` states the
-general case. The shipped `compress` is proved to meet it by
-`fixed_meets_spec` (via
-`Flare.L4.Middleware.compress_partial`), which is general.
+**Lean.** The counterexamples `Flare.Bugs.APP_26.partial_reencoded` and
+`violates_spec`, and the general `partial_body_replaced` (at tag
+`formal-audit-0.12`), are about the pre-fix Compress, against the spec
+`PartialSpec` ("a partial response passes through unchanged"). The shipped
+`compress` meets it for every configuration:
+`Flare.L4.Middleware.compress_partial`.
 
 **Fix.** Return the inner response unchanged when the status is 206 or it
 carries `Content-Range`.
 
-**Repro.** `formal/repro/APP-26_compress_encodes_partial_content.mojo`. It
+**Repro.** `formal/repro/APP-26_compress_encodes_partial_content.mojo` (at tag `formal-audit-0.12`). It
 uses a stub inner handler that returns what FileServer returns for
 `Range: bytes=0-2047`.
 
 - Observed: `BUG REPRODUCED: 206 with Content-Range 'bytes 0-2047/10000' was re-encoded as gzip; body is 35 bytes, Content-Length 35`
 - Flip (the two lines after the `content-encoding` check in `flare/http/middleware.mojo`): `OK: partial response passed through unencoded (status 206, 2048 bytes)`
 
-Status: resolved. Compress.serve returns a 206, or any response carrying `Content-Range`, unchanged (no re-encoding, Content-Range and Content-Length intact). Tests: `tests/http/test_middleware.mojo::test_compress_partial_content_passthrough`, `::test_compress_content_range_header_passthrough`. The model `compress` mirrors the fix; `compressOld` is the pre-fix code.
+Status: resolved. Compress.serve returns a 206, or any response carrying `Content-Range`, unchanged (no re-encoding, Content-Range and Content-Length intact). Tests: `tests/http/test_middleware.mojo::test_compress_partial_content_passthrough`, `::test_compress_content_range_header_passthrough`. The model `compress` mirrors the fix.
 
 ### APP-27: Compress omits `Vary: Accept-Encoding` on the identity responses it negotiated
 
@@ -981,20 +999,21 @@ encoding branch appends `Vary`. The identity response for the same URL
 (sent when there is no `Accept-Encoding`, when identity is preferred, or
 when every coding is refused) has no `Vary`.
 
-**Lean.** `Flare.Bugs.APP_27.identity_without_vary` and `violates_spec` (on the
-pre-fix `compressNoVary`), against the spec `VarySpec`. The fix is proved sufficient by
-`fixed_meets_spec` (via `Flare.L4.Middleware.compress_vary`), which is
-general.
+**Lean.** The counterexamples `Flare.Bugs.APP_27.identity_without_vary`
+and `violates_spec` (at tag `formal-audit-0.12`) are about
+`compressNoVary`, the Compress of the APP-26 fix without the identity-branch
+`Vary`, against the spec `VarySpec`. The shipped `compress` meets it:
+`Flare.L4.Middleware.compress_vary`.
 
 **Fix.** Append `Vary: Accept-Encoding` on every response past the size and
 already-encoded checks.
 
-**Repro.** `formal/repro/APP-27_compress_missing_vary_on_identity.mojo`
+**Repro.** `formal/repro/APP-27_compress_missing_vary_on_identity.mojo` (at tag `formal-audit-0.12`)
 
 - Observed: `BUG REPRODUCED: gzip response has Vary: Accept-Encoding (gzip) but the identity response for the same URL has none`
 - Flip (`Vary` appended before the `quality == 0` check, later append removed): `OK: Vary: Accept-Encoding on both variants`
 
-Status: resolved. Compress.serve appends `Vary: Accept-Encoding` to every response past the size, already-encoded and partial checks, including the identity variants (no header, identity preferred, every coding refused); passed-through responses get none. Tests: `tests/http/test_middleware.mojo::test_compress_identity_variant_has_vary`, `::test_compress_vary_on_every_negotiated_outcome`, `::test_compress_no_vary_when_passed_through`. The model `compress` is the shipped code; `compressNoVary` is the pre-fix one.
+Status: resolved. Compress.serve appends `Vary: Accept-Encoding` to every response past the size, already-encoded and partial checks, including the identity variants (no header, identity preferred, every coding refused); passed-through responses get none. Tests: `tests/http/test_middleware.mojo::test_compress_identity_variant_has_vary`, `::test_compress_vary_on_every_negotiated_outcome`, `::test_compress_no_vary_when_passed_through`. The model `compress` is the shipped code; `compressNoVary` is the same code without the APP-27 `Vary`, kept for `compress_agrees`.
 
 ### APP-40: the RateLimit refill product wraps after a long idle period
 
@@ -1007,19 +1026,20 @@ keeps getting worse. At `1e6/s` the wrap needs only 2.56 h of idle time.
 **What goes wrong.** `reliability.mojo:369-374` computes
 `(elapsed * rate) // 1_000_000`, and the product wraps `Int64`.
 
-**Lean.** `Flare.Bugs.APP_40.full_bucket_rejected_after_idle` and
-`product_overflows`. The fix is proved sufficient by
-`implFixed_refines_spec`, and `Flare.L4.RateLimit.overflow_iff` gives the
-exact threshold.
+**Lean.** The counterexamples `Flare.Bugs.APP_40.full_bucket_rejected_after_idle`
+and `product_overflows` (at tag `formal-audit-0.12`) are about the
+unclamped step. The shipped `step` computes the spec for every idle time:
+`Flare.L4.RateLimit.step_eq_spec`; `overflow_iff` gives the exact threshold
+of the unclamped product.
 
 **Fix.** Clamp `elapsed` to the time needed to fill the bucket (shipped).
 
-**Repro.** `formal/repro/APP-40_ratelimit_refill_overflow.mojo`
+**Repro.** `formal/repro/APP-40_ratelimit_refill_overflow.mojo` (at tag `formal-audit-0.12`)
 
 - Observed: `BUG REPRODUCED: full bucket after 9300 s idle at rate 1e6/s returned 429 ; stored milli-tokens now -9145744073710`
 - Flip: `OK: request admitted after 9300 s idle; milli-tokens 999999000`
 
-Status: resolved. `serve` clamps `elapsed` to `max_elapsed = burst * 1e9 // rate + 1` before forming the refill product. Test: `tests/http/test_reliability.mojo::test_ratelimit_full_bucket_admits_after_a_long_idle_period`; the repro now prints `OK:`. The shipped model is `Flare.L4.RateLimit.step`; `Flare.Bugs.APP_40.implFixed_refines_spec` is `step_eq_spec` for it.
+Status: resolved. `serve` clamps `elapsed` to `max_elapsed = burst * 1e9 // rate + 1` before forming the refill product. Test: `tests/http/test_reliability.mojo::test_ratelimit_full_bucket_admits_after_a_long_idle_period`; the repro now prints `OK:`. The shipped model is `Flare.L4.RateLimit.step`, and `step_eq_spec` is stated about it.
 
 ### APP-41: CircuitBreaker measures the cooldown from the start of the failing request
 
@@ -1031,17 +1051,18 @@ already expired. Slow upstreams are the main case breakers exist for.
 **What goes wrong.** `now` is read on entry (449) and stored as the
 opened-at time (435-440, 463, 468).
 
-**Lean.** `Flare.Bugs.APP_41.slow_failure_skips_cooldown`. The fix is proved
-sufficient by `fixed_cooldown_respected`.
+**Lean.** The counterexample `Flare.Bugs.APP_41.slow_failure_skips_cooldown`
+(at tag `formal-audit-0.12`) is about the pre-fix breaker. The shipped
+breaker respects the cooldown: `Flare.L4.CircuitBreaker.cooldown_respected`.
 
 **Fix.** Call `_record_failure(Int64(perf_counter_ns()))` at both sites (shipped).
 
-**Repro.** `formal/repro/APP-41_circuitbreaker_cooldown_from_request_start.mojo`
+**Repro.** `formal/repro/APP-41_circuitbreaker_cooldown_from_request_start.mojo` (at tag `formal-audit-0.12`)
 
 - Observed: `BUG REPRODUCED: call right after the trip returned 500 and the inner handler ran 2 times (expected 503, 1 call); first status 500`
 - Flip: `OK: breaker fast-failed with 503 during cooldown; inner calls 1`
 
-Status: resolved. Both `_record_failure` call sites in `serve` now pass `perf_counter_ns()` read when the failure is recorded, so the cooldown counts from the failure. Test: `tests/http/test_reliability.mojo::test_circuitbreaker_cooldown_counts_from_the_failure_not_the_request`; the repro now prints `OK:`. The shipped model is `Flare.L4.CircuitBreaker.stepShipped` (`fix41` and, since APP-42, `fix42` on); `Flare.Bugs.APP_41.shipped_meets_spec` is stated about it.
+Status: resolved. Both `_record_failure` call sites in `serve` now pass `perf_counter_ns()` read when the failure is recorded, so the cooldown counts from the failure. Test: `tests/http/test_reliability.mojo::test_circuitbreaker_cooldown_counts_from_the_failure_not_the_request`; the repro now prints `OK:`. The shipped model is `Flare.L4.CircuitBreaker.step`, and `cooldown_respected` is stated about it.
 
 ### APP-42: CircuitBreaker admits every request while HALF_OPEN
 
@@ -1053,18 +1074,19 @@ probe".
 
 **What goes wrong.** `serve` tests only `state == OPEN` (450-460).
 
-**Lean.** `Flare.Bugs.APP_42.halfopen_admits_two`. The fix is proved
-sufficient by `fixed_halfopen_one_probe` and `fixed_both`.
+**Lean.** The counterexample `Flare.Bugs.APP_42.halfopen_admits_two` (at
+tag `formal-audit-0.12`) is about the pre-fix breaker. The shipped breaker
+admits a single probe: `Flare.L4.CircuitBreaker.single_probe`.
 
 **Fix.** Fast-fail on HALF_OPEN, and claim the transition with a
 compare-and-swap.
 
-**Repro.** `formal/repro/APP-42_circuitbreaker_halfopen_unbounded_probes.mojo`
+**Repro.** `formal/repro/APP-42_circuitbreaker_halfopen_unbounded_probes.mojo` (at tag `formal-audit-0.12`)
 
 - Observed: `BUG REPRODUCED: while worker 1's probe was in flight (HALF_OPEN), worker 2 got 200 and its upstream ran 1 time(s); expected 503 and 0. trip status 500 probe status 200`
 - Flip: `OK: second request fast-failed with 503 while the probe was in flight`
 
-Status: resolved. `serve` fast-fails with 503 while the state is HALF_OPEN, and claims OPEN -> HALF_OPEN with a new `_cell_cas`, so a worker that loses the race also fast-fails and exactly one probe runs. Test: `tests/http/test_reliability.mojo::test_circuitbreaker_half_open_admits_only_the_probe` (a second breaker copy sharing the cell serves a request from inside the probe; it gets 503 and the upstream is not reached; the probe's success closes the breaker). The repro now prints `OK:` (3 of 3 runs). The shipped model is `Flare.L4.CircuitBreaker.stepShipped` (`stepG true true`); `Flare.Bugs.APP_42.shipped_meets_spec` is stated about it. Decision: a probe that never records an outcome would leave the breaker half-open; `serve` is synchronous and records success or failure on every return or raise, so this cannot happen short of the process dying.
+Status: resolved. `serve` fast-fails with 503 while the state is HALF_OPEN, and claims OPEN -> HALF_OPEN with a new `_cell_cas`, so a worker that loses the race also fast-fails and exactly one probe runs. Test: `tests/http/test_reliability.mojo::test_circuitbreaker_half_open_admits_only_the_probe` (a second breaker copy sharing the cell serves a request from inside the probe; it gets 503 and the upstream is not reached; the probe's success closes the breaker). The repro now prints `OK:` (3 of 3 runs). The shipped model is `Flare.L4.CircuitBreaker.step`, and `single_probe` is stated about it. Decision: a probe that never records an outcome would leave the breaker half-open; `serve` is synchronous and records success or failure on every return or raise, so this cannot happen short of the process dying.
 
 ### APP-43: a network-path `Location` (`//host/path`) is resolved as a path
 
@@ -1077,17 +1099,18 @@ host, so nothing leaks.
 **What goes wrong.** `redirect_policy.mojo:171-172` returns
 `origin + location` for any reference that starts with `/`.
 
-**Lean.** `Flare.Bugs.APP_43.network_path_resolved_as_path` and
-`violates_spec`. The fix is proved sufficient by `resolveLocation_network_path`.
+**Lean.** The counterexamples `Flare.Bugs.APP_43.network_path_resolved_as_path`
+and `violates_spec`, and the fix theorem `resolveLocation_network_path`, are
+at tag `formal-audit-0.12`.
 
 **Fix.** For a reference starting with `//`, return `scheme + ":" + location`.
 
-**Repro.** `formal/repro/APP-43_redirect_network_path_location.mojo`
+**Repro.** `formal/repro/APP-43_redirect_network_path_location.mojo` (at tag `formal-audit-0.12`)
 
 - Observed: `BUG REPRODUCED: '//cdn.example.net/img' against https://api.example.com/a resolved to https://api.example.com:443//cdn.example.net/img ; decide next_url https://api.example.com:443//cdn.example.net/img forward_authorization True`
 - Flip: `OK: network-path Location resolved to https://cdn.example.net/img`
 
-Status: resolved. `_resolve_location` returns `base.scheme + ":" + location` for a reference starting with `//`. Tests: `tests/http/test_redirect_policy.mojo::test_network_path_location_replaces_the_authority` and `::test_network_path_location_is_cross_origin_for_same_origin_only` (the second covers `same_origin_only` rejecting the hop and a `//` reference naming the same host staying same-origin). The repro now prints `OK:` (3 of 3 runs). The shipped model is `Flare.L4.Redirect.resolveLocation`; the counterexamples are about the pre-fix `resolveLocationOld`, and `Flare.Bugs.APP_43.resolveLocation_network_path` is stated about the shipped one.
+Status: resolved. `_resolve_location` returns `base.scheme + ":" + location` for a reference starting with `//`. Tests: `tests/http/test_redirect_policy.mojo::test_network_path_location_replaces_the_authority` and `::test_network_path_location_is_cross_origin_for_same_origin_only` (the second covers `same_origin_only` rejecting the hop and a `//` reference naming the same host staying same-origin). The repro now prints `OK:` (3 of 3 runs). The shipped model is `Flare.L4.Redirect.resolveLocation`.
 
 ### APP-44: `_same_origin` compares hosts case-sensitively
 
@@ -1099,17 +1122,19 @@ spuriously and credentials are dropped.
 **What goes wrong.** `redirect_policy.mojo:188-198` compares with
 `a.host != b.host`, and `Url.parse` keeps the host's case.
 
-**Lean.** `Flare.Bugs.APP_44.host_case_not_same_origin`. The fix is proved
-sufficient by `sameOrigin_case`.
+**Lean.** The counterexample `Flare.Bugs.APP_44.host_case_not_same_origin`
+and the fix theorem `sameOrigin_case` are at tag `formal-audit-0.12`. The
+credential-confinement theorems of section 12 (`sendLoop_confined`) are
+stated over the lowercased origin `originOf`.
 
 **Fix.** Compare lowercased hosts.
 
-**Repro.** `formal/repro/APP-44_same_origin_host_case.mojo`
+**Repro.** `formal/repro/APP-44_same_origin_host_case.mojo` (at tag `formal-audit-0.12`)
 
 - Observed: `BUG REPRODUCED: _same_origin(API.example.com, api.example.com) = False ; same_origin_only decide action = 2 (0=FOLLOW, 2=REJECT)`
 - Flip: `OK: host comparison is case-insensitive`
 
-Status: resolved. `_same_origin` compares `a.host.lower()` with `b.host.lower()`. Test: `tests/http/test_redirect_policy.mojo::test_same_origin_ignores_host_case` (`same_origin_only` follows `http://API.example.com/old` to `http://api.example.com/new` and keeps Authorization; a different host is still rejected). The repro now prints `OK:` (3 of 3 runs). The shipped model is `Flare.L4.Redirect.sameOrigin`, and `originOf` (the tuple the credential-confinement theorems use) now lowercases the host; the counterexample is about the pre-fix `sameOriginOld`, and `Flare.Bugs.APP_44.sameOrigin_case` is stated about the shipped one. The client pool still keys on the unnormalised host (not part of this finding).
+Status: resolved. `_same_origin` compares `a.host.lower()` with `b.host.lower()`. Test: `tests/http/test_redirect_policy.mojo::test_same_origin_ignores_host_case` (`same_origin_only` follows `http://API.example.com/old` to `http://api.example.com/new` and keeps Authorization; a different host is still rejected). The repro now prints `OK:` (3 of 3 runs). The shipped model is `Flare.L4.Redirect.sameOrigin`, and `originOf` (the tuple the credential-confinement theorems use) lowercases the host. The client pool still keys on the unnormalised host (not part of this finding).
 
 ### APP-45: relative references are not resolved per RFC 3986 §5.2
 
@@ -1122,20 +1147,21 @@ Status: resolved. `_same_origin` compares `a.host.lower()` with `b.host.lower()`
 - `?page=2` against `http://h/list/items` gives `http://h:80/list/?page=2`.
 - Dot segments are kept, so `../g` against `/b/c/d` gives `/b/c/../g`.
 
-**Lean.** `Flare.Bugs.APP_45.query_only_reference_wrong` and
-`dot_segments_kept`. The fix is proved sufficient by
-`resolveLocation_query_only` (the query-only case), `rdsAux_no_dots` and
-`rfc_5_4_1_examples`.
+**Lean.** The counterexamples `Flare.Bugs.APP_45.query_only_reference_wrong`
+and `dot_segments_kept`, and the fix theorems `resolveLocation_query_only`
+(the query-only case) and `rfc_5_4_1_examples`, are at tag
+`formal-audit-0.12`. `Flare.L4.Redirect.rdsAux_no_dots` shows the shipped
+dot-segment walk never leaves a `.` or `..` segment.
 
 **Fix.** For `?` references, return `origin + base.path + location`. The
 full fix also applies `remove_dot_segments`.
 
-**Repro.** `formal/repro/APP-45_redirect_relative_reference_resolution.mojo`
+**Repro.** `formal/repro/APP-45_redirect_relative_reference_resolution.mojo` (at tag `formal-audit-0.12`)
 
 - Observed: `BUG REPRODUCED: '?page=2' against http://h/list/items -> http://h:80/list/?page=2`
 - Flip: `OK: query-only reference resolved per RFC 3986: http://h:80/list/items?page=2`
 
-Status: resolved. `_resolve_location` now follows RFC 3986 §5.2.2: a `?` reference keeps the whole base path (the base query is replaced), a `#` reference keeps the base path and query, a relative path merges with the directory of the base *path* (a `/` inside the base query used to count as a separator), and the resolved path of a relative or origin-relative reference goes through the new `_remove_dot_segments` (§5.2.4); the query and fragment are not touched. Tests: `tests/http/test_redirect_policy.mojo::test_query_only_reference_keeps_the_base_path`, `::test_dot_segments_are_removed_from_a_relative_reference`, `::test_dot_segments_are_removed_from_an_origin_relative_reference`, `::test_merge_uses_the_base_path_not_its_query` and `::test_rfc3986_section_5_4_1_normal_examples` (29 of the RFC's normal examples). The repro (which checks the query-only case) now prints `OK:` (3 of 3 runs). The shipped model is `Flare.L4.Redirect.resolveLocation` with `removeDotSegments`; the counterexamples are about the pre-fix `resolveLocationOld`. `Flare.Bugs.APP_45.resolveLocation_query_only` is stated about the shipped resolver for every base and query, `rdsAux_no_dots` shows the dot-segment walk never leaves a `.` or `..` segment, and `rfc_5_4_1_examples` checks the RFC examples on the model. Decision: absolute `http(s)://` Locations are still returned as given (not normalised), as are network-path references; only references flare resolves itself are normalised.
+Status: resolved. `_resolve_location` now follows RFC 3986 §5.2.2: a `?` reference keeps the whole base path (the base query is replaced), a `#` reference keeps the base path and query, a relative path merges with the directory of the base *path* (a `/` inside the base query used to count as a separator), and the resolved path of a relative or origin-relative reference goes through the new `_remove_dot_segments` (§5.2.4); the query and fragment are not touched. Tests: `tests/http/test_redirect_policy.mojo::test_query_only_reference_keeps_the_base_path`, `::test_dot_segments_are_removed_from_a_relative_reference`, `::test_dot_segments_are_removed_from_an_origin_relative_reference`, `::test_merge_uses_the_base_path_not_its_query` and `::test_rfc3986_section_5_4_1_normal_examples` (29 of the RFC's normal examples). The repro (which checks the query-only case) now prints `OK:` (3 of 3 runs). The shipped model is `Flare.L4.Redirect.resolveLocation` with `removeDotSegments`; `Flare.L4.Redirect.rdsAux_no_dots` shows the dot-segment walk never leaves a `.` or `..` segment. Decision: absolute `http(s)://` Locations are still returned as given (not normalised), as are network-path references; only references flare resolves itself are normalised.
 
 ### APP-46: single-worker `drain(timeout_ms)` is a hard stop
 
@@ -1155,12 +1181,13 @@ handlers to return".
 serving thread sees the flag within one poll (at most 100 ms) and closes
 every live connection (`_unified_reactor_impl.mojo:1000-1046`).
 
-**Lean.** `Flare.Bugs.APP_46.cut_example` (1000 bytes pending, 1 byte/ms,
-`timeout_ms = 5000`: 100 bytes delivered), `violates_spec`. Fix: after
-closing the listener, wait out `timeout_ms` before setting `_stopping`;
-`fixed_meets_spec`, `fixed_on_example`.
+**Lean.** The counterexamples `Flare.Bugs.APP_46.cut_example` (1000 bytes
+pending, 1 byte/ms, `timeout_ms = 5000`: 100 bytes delivered) and
+`violates_spec` are at tag `formal-audit-0.12`. Fix: after closing the
+listener, wait out `timeout_ms` before setting `_stopping`; the shipped
+delay meets the spec: `Flare.L4.Drain.graceful`.
 
-**Repro.** `formal/repro/APP-46_drain_is_hard_stop.mojo`: `serve()` on a
+**Repro.** `formal/repro/APP-46_drain_is_hard_stop.mojo` (at tag `formal-audit-0.12`): `serve()` on a
 second thread, a 32 MiB response read at 64 KiB every 5 ms, `drain(5000)`
 200 ms in. Observed:
 `BUG REPRODUCED: drain(timeout_ms=5000) returned after 0 ms (report drained=0 in_flight=0) and the in-flight 32 MiB response was cut: the client (reading 64 KiB every 5 ms) got 4627156 bytes`.
@@ -1183,7 +1210,7 @@ The flip was re-run with 10 ms `usleep` steps and printed `OK: in-flight
 response fully delivered during drain (33554538 bytes, drain took 6798 ms)`,
 exit 0.
 
-Status: resolved. `HttpServer.drain` closes the listener, waits `timeout_ms` (negative clamps to 0; 1 ms sleeps bounded by `monotonic_now_ms`), then sets `_stopping`; `drain(0)` is still `close()`. Tests: `tests/http/test_server_drain.mojo::test_drain_lets_an_in_flight_response_finish`, `::test_drain_waits_out_the_timeout_before_stopping`; the repro now prints `OK:` (3 of 3 runs). The shipped delay is `Flare.L4.Drain.stopDelayFixed`; `Flare.Bugs.APP_46.fixed_meets_spec` is stated about it. Decision: the single-worker path always waits the full `timeout_ms`, since it publishes no live-connection count (idle keep-alive connections would count as live anyway); documented in the docstring and `docs/operations.md`.
+Status: resolved. `HttpServer.drain` closes the listener, waits `timeout_ms` (negative clamps to 0; 1 ms sleeps bounded by `monotonic_now_ms`), then sets `_stopping`; `drain(0)` is still `close()`. Tests: `tests/http/test_server_drain.mojo::test_drain_lets_an_in_flight_response_finish`, `::test_drain_waits_out_the_timeout_before_stopping`; the repro now prints `OK:` (3 of 3 runs). The shipped delay is `Flare.L4.Drain.stopDelay`, and `graceful` is stated about it. Decision: the single-worker path always waits the full `timeout_ms`, since it publishes no live-connection count (idle keep-alive connections would count as live anyway); documented in the docstring and `docs/operations.md`.
 
 ### APP-47: an h2c upgrade whose 101 flushes on a writable edge never migrates
 
@@ -1199,16 +1226,17 @@ TLS; the writable-edge path has the same problem in cleartext.
 **Spec.** RFC 7540 §3.2: after the 101 the server's first bytes are its
 connection preface, and the upgrade request is answered as stream 1.
 
-**What goes wrong.** See section 16: a writable edge goes to
-`_drive_h1_writable`, which applies the step without migrating; the step
-has no interest bits, so `_apply_step` leaves write interest armed and
-every poll returns another writable edge.
+**What goes wrong.** Every writable edge on a `KIND_H1` connection goes to
+`_drive_h1_writable` (see section 16), which applies the step without
+migrating; the step has no interest bits, so `_apply_step` leaves write
+interest armed and every poll returns another writable edge.
 
-**Lean.** `Flare.Bugs.APP_47.violates_spec`. Fix: also route a writable
-edge to `_drive_h1` while `_h2c_upgrade_pending` is set;
-`fixed_meets_spec`.
+**Lean.** The counterexample `Flare.Bugs.APP_47.violates_spec` (at tag
+`formal-audit-0.12`) is about the pre-fix routing. Fix: also route a
+writable edge to `_drive_h1` while `_h2c_upgrade_pending` is set; the
+shipped routing meets the spec: `Flare.L4.ConnExt.H2c.run_spec`.
 
-**Repro.** `formal/repro/APP-47_h2c_upgrade_lost_on_writable_edge.mojo`
+**Repro.** `formal/repro/APP-47_h2c_upgrade_lost_on_writable_edge.mojo` (at tag `formal-audit-0.12`)
 drives `_unified_handle_conn_event` with real reactor events. The first
 version was nondeterministic on macOS: socket-buffer autotuning sometimes
 let the 101 flush inline, so the writable-edge path was never reached and
@@ -1223,7 +1251,7 @@ on macOS and on Linux:
 at `_unified_reactor_impl.mojo:812`: 5 of 5 runs
 `OK: connection migrated (kind 2), client received 92 bytes after the backlog (101 + SETTINGS)`, exit 0.
 
-Status: resolved. A writable edge on a `KIND_H1` connection now goes to `_drive_h1` while `_h2c_upgrade_pending` is set (with the handle in `STATE_WRITING`, `on_readable` is a no-op that hands over to `on_writable`), so the flush migrates the connection. Test: `tests/http/test_h2c_upgrade.mojo::test_h2c_upgrade_101_flushed_on_a_writable_edge_migrates` (drives `on_readable` directly so the 101 is queued and unwritten, then delivers one writable edge; no dependence on kernel buffer sizes). The repro now prints `OK:` (3 of 3 runs). The shipped routing is `Flare.L4.ConnExt.H2c.shipped`; `Flare.Bugs.APP_47.fixed_meets_spec` is stated about it.
+Status: resolved. A writable edge on a `KIND_H1` connection now goes to `_drive_h1` while `_h2c_upgrade_pending` is set (with the handle in `STATE_WRITING`, `on_readable` is a no-op that hands over to `on_writable`), so the flush migrates the connection. Test: `tests/http/test_h2c_upgrade.mojo::test_h2c_upgrade_101_flushed_on_a_writable_edge_migrates` (drives `on_readable` directly so the 101 is queued and unwritten, then delivers one writable edge; no dependence on kernel buffer sizes). The repro now prints `OK:` (3 of 3 runs). The shipped routing is `Flare.L4.ConnExt.H2c.route`, and `run_spec` is stated about it.
 
 ### APP-48: a WebSocket upgrade on a TLS connection is served in cleartext
 
@@ -1243,11 +1271,12 @@ WebSocket branch whenever `config.ws.handler` is set; `_handle_ws_upgrade`
 h2c branch just below checks `not self.tls` (881). TLS connections reach
 this code through `_migrate_tls` (`_unified_reactor_impl.mojo:545-552`).
 
-**Lean.** `Flare.Bugs.APP_48.violates_spec`. Fix: `if config.ws.handler and
-not self.tls:`; `fixed_meets_spec` (TLS connections stay inside TLS,
-cleartext behaviour unchanged).
+**Lean.** The counterexample `Flare.Bugs.APP_48.violates_spec` (at tag
+`formal-audit-0.12`) is about the pre-fix branch. Fix: `if config.ws.handler
+and not self.tls:`; the shipped branch keeps every TLS connection inside
+TLS: `Flare.L4.ConnExt.Ws.spec`.
 
-**Repro.** `formal/repro/APP-48_ws_upgrade_over_tls_sends_cleartext.mojo`
+**Repro.** `formal/repro/APP-48_ws_upgrade_over_tls_sends_cleartext.mojo` (at tag `formal-audit-0.12`)
 peeks at the raw TCP bytes the server sends back inside a TLS session.
 Observed: after the TLS session-ticket records, the cleartext
 `HTTP/1.1 101 Switching Protocols ...` and an unencrypted text frame
@@ -1297,15 +1326,16 @@ count. OpenSSL keeps the record pending. `_flush_write_buf_tls` then calls
 `SSL_R_BAD_WRITE_RETRY`. flare classifies that as fatal and sets
 `should_close`.
 
-**Lean.** `Flare.Bugs.APP_49.violates_spec` covers every short send,
-including the observed 24-of-25 case (`observed_wire`).
-`tls_response_lost` covers the TLS case. Fix: cleartext, keep the unsent
-tail and put it in front of the response in `write_buf`
-(`_transition_to_writing`); TLS, keep the interim in a buffer the connection
-owns and retry `SSL_write` from it at the start of `_flush_write_buf_tls`.
-`fixed_meets_spec` covers both.
+**Lean.** The counterexamples `Flare.Bugs.APP_49.violates_spec` (every
+short send, including the observed 24-of-25 case `observed_wire`) and
+`tls_response_lost` (the TLS case) are at tag `formal-audit-0.12`. Fix:
+cleartext, keep the unsent tail and put it in front of the response in
+`write_buf` (`_transition_to_writing`); TLS, keep the interim in a buffer
+the connection owns and retry `SSL_write` from it at the start of
+`_flush_write_buf_tls`. The shipped code meets the spec in both cases:
+`Flare.L4.Continue.Plain.run_spec` and `Tls.run_spec`.
 
-**Repro.** `formal/repro/APP-49_continue_partial_send_corrupts_stream.mojo`,
+**Repro.** `formal/repro/APP-49_continue_partial_send_corrupts_stream.mojo` (at tag `formal-audit-0.12`),
 `# PLATFORM: linux`, run with `formal/repro/linux.sh` (Linux 6.12,
 aarch64). A client sets SO_RCVBUF 4096 before connecting, then pipelines a
 GET and the head of a POST with `Expect: 100-continue`, reading nothing.
@@ -1330,30 +1360,21 @@ and
 `OK: TLS: the interim record did not go out after a 2922 byte response (client read it all, then nothing for 300 ms); the final response step closed=False and the client then read 126 bytes: HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 200 OK\r\nCo`,
 exit 0.
 
-Status: resolved. `ConnHandle.continue_pending` keeps what the socket did not take of the interim. Cleartext: the unsent tail of a short `send` is put in front of the response in `_transition_to_writing`. TLS: the interim is sent from that connection-owned buffer and, after WANT_WRITE, retried from it at the start of `_flush_write_buf_tls` before any response byte. A send that takes none of the interim is still dropped (the client's fallback covers it). Tests: `tests/http/test_continue_interim.mojo::test_cleartext_unsent_interim_tail_precedes_the_response`, `::test_interim_taken_whole_leaves_nothing_pending`, `::test_keep_unsent_interim_ignores_none_and_all`, `::test_tls_pending_interim_is_retried_before_the_response` (the first and last put the connection in the state a short send / WANT_WRITE leaves, since the trigger is Linux-only); the repro now prints `OK:` for both variants on Linux. The shipped models are `Flare.L4.Continue.Plain.runFixed` and `Tls.runFixed`; `Flare.Bugs.APP_49.fixed_meets_spec` is stated about them.
+Status: resolved. `ConnHandle.continue_pending` keeps what the socket did not take of the interim. Cleartext: the unsent tail of a short `send` is put in front of the response in `_transition_to_writing`. TLS: the interim is sent from that connection-owned buffer and, after WANT_WRITE, retried from it at the start of `_flush_write_buf_tls` before any response byte. A send that takes none of the interim is still dropped (the client's fallback covers it). Tests: `tests/http/test_continue_interim.mojo::test_cleartext_unsent_interim_tail_precedes_the_response`, `::test_interim_taken_whole_leaves_nothing_pending`, `::test_keep_unsent_interim_ignores_none_and_all`, `::test_tls_pending_interim_is_retried_before_the_response` (the first and last put the connection in the state a short send / WANT_WRITE leaves, since the trigger is Linux-only); the repro now prints `OK:` for both variants on Linux. The shipped models are `Flare.L4.Continue.Plain.run` and `Tls.run`, and `Plain.run_spec` and `Tls.run_spec` are stated about them.
 
 ## Documentation gaps
 
-- **Percent-decoding claim.** `docs/features.md:279` lists "`Url`,
+- **Percent-decoding claim.** `docs/features.md` lists "`Url`,
   `UrlParseError`: URL parser, percent decoding" for `flare.http.url`.
   `url.mojo` performs no percent-decoding: host, path, query and fragment
   are returned raw. Percent-decoding lives in `flare.http.form` (`urldecode`).
-- **Single-worker drain** (the timeout itself is APP-46). The docs describe a timed, measured drain:
-  - `docs/features.md:110` lists "`HttpServer.drain(timeout_ms) -> ShutdownReport` per worker";
-  - `docs/architecture.md:291` shows drain flipping `SHUTDOWN` on live connections;
-  - the method's own summary (`server.mojo:1697-1701`) says it "waits up to `timeout_ms` milliseconds for in-flight reactor events to flush";
-  - its Notes paragraph (1729-1731) says "The drain timeout bounds the wait for handlers to return".
-
-  The body (1733-1755) closes the listener, sets `_stopping` and returns
-  at once. The inline comment (1743-1752) says the wait is "capped at 1ms",
-  but no sleep call follows. The report has all counts zero
-  (`Flare.L4.Drain.drain_ignores_timeout`, `drain_report_zero`). The
-  docstring's "Returns" paragraph and the inline comment do say this, so the
-  code is consistent with part of its own documentation. The summary line
-  and `features.md` are not. Only the multi-worker `Scheduler.drain` (L5)
-  measures anything.
+- **Single-worker drain report.** `HttpServer.drain` returns a
+  `ShutdownReport` whose counts are all zero; only the multi-worker
+  `Scheduler.drain` (L5) measures anything. The docstring's "Returns"
+  paragraph says so, and `docs/features.md` describes the wait added for
+  APP-46. The report is not modelled.
 - **Redirect method rewriting.** The `RedirectDecision` docstring
-  (`redirect_policy.mojo:134-137`) documents POST, PUT and PATCH becoming
+  (`redirect_policy.mojo`) documents POST, PUT and PATCH becoming
   GET on 301/302/303. The code does this for DELETE as well
   (`decide_301_delete_is_get`). RFC 9110 §15.4.2 permits it only for POST.
   This is documented behaviour, recorded here as a deviation.
@@ -1366,7 +1387,8 @@ Status: resolved. `ConnHandle.continue_pending` keeps what the socket did not ta
   is dispatched after `should_close` (`run_segs_frozen`). The keep-alive
   count respects `max_keepalive_requests` (`ka_bound`). The general
   serialiser omits the body for HEAD, 1xx, 204 and 304 (`serialize_spec`);
-  APP-04 and APP-05 are the two paths that bypass it.
+  the static and error paths, which bypassed it before APP-04 and APP-05,
+  are covered by `staticBytes_spec` and `headFlag_spec`.
 - **ServerConfig.** `check` lets the idle (head) timer exceed
   `request_timeout_ms` (`head_timer_unordered`). The request budget is still
   enforced on every readable event, and `closeTime_le` bounds the read phase
@@ -1392,8 +1414,9 @@ Status: resolved. `ConnHandle.continue_pending` keeps what the socket did not ta
 - **Cookies.** `Set-Cookie` output never contains CR, LF or other controls.
   `SameSite=None` always carries `Secure`. Max-Age parsing cannot wrap.
 - **Form.** The round trips `urldecode(urlencode s) = s` and
-  `parse(to_urlencoded fd) = fd` hold for all well-formed UTF-8 strings (for
-  all byte strings before the APP-24 fix, which was the only defect).
+  `parse(to_urlencoded fd) = fd` hold for all well-formed UTF-8 strings
+  (`urldecode_urlencode`, `parseForm_toUrlencoded`); APP-24 was the only
+  defect.
 - **Url.** These behaviours were checked and are not filed:
   - `HTTP://` in upper case is rejected (fail-closed).
   - An empty port raises.
@@ -1436,40 +1459,45 @@ Status: resolved. `ConnHandle.continue_pending` keeps what the socket did not ta
 
 ## Traceability
 
-| Lean definition | Mojo file:line (@59bda50) | Theorems | Status |
+Mojo paths are relative to `flare/`. Each Lean definition's anchor names the
+Mojo symbols it mirrors; `formal/scripts/anchors.py` checks them.
+
+| Lean definition | Mojo symbols | Theorems | Status |
 |---|---|---|---|
-| `Flare.L4.ConnSM.init`, `queueError`, `finalise`, `applyKA` | http/_reactor/conn_handle.mojo:354-398, 1576-1580, 718-756, 697-715 | `inv_init`, `inv_queueError`, `ka_bound` | proved |
-| `Flare.L4.ConnSM.dispatch`, `parse`, `onReadable` | conn_handle.mojo:846-860, 911-920, 579-695, 760-920 | `inv_dispatch`, `inv_parse`, `inv_onReadable`, `responses_fifo` | proved; APP-01 |
-| `Flare.L4.ConnSM.onWritable`, `onTimeout`, `step`, `lts` | conn_handle.mojo:1262-1375, 1403-1411 | `writable_resumes`, `timeout_closes`, `segs_frozen`, `inv_inductive` | proved |
-| `Flare.L4.ConnSM.Framing.serialize` | http/_reactor/write_path.mojo:151-155, 222-235 | `serialize_spec` | proved |
-| `Flare.L4.ConnSM.Framing.headFlag`, `staticBytes` | conn_handle.mojo:747-754, 1590-1620, 1174-1220 | `headFlag_spec`, `staticBytes_spec` | APP-04, APP-05 |
-| `Flare.L4.KeepAlive.isKeepaliveFast`, `isCloseFast`, `computeCloseAfter` | http/_reactor/keepalive_scan.mojo:206-236, 239-259, 350-390 | `computeCloseAfterOld_single`, `computeCloseAfter_eq_spec` | APP-03 |
-| `Flare.L4.KeepAlive.wantsClose` and helpers | keepalive_scan.mojo:393-491 | `wantsClose_sound_close`, `wantsClose_spec` | APP-02 |
-| `Flare.L4.ServerConfig.check`, timers, `overCapImpl` | http/_server/config.mojo:132-144, 206-221, 276-329; conn_handle.mojo:460-463, 598-691, 1314-1375 | `default_check`, `timer_instr_nonneg`, `closeTime_le`, `overCapImpl_eq_spec` | proved; APP-06 |
-| `Flare.L4.Router.splitPath`, `compile`, `matchSegs`, `serve`, `serveMounts` | http/router.mojo:111-156, 175-214, 339-394, 488-498, 675-929 | `serve_eq_spec`, `serve_valid`, `allow_exact`, `mount_compose` | proved |
-| `Flare.L4.ComptimeRouter.matchOne`, `scanCT`, `serveCT` | http/routes.mojo:66-78, 91-174, 199-284 | `serveCT_eq_serve`, `router_equiv_comptime`, `matchOne_eq_spec` | proved; APP-10 |
-| `Flare.L4.Middleware.setH`, `appendH`, `getH`, `hasH` | http/headers.mojo:139-213 | `getH_setH_self`, `hasH_setH_self` | proved |
-| `Flare.L4.Middleware.logger`, `requestId`, `catchPanic` | http/middleware.mojo:61-86, 105-111, 397-404 | `logger_transparent`, `catchPanic_idem`, `requestId_outside_catchPanic` | proved |
-| `Flare.L4.Middleware.compress`, `encodeAs` | http/middleware.mojo:345-382 | `compress_content_length`, `compress_partial`, `compress_vary` | APP-26, APP-27 |
-| `Flare.L4.Negotiate.parseQ`, `parseEntry`, `parseHeader`, `step`, `negotiate` | http/middleware.mojo:131-260 | `decideOld_eq_spec_of_noStar`, `decide'_eq_spec` | APP-20 |
-| `Flare.L4.Cors.originAllowed`, `attachOrigin`, `serve` | http/cors.mojo:89-228 | `originAllowed_sound`, `acao_not_star_with_creds`, `serve_vary` | APP-21, APP-22 |
-| `Flare.L4.Cookie.toSetCookie`, `parseMaxAge` | http/cookie.mojo:89-212 | `toSetCookie_noCRLF`, `toSetCookie_none_secure`, `parseMaxAge_sound` | proved |
-| `Flare.L4.Form.urldecode`, `urlencode`, `parseForm`, `toUrlencoded` | http/form.mojo:28-129, 199-270 | `urldecode_urlencode`, `parseForm_toUrlencoded` | proved; APP-24 |
-| `Flare.L4.Url.parse`, `parseWith`, `parsePort` | http/url.mojo:73-299 | `parsePort_iff`, `parse_port`, `parse_spec` | APP-23, APP-25 |
-| `Flare.L4.RateLimit.step` (pre-fix: `stepOld`), `spec` | http/reliability.mojo:361-404 | `step_eq_spec`, `step_inv`, `overflow_iff` | resolved (APP-40) |
-| `Flare.L4.CircuitBreaker.stepG`, `step` | http/reliability.mojo:397-469 | `step_counts_inv`, `step_open_rejects` | APP-41, APP-42 |
-| `Flare.L4.RateLimit.step`, `spec` | http/reliability.mojo:358-394 | `step_eq_spec`, `step_inv`, `overflow_iff` | APP-40 |
-| `Flare.L4.CircuitBreaker.stepG`, `stepShipped` | http/reliability.mojo:413-504 | `step_counts_inv`, `step_open_rejects` | APP-41, APP-42 |
-| `Flare.L4.Retry.budget`, `sleep`, `serve` | http/reliability.mojo:164-271 | `budget_eq_spec`, `sleep_bounds`, `serve_calls_bounded` | proved |
-| `Flare.L4.Redirect.resolveLocation`, `sameOrigin`, `decideR`, `sendLoop` | http/redirect_policy.mojo:154-354; http/client.mojo:2196-2281 | `sendLoop_terminates`, `sendLoop_confined`, `decide_method_rfc` | APP-43, APP-44, APP-45 |
-| `Flare.L4.ClientPool.release`, `acquire`, `popLoop`, `total` | http/client_pool.mojo:86-102, 203-293 | `inv_inductive`, `caps`, `acquire_same_origin` | proved |
-| `Flare.L4.Drain.drain` | http/server.mojo:1694-1755 | `drain_ignores_timeout`, `drain_report_zero` | proved (APP-46; docs gap for the report) |
-| `Flare.L4.Drain.delivered`, `stopDelay` | http/server.mojo:1733-1755, http/_unified_reactor_impl.mojo:1000-1046, 1103-1170 | `delivered_le_pollCap`, `APP_46.violates_spec`, `fixed_graceful` | counterexample (APP-46) |
-| `Flare.L4.ClientLease.sendPooled`, `Client` | http/client.mojo:2509-2593 | `dispose_first`, `release_once`, `inv_reachable`, `acquire_not_held` | proved |
-| `Flare.L4.ConnExt.H2c.route`, `driveH1`, `driveH1Writable` | http/_unified_reactor_impl.mojo:174-258, 812-855; http/_reactor/conn_handle.mojo:1353-1362 | `impl_spins`, `APP_47.violates_spec`, `fixed_spec` | counterexample (APP-47) |
-| `Flare.L4.ConnLive.trace`, `Fair`, `Oracle.Ext` | http/_reactor/conn_handle.mojo (via `ConnSM.step`); http/_unified_reactor_impl.mojo:220-235, 832-855 | `eventually_served`, `done_reason`, `trace_done_sc` | proved |
-| `Flare.L4.ConnStream.Stream.batch`, `wloop`, `finish`, `onWritable` | http/_reactor/conn_handle.mojo:1621-1642, 1286-1351, 1364-1375, 1262-1375 | `inv_onWritable`, `wire_exact_at_end`, `interest` | proved |
-| `Flare.L4.ConnStream.Tls.drain`, `flush`, `readDriver`, `writeDriver`, `route` | conn_handle.mojo:479-520, 1213-1240, 1314-1375; http/_unified_reactor_impl.mojo:174-190, 243-258, 812-831 | `blocked_interest`, `retry_read`, `retry_write`, `inv_route`, `interest_nonempty` | proved |
-| `Flare.L4.Negotiate.parseHeaderMojo` | http/middleware.mojo:131-235 | `parseHeaderMojo_eq`, `negotiateOldMojo_eq` | proved |
-| `Flare.L4.Continue.Plain.sendContinue`, `finalise`, `flush`; `Tls.sendContinue`, `flush` | http/_reactor/conn_handle.mojo:544-576, 718-756, 1423-1435, 1286-1312, 1213-1240 | `Plain.violates`, `Tls.violates`, `APP_49.violates_spec`, `fixed_meets_spec` | counterexample (APP-49) |
-| `Flare.L4.ConnExt.Ws.upgradeTaken`, `wire` (pre-fix: `upgradeTakenOld`, `wireOld`) | http/_reactor/conn_handle.mojo:838-885, 1476-1574 | `APP_48.violates_spec`, `spec` | resolved (APP-48) |
+| `Flare.L4.ConnSM.init`, `queueError`, `finalise`, `applyKA` | `http/_reactor/conn_handle.mojo`: `ConnHandle.__init__`, `_queue_error`, `_transition_to_writing`, `_finalise_response`, `_apply_keepalive_policy` | `inv_init`, `inv_queueError`, `ka_bound` | proved |
+| `Flare.L4.ConnSM.dispatch`, `parse`, `onReadable` | `conn_handle.mojo`: `ConnHandle.on_readable`, `_check_request_complete`, `_drain_recv` | `inv_dispatch`, `inv_parse`, `inv_onReadable`, `responses_fifo`, `no_request_after_close_header` | proved; APP-01 |
+| `Flare.L4.ConnSM.onWritable`, `onTimeout`, `stepCH`, `lts` | `conn_handle.mojo`: `ConnHandle.on_writable`, `on_timeout` | `writable_resumes`, `timeout_closes`, `segs_frozen`, `inv_inductive` | proved |
+| `Flare.L4.ConnSM.Framing.serialize` | `http/_reactor/write_path.mojo`: `serialize_response_into`, `_wire_status` | `serialize_spec` | proved |
+| `Flare.L4.ConnSM.Framing.headFlag`, `staticBytes` | `conn_handle.mojo`: `ConnHandle._check_request_complete`, `_handle_ws_upgrade`, `on_readable_view`, `on_readable_static` | `headFlag_spec`, `staticBytes_spec` | proved; APP-04, APP-05 |
+| `Flare.L4.KeepAlive.isKeepaliveFast`, `isCloseFast`, `computeCloseAfter` | `http/_reactor/keepalive_scan.mojo`: `_connection_is_keepalive`, `_connection_is_close`, `_conn_token_mask`, `_compute_close_after` | `computeCloseAfter_eq_spec` | proved; APP-03 |
+| `Flare.L4.KeepAlive.wantsClose` and helpers | `keepalive_scan.mojo`: `_wants_close` | `wantsClose_sound_close`, `wantsClose_spec` | proved; APP-02 |
+| `Flare.L4.ServerConfig.check`, timers, `overCapImpl` | `http/_server/config.mojo`: `ServerConfig`, `ServerConfig.check`; `conn_handle.mojo`: `ConnHandle._check_request_complete`, `on_writable`, `_drain_recv`, `_drain_recv_tls`, `_append_pre_recv_bytes` | `default_check`, `timer_instr_nonneg`, `closeTime_le`, `overCapImpl_eq_spec` | proved; APP-06 |
+| `Flare.L4.Router.splitPath`, `compile`, `matchSegs`, `serve`, `serveMounts` | `http/router.mojo`: `_split_path`, `_compile_segments`, `_match`, `Router.serve`, `_MountedRouter.serve`, `_prefix_match` | `serve_eq_spec`, `serve_valid`, `allow_exact`, `mount_compose` | proved |
+| `Flare.L4.ComptimeRouter.matchOne`, `scanCT`, `serveCT` | `http/routes.mojo`: `_match_one`, `ComptimeRouter.serve` | `serveCT_eq_serve`, `router_equiv_comptime`, `matchOne_eq_spec` | proved; APP-10 |
+| `Flare.L4.Middleware.setH`, `appendH`, `getH`, `hasH` | `http/headers.mojo`: `HeaderMap.set`, `append`, `get`, `contains` | `getH_setH_self`, `hasH_setH_self` | proved |
+| `Flare.L4.Middleware.logger`, `requestId`, `catchPanic` | `http/middleware.mojo`: `Logger.serve`, `RequestId.serve`, `CatchPanic.serve` | `logger_transparent`, `catchPanic_idem`, `requestId_outside_catchPanic` | proved |
+| `Flare.L4.Middleware.compress`, `encodeAs` | `middleware.mojo`: `Compress.serve` | `compress_content_length`, `compress_partial`, `compress_vary` | proved; APP-26, APP-27 |
+| `Flare.L4.Negotiate.parseQ`, `parseEntry`, `parseHeader`, `decide'`, `negotiate` | `middleware.mojo`: `_parse_q`, `negotiate_encoding` | `parseQ_le`, `decide'_eq_spec`, `negotiate_eq_spec` | proved; APP-20 |
+| `Flare.L4.Negotiate.parseHeaderMojo` | `middleware.mojo`: `negotiate_encoding` | `parseHeaderMojo_eq` | proved |
+| `Flare.L4.Cors.originAllowed`, `attachOrigin`, `ensureVary`, `serve` | `http/cors.mojo`: `_origin_allowed`, `Cors._attach_origin`, `_ensure_vary_origin`, `Cors.serve` | `originAllowed_sound`, `acao_not_star_with_creds`, `serve_vary` | proved; APP-21, APP-22 |
+| `Flare.L4.Cookie.toSetCookie`, `parseMaxAge` | `http/cookie.mojo`: `Cookie.to_set_cookie_header`, `_parse_max_age` | `toSetCookie_noCRLF`, `toSetCookie_none_secure`, `parseMaxAge_sound` | proved |
+| `Flare.L4.Form.urldecode`, `urlencode`, `parseForm`, `toUrlencoded` | `http/form.mojo`: `urldecode`, `urlencode`, `parse_form_urlencoded`, `FormData.to_urlencoded` | `urldecode_valid`, `urldecode_urlencode`, `parseForm_toUrlencoded` | proved; APP-24 |
+| `Flare.L4.Url.parse`, `parseWith`, `parsePort` | `http/url.mojo`: `Url.parse`, `_find`, `_rfind`, `_default_port`, `_parse_port` | `parsePort_iff`, `parse_port`, `parse_spec` | proved; APP-23, APP-25 |
+| `Flare.L4.RateLimit.step`, `stepUnclamped`, `spec` | `http/reliability.mojo`: `RateLimit.serve` | `step_eq_spec`, `step_inv`, `overflow_iff` | proved; APP-40 |
+| `Flare.L4.CircuitBreaker.arrive`, `finish`, `step` | `reliability.mojo`: `CircuitBreaker.serve`, `_record_failure` | `step_counts_inv`, `step_open_rejects`, `cooldown_respected`, `single_probe` | proved; APP-41, APP-42 |
+| `Flare.L4.Retry.budget`, `sleep`, `serve` | `reliability.mojo`: `_backoff_sleep_ms`, `Retry.serve` | `budget_eq_spec`, `sleep_bounds`, `serve_calls_bounded` | proved |
+| `Flare.L4.Redirect.resolveLocation`, `removeDotSegments`, `sameOrigin`, `decideR`, `sendLoop` | `http/redirect_policy.mojo`: `_resolve_location`, `_remove_dot_segments`, `_same_origin`, `RedirectPolicy.decide`; `http/client.mojo`: `HttpClient._send_once` | `sendLoop_terminates`, `rdsAux_no_dots`, `sendLoop_confined`, `decide_method_rfc` | proved; APP-43, APP-44, APP-45 |
+| `Flare.L4.ClientPool.release`, `acquire`, `popLoop`, `total` | `http/client_pool.mojo`: `ClientPool.release`, `acquire`, `_total_idle` | `inv_inductive`, `caps`, `acquire_same_origin` | proved |
+| `Flare.L4.Drain.pollCap`, `delivered`, `stopDelay` | `http/_reactor/lifecycle.mojo`: `_poll_timeout_ms`; `http/_unified_reactor_impl.mojo`: `_run_unified_loop_for_fd`, `_drain_remaining_conns_unified`; `http/server.mojo`: `HttpServer.drain` | `graceful`, `stopDelay_nonpos` | proved; APP-46 |
+| `Flare.L4.ClientLease.sendPooled`, `client` | `http/client.mojo`: `HttpClient._send_h1_pooled` | `dispose_first`, `release_once`, `inv_reachable`, `acquire_not_held` | proved |
+| `Flare.L4.ConnExt.H2c.route`, `driveH1`, `driveH1Writable` | `http/_unified_reactor_impl.mojo`: `_unified_handle_conn_event`, `_drive_h1`, `_drive_h1_writable`; `conn_handle.mojo`: `ConnHandle.on_writable` | `run_spec` | proved; APP-47 |
+| `Flare.L4.ConnExt.Ws.upgradeTaken`, `wire` | `conn_handle.mojo`: `ConnHandle.on_readable`, `_start_h2c_upgrade`, `_handle_ws_upgrade` | `spec` | proved; APP-48 |
+| `Flare.L4.ConnLive.trace`, `Fair`, `Oracle.Ext` | `conn_handle.mojo` (via `ConnSM.step`); reactor re-drive in `_unified_reactor_impl.mojo` (not anchored) | `eventually_served`, `done_reason`, `trace_done_sc` | proved |
+| `Flare.L4.ConnStream.Stream.batch`, `wloop`, `finish`, `onWritable` | `conn_handle.mojo`: `ConnHandle._stream_refill`, `on_writable` | `inv_onWritable`, `wire_exact_at_end`, `interest` | proved |
+| `Flare.L4.ConnStream.Tls.drain`, `flush`, `readDriver`, `writeDriver`, `route` | `conn_handle.mojo`: `ConnHandle._drain_recv_tls`, `_flush_write_buf_tls`, `on_writable`; `_unified_reactor_impl.mojo`: `_drive_h1`, `_drive_h1_writable`, `_unified_handle_conn_event` | `blocked_interest`, `retry_read`, `retry_write`, `inv_route`, `interest_nonempty` | proved |
+| `Flare.L4.Continue.Plain.sendContinue`, `finalise`, `flush`; `Tls.sendContinue`, `flush` | `conn_handle.mojo`: `ConnHandle._maybe_send_continue`, `_keep_unsent_interim`, `_check_request_complete`, `_transition_to_writing`, `on_writable`, `_flush_write_buf_tls` | `Plain.run_spec`, `Tls.run_spec` | proved; APP-49 |
+| `Flare.L4.Policies.ErrorLog.handlerError`, `extractorError` | `errors.mojo`: `log_handler_error`; `http/extract.mojo`: `Extracted.serve`, `_bad_request_from_error` | `ErrorLog.policy` | proved; DOC-04 |
+| `Flare.L4.Policies.EntryPoints.entry` | `http/server.mojo`: `HttpServer._reject_extra_listeners` | `EntryPoints.entry_spec` | proved; DOC-05 |
+| `Flare.L4.Policies.Session.csEncode`, `csLoad`, `backedDefaultTtl` | `http/session.mojo`: `CookieSessionStore.encode_at`, `load_at`, `BackedSessionStore.__init__`, `DEFAULT_SESSION_TTL_S` | `Session.expires` | proved; DOC-06 |
+| `Flare.L4.Policies.TlsReload.reload` | `tls/acceptor.mojo`: `TlsAcceptor.reload` | `TlsReload.rotates` | proved; DOC-07 |
+| `Flare.L4.Policies.Tickets.defaultTickets`, `build` | `tls/acceptor.mojo`: `TlsServerConfig.__init__`, `TlsAcceptor.__init__` | `Tickets.opt_in` | proved; DOC-08 |

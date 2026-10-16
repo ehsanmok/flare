@@ -5,10 +5,8 @@ import Flare.L3_Protocol.H2.HpackTable
 
 HPACK only works if the decoder's dynamic table mirrors the encoder's
 entry for entry. The peer's encoder indexes the *wire octets*; flare's
-decoder stores `_octets_to_string(octets)` (`hpack.mojo:48-76`). Before the
-HPACK-01 fix that rewrote any block containing a byte `≥ 0x80` with
-`utf8_lossy_string` (`octetsToStringOld`); it now keeps the octets
-unchanged (`octetsToString`, `sync_exact_shipped`).
+decoder stores `_octets_to_string(octets)` (`hpack.mojo:48-76`), which
+keeps the octets unchanged (`octetsToString`, `sync_exact_shipped`).
 
 Model: `conv : Bytes → Bytes` is the octet conversion. The peer's table is
 the RFC 7541 table over raw entries (`specInsert`); flare's is `Table`
@@ -21,9 +19,10 @@ over converted entries.
   `utf8Lossy` is: `utf8Lossy_length_ge`), flare's table is always a
   converted *prefix* of the peer's. Consequently `lookup_sound`: an index
   flare resolves names the peer's entry at that index (modulo
-  conversion). The suspected "wrong header" outcome of HP-1 is therefore
-  impossible; the actual outcome is an out-of-range index, i.e.
-  COMPRESSION_ERROR on a legal block (see `Flare.Bugs.HPACK_01`).
+  conversion), so a lossy conversion can only make an index fall out of
+  range (COMPRESSION_ERROR), never resolve to a wrong header.
+* `jinv_withConfig`: the same prefix invariant from the table
+  `with_config` builds, whatever header table size was advertised.
 -/
 namespace Flare.L3.H2.Hpack
 
@@ -34,7 +33,7 @@ def isCont (b : UInt8) : Bool := 0x80 ≤ b && b ≤ 0xBF
 /-- Classification of the sequence at the head of `l`: `(true, n)` is a
 well-formed `n`-byte sequence, `(false, n)` a maximal ill-formed subpart of
 `n` bytes.
-mirrors flare/http/proto/utf8.mojo:31-90 @59bda50 -/
+mirrors flare/http/proto/utf8.mojo#_step sha=1b2fb002f8f6 at=59bda50f -/
 def step : Bytes → Bool × Nat
   | [] => (false, 1)
   | b :: r =>
@@ -78,7 +77,7 @@ theorem step_bounds (b : UInt8) (r : Bytes) :
 /-- `utf8_lossy_string` as a single pass (its first phase only locates the
 first bad index; copying well-formed sequences from there is what the
 second phase does, so one pass computes the same bytes).
-mirrors flare/http/proto/utf8.mojo:93-139 @59bda50 -/
+mirrors flare/http/proto/utf8.mojo#utf8_lossy_string sha=379ea80da6e6 at=59bda50f -/
 def utf8Lossy (l : Bytes) : Bytes :=
   match l with
   | [] => []
@@ -124,27 +123,7 @@ theorem utf8Lossy_length_ge (l : Bytes) : l.length ≤ (utf8Lossy l).length := b
             List.length_nil]
           omega
 
-/-- The pre-fix conversion. mirrors flare/http2/hpack.mojo:49-63 @59bda50.
-Any block containing an octet `≥ 0x80` was rebuilt through
-`utf8_lossy_string`, so each malformed octet grew to U+FFFD (3 octets).
-Kept so that `Flare.Bugs.HPACK_01` can state the bug about a named
-definition; the shipped decoder no longer uses it. -/
-def octetsToStringOld (b : Bytes) : Bytes :=
-  if b.any (fun x => x ≥ 0x80) then utf8Lossy b else b
-
-theorem octetsToStringOld_length_ge (b : Bytes) : b.length ≤ (octetsToStringOld b).length := by
-  unfold octetsToStringOld; split
-  · exact utf8Lossy_length_ge b
-  · exact Nat.le_refl _
-
-theorem octetsToStringOld_ascii (b : Bytes) (h : ∀ x ∈ b, x < 0x80) :
-    octetsToStringOld b = b := by
-  unfold octetsToStringOld
-  have : b.any (fun x => x ≥ 0x80) = false := by
-    rw [List.any_eq_false]; intro x hx; have := h x hx; simp; exact this
-  simp [this]
-
-/-- The shipped conversion. mirrors flare/http2/hpack.mojo:48-76 (HPACK-01 fix):
+/-- The shipped conversion. mirrors flare/http2/hpack.mojo#_octets_to_string+HPACK_BUDGET_ERROR sha=71830c539a36 at=c165c9a1 (HPACK-01 fix):
 the octets are stored unchanged (`String(unsafe_from_utf8=b)`), so the table
 holds exactly the peer's entry sizes (RFC 7541 §4.1). -/
 def octetsToString (b : Bytes) : Bytes := b
@@ -274,6 +253,23 @@ theorem jinv_step (c : Bytes → Bytes) (hc : Expanding c) (j j' : Joint) (ev : 
       exact ⟨hi', hm', corr_sizeUpdate c hc _ _ _ _ hi hcorr hu⟩
     · cases hs
 
+/-- The decoder table `with_config` (server and client) builds: the
+current size stays at the 4096 default and only the ceiling for the
+peer's size update is the advertised `header_table_size`. RFC 9113 §6.5.3
+and RFC 7541 §4.2: the peer's encoder keeps the 4096-octet table until it
+has our SETTINGS and signals the change with a size update. -/
+def withConfigInit (adv : Nat) : Table := { Table.init with settingsMax := adv }
+
+/-- From the `with_config` table, whatever size was advertised, flare's
+decoder table stays a (converted) prefix of the peer encoder's table with
+the same maximum, under every sequence of inserts and size updates. -/
+theorem jinv_withConfig (c : Bytes → Bytes) (hc : Expanding c) (adv : Nat) :
+    ∀ j, (LTS.ofFn (· = { jinit with dec := withConfigInit adv }) (jstep c)).Reachable j → JInv c j := by
+  have hI : (LTS.ofFn (· = { jinit with dec := withConfigInit adv }) (jstep c)).Inductive (JInv c) :=
+    ⟨fun s h => by subst h; exact ⟨⟨rfl, Nat.zero_le _⟩, rfl, ⟨0, rfl⟩⟩,
+     fun s l s' hp hs => jinv_step c hc s s' l hp hs⟩
+  exact hI.reachable
+
 /-- The joint system as an LTS (Flare.LTS vocabulary). -/
 def jointLTS (c : Bytes → Bytes) : LTS Joint Ev := LTS.ofFn (· = jinit) (jstep c)
 
@@ -354,12 +350,6 @@ theorem sync_exact (c : Bytes → Bytes) (j : Joint) (evs : List Ev) (j' : Joint
 invariant (no wrong header can ever be returned). -/
 theorem prefix_inv_flare : ∀ j, (jointLTS octetsToString).Reachable j → JInv octetsToString j :=
   prefix_inv octetsToString octetsToString_length_ge
-
-/-- The pre-fix conversion satisfied the same prefix invariant: wrong
-headers were never returned, only out-of-range indices (HPACK-01). -/
-theorem prefix_inv_old :
-    ∀ j, (jointLTS octetsToStringOld).Reachable j → JInv octetsToStringOld j :=
-  prefix_inv octetsToStringOld octetsToStringOld_length_ge
 
 /-- **Shipped decoder.** With the byte-exact conversion flare's table equals
 the peer's RFC 7541 table at every step, whatever octets the peer sends. -/

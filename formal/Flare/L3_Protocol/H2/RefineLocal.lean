@@ -16,13 +16,13 @@ hypotheses):
 * `pop k` (client): `take_response` / `discard_stream` run once the
   response is complete or the stream was reset: `k` is absent,
   half-closed (remote) or closed;
-* `endLocal k e` (client): `k` is in the table and not already
+* `endLocal k` (client): `k` is in the table and not already
   half-closed (local);
 * `stream k`, `drain k` (client): the streaming body reader runs only
   on the client;
 * `release`: no precondition.
 
-`fixed_local`: in the fixed model each such step preserves `Inv` and is
+`fixed_local`: each such step preserves `Inv` and is
 matched by a run of the §5.1 spec made of `send` labels (HEADERS, DATA,
 WINDOW_UPDATE, forgetting a finished stream); a step that changes no
 stream state is matched by the empty run.
@@ -37,7 +37,7 @@ def LocalOK (c : Conn) : Ev → Prop
   | .send k _ => c.isClient = false ∧ ∃ s, get c k = some s ∧ (s.state = .open_ ∨ s.state = .hcr)
   | .openLocal k _ => c.isClient = true ∧ k % 2 = 1 ∧ k > c.maxLocalSid
   | .pop k => c.isClient = true ∧ ∀ s, get c k = some s → s.state = .hcr ∨ s.state = .closed
-  | .endLocal k _ => c.isClient = true ∧ ∃ s, get c k = some s ∧ s.state ≠ .hcl
+  | .endLocal k => c.isClient = true ∧ ∃ s, get c k = some s ∧ s.state ≠ .hcl
   | .stream _ => c.isClient = true
   | .drain _ => c.isClient = true
 
@@ -91,7 +91,7 @@ theorem get_erase_self (c : Conn) (k : Nat) : get (erase c k) k = none := by
   intro p hp; simp at hp ⊢; exact hp.2
 
 theorem abs_erase (c : Conn) (k : Nat) :
-    abs (erase c k) = fun j => if j = k then (if idleAbs c k then .idle else .closed) else abs c j := by
+    abs (erase c k) = fun j => if j = k then (if isIdleId c k then .idle else .closed) else abs c j := by
   funext j
   by_cases h : j = k
   · subst h; rw [if_pos rfl, abs_none (get_erase_self c j)]; rfl
@@ -112,12 +112,12 @@ theorem cont_not (c : Conn) (k : Nat) (s : Stream) (hI : Inv c) (hs : get c k = 
 
 theorem fixed_local (dec : Dec) (c : Conn) (e : Ev) (hI : Inv c) (hok : LocalOK c e)
     (hne : ∀ f, e ≠ .frame f) :
-    ∃ c' o, step F dec c e = .ok (c', o) ∧ Inv c' ∧ ∃ ls, SRun c.isClient (abs c) ls (abs c') := by
+    ∃ c' o, step dec c e = .ok (c', o) ∧ Inv c' ∧ ∃ ls, SRun c.isClient (abs c) ls (abs c') := by
   cases e with
   | frame f => exact absurd rfl (hne f)
   | release n =>
-    have hiv : iv (release F c n).1 = iv c := by simp only [release]; split <;> rfl
-    exact ⟨(release F c n).1, (release F c n).2, rfl, inv_congr hiv hI, [], srun_nil _ (abs_congr hiv)⟩
+    have hiv : iv (release c n).1 = iv c := by simp only [release]; split <;> rfl
+    exact ⟨(release c n).1, (release c n).2, rfl, inv_congr hiv hI, [], srun_nil _ (abs_congr hiv)⟩
   | respond k n =>
     obtain ⟨hsrv, s, hs, hst⟩ := hok
     simp only [step]
@@ -162,7 +162,7 @@ theorem fixed_local (dec : Dec) (c : Conn) (e : Ev) (hI : Inv c) (hok : LocalOK 
       | none => rfl
       | some s => have := (hI.keys k s hg).2; simp [hcl] at this; omega
     have hidle : abs c k = .idle := by
-      rw [abs_none hn]; unfold idleAbs; simp [hcl]; omega
+      rw [abs_none hn]; unfold isIdleId; simp [hcl]; omega
     have hol : openLocal c k es = put { c with maxLocalSid := k } k
         { state := if es then St.hcl else St.open_, sendW := c.peerInitW, recvW := c.initW } := by
       simp [openLocal, hgt]
@@ -180,7 +180,7 @@ theorem fixed_local (dec : Dec) (c : Conn) (e : Ev) (hI : Inv c) (hok : LocalOK 
       | some t => left; rfl
       | none =>
         simp only []
-        unfold idleAbs; rw [hc1c, hcl, hc1m]; simp only [if_true]
+        unfold isIdleId; rw [hc1c, hcl, hc1m]; simp only [if_true]
         by_cases h1 : j > k ∨ j % 2 = 0
         · left
           have e1 : (decide (j > k) || j % 2 == 0) = true := by simp; omega
@@ -256,7 +256,7 @@ theorem fixed_local (dec : Dec) (c : Conn) (e : Ev) (hI : Inv c) (hok : LocalOK 
         have := rbu j hj
         show abs (erase c k) j = .closed
         rw [abs_erase]
-        show (if j = k then (if idleAbs c k then SS.idle else SS.closed) else abs c j) = .closed
+        show (if j = k then (if isIdleId c k then SS.idle else SS.closed) else abs c j) = .closed
         by_cases hjk : j = k
         · rw [if_pos hjk]; subst hjk
           cases hg : get c j with
@@ -277,13 +277,10 @@ theorem fixed_local (dec : Dec) (c : Conn) (e : Ev) (hI : Inv c) (hok : LocalOK 
           rw [idleAbs_key (hI.keys k t hg)]
           rcases hst t hg with h | h <;> rw [h] <;> rfl
         · intro j hj; left; rw [abs_erase]; simp [hj]
-  | endLocal k em =>
+  | endLocal k =>
     obtain ⟨hcl, s, hs, hst⟩ := hok
     simp only [step]
     unfold endLocal; rw [hs]; simp only []
-    have h13 : F.h2_13 = true := rfl
-    have h12 : F.h2_12 = true := rfl
-    rw [h13, h12]
     by_cases hc : s.state = .closed
     · rw [if_pos (by simp [hc])]
       exact ⟨_, _, rfl, hI, [], srun_nil _ rfl⟩

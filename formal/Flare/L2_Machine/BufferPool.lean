@@ -23,7 +23,7 @@ structure Pool where
   buckets : Nat → List Handle
   classCap : Nat
 
-/-- mirrors flare/runtime/buffer_pool.mojo `_class_index_for` (fixed, RT-05) (`none` is `_OVERSIZE_CLASS`) -/
+/-- mirrors flare/runtime/buffer_pool.mojo#_class_index_for sha=174f86eb3b2a at=8e1b2089 (fixed, RT-05) (`none` is `_OVERSIZE_CLASS`) -/
 def classIndex (n : Nat) : Option Nat :=
   if n ≤ 1024 then some 0
   else if n ≤ 4 * 1024 then some 1
@@ -31,7 +31,7 @@ def classIndex (n : Nat) : Option Nat :=
   else if n ≤ 64 * 1024 then some 3
   else none
 
-/-- mirrors flare/runtime/buffer_pool.mojo `_capacity_for_class` (fixed, RT-05) -/
+/-- mirrors flare/runtime/buffer_pool.mojo#_capacity_for_class sha=36dba022d196 at=8e1b2089 (fixed, RT-05) -/
 def capacityFor (i : Nat) : Nat :=
   if i = 0 then 1024
   else if i = 1 then 4 * 1024
@@ -39,13 +39,13 @@ def capacityFor (i : Nat) : Nat :=
   else if i = 3 then 64 * 1024
   else 0
 
-/-- mirrors flare/runtime/buffer_pool.mojo `__init__`, `with_class_capacity` (fixed, RT-05) -/
+/-- mirrors flare/runtime/buffer_pool.mojo#BufferPool.__init__+BufferPool.with_class_capacity sha=6d99103ab227 at=8e1b2089 (fixed, RT-05) -/
 def Pool.new (classCap : Nat) : Pool := ⟨fun _ => [], if classCap < 1 then 1 else classCap⟩
 
 def upd (f : Nat → List Handle) (i : Nat) (v : List Handle) : Nat → List Handle :=
   fun j => if j = i then v else f j
 
-/-- mirrors flare/runtime/buffer_pool.mojo `acquire` (fixed, RT-05) -/
+/-- mirrors flare/runtime/buffer_pool.mojo#BufferPool.acquire sha=21158b7919cc at=8e1b2089 (fixed, RT-05) -/
 def acquire (p : Pool) (n : Nat) : Pool × Handle :=
   match classIndex n with
   | none => (p, ⟨n, -1⟩)
@@ -55,7 +55,7 @@ def acquire (p : Pool) (n : Nat) : Pool × Handle :=
     | h :: rest => ({ p with buckets := upd p.buckets i rest }, h)
 
 /-- `release`, parameterised by the extra acceptance test `ok i h`
-(pre-fix flare: none; shipped: `capacity >= _capacity_for_class(i)`). -/
+(`release` uses `capacity >= _capacity_for_class(i)`). -/
 def releaseWith (ok : Nat → Handle → Bool) (p : Pool) (h : Handle) : Pool :=
   if h.cls < 0 ∨ h.cls ≥ 4 then p
   else
@@ -64,11 +64,7 @@ def releaseWith (ok : Nat → Handle → Bool) (p : Pool) (h : Handle) : Pool :=
     else if ok i h then { p with buckets := upd p.buckets i (h :: p.buckets i) }
     else p
 
-/-- Pre-fix `release` (flare/runtime/buffer_pool.mojo:337-364 @59bda50): recycles by the class
-tag alone. Kept for the RT-05 counterexample. -/
-def releaseOld := releaseWith (fun _ _ => true)
-
-/-- mirrors flare/runtime/buffer_pool.mojo `release` (fixed, RT-05): a handle
+/-- mirrors flare/runtime/buffer_pool.mojo#BufferPool.release sha=6c9cdde9720a at=8e1b2089 (fixed, RT-05): a handle
 whose capacity is below its class's is dropped. -/
 def release := releaseWith (fun i h => decide (capacityFor i ≤ h.cap))
 
@@ -115,7 +111,7 @@ theorem classIndex_least (n i : Nat) (h : classIndex n = some i) (j : Nat) (hj :
     rcases (by omega : j = 0 ∨ j = 1 ∨ j = 2) with rfl | rfl | rfl <;> simp [capacityFor] <;> omega
   cases h
 
-/-! ## Bucket bound (holds for the pre-fix and the shipped release) -/
+/-! ## Bucket bound (holds for every acceptance test) -/
 
 def Bounded (p : Pool) : Prop := ∀ i, (p.buckets i).length ≤ p.classCap
 

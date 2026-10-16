@@ -26,7 +26,7 @@ def vval : Bytes → Nat
   | [] => 0
   | x :: xs => (x.toNat % 64) * 256 ^ xs.length + Bytes.beNat xs
 
-/-- mirrors flare/quic/varint.mojo:111-138 @59bda50 -/
+/-- mirrors flare/quic/varint.mojo#decode_varint sha=2fbdb2fed88f at=59bda50f -/
 def decVarint (b : Bytes) : Option (Nat × Nat) :=
   match b with
   | [] => none
@@ -123,8 +123,8 @@ def VarintCodec (enc : Nat → Bytes) : Prop :=
 /-! ## Frames -/
 
 /-- Frame header: `(type, length, header_size)`.
-mirrors flare/http3/frame.mojo:137-142 @59bda50 (and
-flare/http3/request_reader.mojo:176-194, which is the same logic) -/
+mirrors flare/http3/frame.mojo#decode_http3_frame sha=e8fe36e2fe89 at=59bda50f (and
+flare/http3/request_reader.mojo#_parse_frame_header sha=fe9761123ed9 at=193ddcec, which is the same logic) -/
 def parseHeader (buf : Bytes) : Option (Nat × Nat × Nat) :=
   match decVarint buf with
   | none => none
@@ -135,14 +135,14 @@ def parseHeader (buf : Bytes) : Option (Nat × Nat × Nat) :=
     | none => none
     | some (l, k2) => some (t, l, k1 + k2)
 
-/-- mirrors flare/http3/frame.mojo:123-159 @59bda50 -/
+/-- mirrors flare/http3/frame.mojo#decode_http3_frame sha=e8fe36e2fe89 at=59bda50f -/
 def decodeFrame (buf : Bytes) : Option (Nat × Bytes) :=
   match parseHeader buf with
   | none => none
   | some (t, l, hs) =>
     if hs + l > buf.length then none else some (t, (buf.drop hs).take l)
 
-/-- mirrors flare/http3/frame.mojo:95-117 @59bda50 -/
+/-- mirrors flare/http3/frame.mojo#Http3Frame+encode_http3_frame sha=acf891c9460e at=59bda50f -/
 def encodeFrame (enc : Nat → Bytes) (t : Nat) (p : Bytes) : Bytes :=
   enc t ++ enc p.length ++ p
 
@@ -235,7 +235,7 @@ theorem decodeFrame_encode (enc : Nat → Bytes) (henc : VarintCodec enc)
 
 /-! ## SETTINGS payload (RFC 9114 §7.2.4) -/
 
-/-- mirrors flare/http3/frame.mojo:198-218 @59bda50 -/
+/-- mirrors flare/http3/frame.mojo#decode_http3_settings sha=0283df16a0c9 at=59bda50f -/
 def decodeSettings (b : Bytes) : Option (List (Nat × Nat)) :=
   if hb : b.length = 0 then some [] else
   match h1 : decVarint b with
@@ -253,7 +253,7 @@ decreasing_by
   have := decVarint_some h1
   simp; omega
 
-/-- mirrors flare/http3/frame.mojo:172-195 @59bda50 -/
+/-- mirrors flare/http3/frame.mojo#encode_http3_settings sha=5b00d2a187af at=59bda50f -/
 def encodeSettings (enc : Nat → Bytes) : List (Nat × Nat) → Bytes
   | [] => []
   | (i, v) :: tl => enc i ++ enc v ++ encodeSettings enc tl

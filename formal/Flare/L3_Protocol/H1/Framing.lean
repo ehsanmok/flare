@@ -20,14 +20,12 @@ body are parsed by the other as the next request: request smuggling.
 Both sides are modelled over the header block as a list of field lines (the
 bytes between consecutive line terminators, terminators excluded; request
 line and final empty line removed). The shipped reactor splits lines on LF and drops a
-preceding CR (`reactorLines`, the `H1-04` fix); the pre-fix reactor split on
-CRLF only (`linesCRLFOld`). The strict parser splits on CRLF and raises on a
+preceding CR (`reactorLines`, the `H1-04` fix). The strict parser splits on CRLF and raises on a
 bare LF, so in strict mode the line lists coincide. The parser with
 `allow_lf_only_line_endings` splits on LF; `H1-04` was that mismatch.
 
-`scanField skip` is the reactor's per-line test. The shipped reactor skips
-SP/HTAB between name and colon (`skip = true`, the `H1-03` fix); `skip = false`
-is the pre-fix test, where the colon had to follow the field name immediately.
+`scanField` is the reactor's per-line test; it skips SP/HTAB between name
+and colon (the `H1-03` fix).
 `framing_agrees` proves that whenever the parser accepts, the shipped reactor
 reaches the same verdict, for both the strict and the OWS-lenient parser.
 
@@ -51,32 +49,31 @@ inductive Framing where
 /-! ## The reactor's raw-byte scan -/
 
 /-- Per-line field test of `request_te_framing` / `_match_content_length_prefix`:
-case-insensitive `needle` at the start of the line, then (`skip` only) SP/HTAB,
-then `:`. Returns the raw bytes after the colon. The shipped reactor always
-skips (`skip = true`, H1-03 fix); `skip = false` is the pre-fix test.
-mirrors flare/http/proto/chunked.mojo:97-178 and flare/http/_scan.mojo:143-186
+case-insensitive `needle` at the start of the line, then SP/HTAB, then `:`.
+Returns the raw bytes after the colon.
+mirrors flare/http/proto/chunked.mojo#_colon_after_name+request_te_framing sha=22f5ca7d026d at=ea1b9282 and flare/http/_scan.mojo#_match_content_length_prefix sha=fbdd33f4e536 at=ea1b9282
 (fixed, H1-03) -/
-def scanField (skip : Bool) (needle L : Bytes) : Option Bytes :=
+def scanField (needle L : Bytes) : Option Bytes :=
   if ieqPrefix needle L = true then
-    match (if skip then (L.drop needle.length).dropWhile isWS else L.drop needle.length) with
+    match (L.drop needle.length).dropWhile isWS with
     | 58 :: r => some r
     | _ => none
   else none
 
 /-- `joined` in `request_te_framing`: a comma only when `joined` is nonempty.
-mirrors flare/http/proto/chunked.mojo:142-148 @59bda50 -/
+mirrors flare/http/proto/chunked.mojo#request_te_framing sha=c79e0c8308ca at=ea1b9282 -/
 def joinR (vs : List Bytes) : Bytes :=
   vs.foldl (fun j v => (if j.isEmpty then j else j ++ [44]) ++ v) []
 
-/-- The reactor's framing decision, parameterised by the colon test: TE scan,
-then Content-Length scan (first `content-length` field at a line start), 400
-for a negative value and 413 above `max_body_size`. `skip = false` is the
-reactor as it was at 59bda50 (kept for `Bugs.H1_03.counterexample`).
-mirrors flare/http/proto/chunked.mojo:120-158, flare/http/_scan.mojo:173-247,
-flare/http/_reactor/conn_handle.mojo:622-654 @59bda50 -/
-def reactorFramingWith (skip allowCL : Bool) (maxBody : Nat) (lines : List Bytes) : Framing :=
-  let S := lines.filterMap (scanField skip TEn)
-  let C := lines.filterMap (scanField skip CLn)
+/-- The reactor's framing decision: TE scan, then Content-Length scan (first
+`content-length` field at a line start), 400 for a negative value and 413
+above `max_body_size`. SP/HTAB between the field name and the colon are
+skipped (H1-03 fix).
+mirrors flare/http/proto/chunked.mojo#_colon_after_name+request_te_framing sha=22f5ca7d026d at=ea1b9282, flare/http/_scan.mojo#_match_content_length_prefix+scan_content_length sha=0e234de63d6b at=ea1b9282,
+flare/http/_reactor/conn_handle.mojo#ConnHandle._check_request_complete sha=e491b536478f at=ea1b9282 (fixed, H1-03) -/
+def reactorFraming (allowCL : Bool) (maxBody : Nat) (lines : List Bytes) : Framing :=
+  let S := lines.filterMap (scanField TEn)
+  let C := lines.filterMap (scanField CLn)
   if S = [] then
     match C with
     | [] => .length 0
@@ -84,49 +81,42 @@ def reactorFramingWith (skip allowCL : Bool) (maxBody : Nat) (lines : List Bytes
   else if C ≠ [] ∧ allowCL = false then .reject
   else if classify (joinR S) = 1 then .chunked else .reject
 
-/-- The shipped reactor: SP/HTAB between the field name and the colon are
-skipped (H1-03 fix).
-mirrors flare/http/proto/chunked.mojo:97-178, flare/http/_scan.mojo:143-266,
-flare/http/_reactor/conn_handle.mojo:622-654 (fixed, H1-03) -/
-def reactorFraming (allowCL : Bool) (maxBody : Nat) (lines : List Bytes) : Framing :=
-  reactorFramingWith true allowCL maxBody lines
-
 /-! ## The full parser -/
 
 /-- Field-name slice: `line[:colon]`, with trailing SP/HTAB removed under
 `allow_ows_around_colon`.
-mirrors flare/http/_server/parse.mojo:247-256 @59bda50 -/
+mirrors flare/http/_server/parse.mojo#_parse_http_request_bytes sha=ddb7cb75d062 at=ea1b9282 -/
 def nameOf (ows : Bool) (t : Bytes) : Bytes :=
   if ows then (t.reverse.dropWhile isWS).reverse else t
 
 /-- The line is a field line the parser accepts: a colon, and a nonempty
 all-tchar name.
-mirrors flare/http/_server/parse.mojo:234-266 @59bda50 -/
+mirrors flare/http/_server/parse.mojo#_parse_http_request_bytes sha=ddb7cb75d062 at=ea1b9282 -/
 def wfB (ows : Bool) (L : Bytes) : Bool :=
   match findB 58 L with
   | none => false
   | some k => let nm := nameOf ows (L.take k); !nm.isEmpty && nm.all isTchar
 
 /-- `(k, v)`: the name, and the stripped bytes after the first colon.
-mirrors flare/http/_server/parse.mojo:267-268 @59bda50 -/
+mirrors flare/http/_server/parse.mojo#_parse_http_request_bytes sha=ddb7cb75d062 at=ea1b9282 -/
 def field (ows : Bool) (L : Bytes) : Bytes × Bytes :=
   match findB 58 L with
   | none => ([], [])
   | some k => (nameOf ows (L.take k), strip (L.drop (k + 1)))
 
 /-- The value when the name equals `lit` (ASCII case-insensitive).
-mirrors flare/http/_server/parse.mojo:291,306 @59bda50 -/
+mirrors flare/http/_server/parse.mojo#_parse_http_request_bytes sha=ddb7cb75d062 at=ea1b9282 -/
 def parserField (ows : Bool) (lit L : Bytes) : Option Bytes :=
   if ieq (field ows L).1 lit = true then some (field ows L).2 else none
 
 /-- `te_joined`: a comma before every value but the first.
-mirrors flare/http/_server/parse.mojo:306-310 @59bda50 -/
+mirrors flare/http/_server/parse.mojo#_parse_http_request_bytes sha=ddb7cb75d062 at=ea1b9282 -/
 def joinP : List Bytes → Bytes
   | [] => []
   | v :: vs => vs.foldl (fun j w => j ++ 44 :: w) v
 
 /-- The parser's framing decision.
-mirrors flare/http/_server/parse.mojo:291-353 @59bda50 -/
+mirrors flare/http/_server/parse.mojo#_parse_http_request_bytes sha=ddb7cb75d062 at=ea1b9282 -/
 def parserFraming (ows allowCL : Bool) (maxBody : Nat) (lines : List Bytes) : Framing :=
   if lines.all (wfB ows) = false then .reject else
   let S := lines.filterMap (parserField ows TEn)
@@ -208,7 +198,7 @@ OWS-lenient lines alike, because a strict line has no whitespace before the
 colon. -/
 theorem scan_of_shape {ows : Bool} {L name w rest : Bytes} (s : Shape ows L name w rest)
     {N : Bytes} (hN58 : (58 : UInt8) ∉ N) (hNws : ∀ x ∈ N, isWS x = false) :
-    scanField true N L = if ieq name N = true then some rest else none := by
+    scanField N L = if ieq name N = true then some rest else none := by
   -- `ieqPrefix N L = ieqPrefix N name`: the byte after `name` stops the match.
   have hpre : ieqPrefix N L = ieqPrefix N name := by
     rw [s.eq]
@@ -260,7 +250,7 @@ theorem CLn_no_ws : ∀ x ∈ CLn, isWS x = false := by decide
 /-- On an accepted line the reactor's value, stripped, is the parser's. -/
 theorem scan_map_strip {ows : Bool} {L : Bytes} (h : wfB ows L = true) {N : Bytes}
     (hN58 : (58 : UInt8) ∉ N) (hNws : ∀ x ∈ N, isWS x = false) :
-    (scanField true N L).map strip = parserField ows N L := by
+    (scanField N L).map strip = parserField ows N L := by
   obtain ⟨name, w, rest, s⟩ := shape_of_wf h
   rw [scan_of_shape s hN58 hNws, field_of_shape s]
   split <;> rfl
@@ -268,14 +258,14 @@ theorem scan_map_strip {ows : Bool} {L : Bytes} (h : wfB ows L = true) {N : Byte
 theorem filterMap_scan_strip {ows : Bool} {N : Bytes}
     (hN58 : (58 : UInt8) ∉ N) (hNws : ∀ x ∈ N, isWS x = false) :
     ∀ lines : List Bytes, lines.all (wfB ows) = true →
-      (lines.filterMap (scanField true N)).map strip = lines.filterMap (parserField ows N)
+      (lines.filterMap (scanField N)).map strip = lines.filterMap (parserField ows N)
   | [], _ => rfl
   | L :: ls, h => by
     simp only [List.all_cons, Bool.and_eq_true] at h
     have ih := filterMap_scan_strip hN58 hNws ls h.2
     have hl := scan_map_strip h.1 hN58 hNws
     simp only [List.filterMap_cons]
-    cases hs : scanField true N L with
+    cases hs : scanField N L with
     | none => rw [hs] at hl; simp only [Option.map_none] at hl; rw [← hl]; exact ih
     | some v => rw [hs] at hl; simp only [Option.map_some] at hl; rw [← hl]; simp [ih]
 
@@ -333,13 +323,13 @@ theorem framing_agrees (ows allowCL : Bool) (maxBody : Nat) (lines : List Bytes)
   have hS := filterMap_scan_strip TEn_no_colon TEn_no_ws lines hwf
   have hC := filterMap_scan_strip CLn_no_colon CLn_no_ws lines hwf
   unfold parserFraming at hacc ⊢
-  unfold reactorFraming reactorFramingWith
+  unfold reactorFraming
   dsimp only at hacc ⊢
   rw [← hS, ← hC, parseCL_map_strip] at hacc ⊢
   rw [classify_join] at hacc ⊢
   simp only [hwf, Bool.true_eq_false, if_false] at hacc ⊢
-  generalize lines.filterMap (scanField true TEn) = S at hacc ⊢
-  generalize lines.filterMap (scanField true CLn) = C at hacc ⊢
+  generalize lines.filterMap (scanField TEn) = S at hacc ⊢
+  generalize lines.filterMap (scanField CLn) = C at hacc ⊢
   have hSe : (S.map strip = []) ↔ S = [] := List.map_eq_nil_iff
   have hCe : (C.map parseCL ≠ []) ↔ C ≠ [] := by simp
   simp only [hSe, hCe] at hacc ⊢
@@ -376,7 +366,7 @@ theorem no_smuggling_strict (allowCL : Bool) (maxBody : Nat) (lines : List Bytes
 /-! ## Line splitting (for `H1-04`) -/
 
 /-- Split on a byte (the line loop of `_read_line_buf_lenient`).
-mirrors flare/http/_server/parse_util.mojo:179-199 @59bda50 -/
+mirrors flare/http/_server/parse_util.mojo#_read_line_buf_lenient sha=96de904254b7 at=59bda50f -/
 def splitOn (c : UInt8) : Bytes → List Bytes
   | [] => [[]]
   | x :: xs =>
@@ -386,32 +376,21 @@ def splitOn (c : UInt8) : Bytes → List Bytes
       | y :: ys => (x :: y) :: ys
 
 /-- Drop one trailing CR.
-mirrors flare/http/_server/parse_util.mojo:201-203 @59bda50 -/
+mirrors flare/http/_server/parse_util.mojo#_read_line_buf_lenient sha=96de904254b7 at=59bda50f -/
 def dropCR (l : Bytes) : Bytes :=
   match l.getLast? with
   | some 13 => l.dropLast
   | _ => l
 
-/-- The pre-fix reactor's line split of a header block (`buf` between the
-request line's CRLF and the final CRLF): on CRLF only. Kept for
-`Bugs.H1_04.counterexample`.
-mirrors flare/http/proto/chunked.mojo:133-153 @59bda50 -/
-def linesCRLFOld : Bytes → List Bytes
-  | [] => [[]]
-  | 13 :: 10 :: xs => [] :: linesCRLFOld xs
-  | x :: xs => match linesCRLFOld xs with
-    | [] => [[x]]
-    | y :: ys => (x :: y) :: ys
-
 /-- `_read_line_buf_lenient` with `allow_lf_only_line_endings`: split on LF,
 drop a trailing CR.
-mirrors flare/http/_server/parse_util.mojo:165-208 @59bda50 -/
+mirrors flare/http/_server/parse_util.mojo#_read_line_buf_lenient sha=96de904254b7 at=59bda50f -/
 def linesLF (b : Bytes) : List Bytes := (splitOn 10 b).map dropCR
 
 /-- The shipped reactor's line split of a header block: on LF, dropping one
 trailing CR, exactly like the LF-lenient parser (H1-04 fix). The request line
 is skipped the same way, up to its first LF.
-mirrors flare/http/proto/chunked.mojo:143-178 (fixed, H1-04) -/
+mirrors flare/http/proto/chunked.mojo#request_te_framing sha=c79e0c8308ca at=2ab99a37 (fixed, H1-04) -/
 def reactorLines (b : Bytes) : List Bytes := linesLF b
 
 /-- **`H1-04` fix.** The shipped reactor, which splits header lines the way

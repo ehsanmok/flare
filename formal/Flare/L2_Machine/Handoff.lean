@@ -23,7 +23,7 @@ structure Q where
 
 def Q.empty (cap : Nat) : Q := ⟨fun _ => 0, 0, 0, 0, cap⟩
 
-/-- mirrors flare/runtime/handoff.mojo:150-167 @59bda50
+/-- mirrors flare/runtime/handoff.mojo#HandoffQueue.push sha=bfb9b674fc9a at=59bda50f
 `none` = division by zero; `some (ok, q')`. -/
 def pushed (q : Q) (fd : Int) (t : Nat) : Q :=
   { q with slots := fun j => if j = q.tail then fd else q.slots j, tail := t, count := q.count + 1 }
@@ -32,13 +32,13 @@ def push (q : Q) (fd : Int) : Option (Bool × Q) :=
   if q.count ≥ q.cap then some (false, q)
   else (modChk (q.tail + 1) q.cap).map fun t => (true, pushed q fd t)
 
-/-- mirrors flare/runtime/handoff.mojo:169-180 @59bda50 -/
+/-- mirrors flare/runtime/handoff.mojo#HandoffQueue.pop sha=7b140b272346 at=59bda50f -/
 def pop (q : Q) : Option (Option Int × Q) :=
   if q.count = 0 then some (none, q)
   else (modChk (q.head + 1) q.cap).map fun h =>
     (some (q.slots q.head), { q with head := h, count := q.count - 1 })
 
-/-- mirrors flare/runtime/handoff.mojo:182-195 @59bda50 (loop of `count`
+/-- mirrors flare/runtime/handoff.mojo#HandoffQueue.drain sha=4291f8b67d88 at=59bda50f (loop of `count`
 steps, each doing `idx = (idx + 1) % capacity`). -/
 def drainGo (q : Q) : Nat → Nat → Option (List Int)
   | 0, _ => some []
@@ -156,7 +156,7 @@ def peekGo (excl : Int) : List Nat → Nat → Int → Nat → Int × Nat
     else if s < bs then peekGo excl rest (i + 1) i s
     else peekGo excl rest (i + 1) b bs
 
-/-- mirrors flare/runtime/handoff.mojo `peek_idle_worker` (fixed, RT-04)
+/-- mirrors flare/runtime/handoff.mojo#WorkerHandoffPool.peek_idle_worker sha=2951392afb73 at=811281db (fixed, RT-04)
 `sizes[i]` = `queues[i].size()`; `initBest` is `capacity` in flare (it was
 `capacity + 1` before RT-04). -/
 def peekWith (initBest : Nat) (enabled : Bool) (_cap : Nat) (sizes : List Nat) (excl : Int) : Int :=
@@ -167,11 +167,6 @@ def peekWith (initBest : Nat) (enabled : Bool) (_cap : Nat) (sizes : List Nat) (
 /-- Shipped `peek_idle_worker`: only peers strictly below capacity qualify. -/
 def peekIdle (enabled : Bool) (cap : Nat) (sizes : List Nat) (excl : Int) : Int :=
   peekWith cap enabled cap sizes excl
-
-/-- Pre-fix `peek_idle_worker` (scan started at `capacity + 1`), kept for the
-RT-04 counterexample. -/
-def peekIdleOld (enabled : Bool) (cap : Nat) (sizes : List Nat) (excl : Int) : Int :=
-  peekWith (cap + 1) enabled cap sizes excl
 
 theorem peekGo_spec (excl : Int) (l : List Nat) (i : Nat) (b : Int) (bs : Nat) :
     ((peekGo excl l i b bs).1 = b ∧ (peekGo excl l i b bs).2 = bs ∧
@@ -229,7 +224,7 @@ theorem peek_below_capacity (cap : Nat) (sizes : List Nat) (excl : Int) (en : Bo
       · refine ⟨Or.inr ⟨k, hk, by simpa using h1, by simpa using h2, h4⟩, fun _ _ hr => ?_⟩
         rw [h1] at hr; omega
 
-/-- mirrors flare/runtime/handoff.mojo `choose_handoff_target` (fixed, RT-04) -/
+/-- mirrors flare/runtime/handoff.mojo#WorkerHandoffPool.choose_handoff_target sha=084f62e1320a at=811281db (fixed, RT-04) -/
 def chooseTarget (enabled : Bool) (cap : Nat) (sizes : List Nat) (thr : Int)
     (local_ : Int) (localLoad : Int) : Int :=
   if !enabled then -1

@@ -3,14 +3,11 @@ import Flare.Core.Bytes
 /-!
 # The interim `100 Continue` and the final response on one connection
 
-Before the APP-49 fix (`run`, `sendContinue`, `finalise`, `flush`),
-`_maybe_send_continue` (flare/http/_reactor/conn_handle.mojo:544-576) wrote
-`HTTP/1.1 100 Continue\r\n\r\n` once, from STATE_READING, with a single
-non-blocking write whose result it ignores. The final response is later
-serialised into a cleared `write_buf` (`_finalise_response`, 718-756) and
-flushed from offset 0 (`on_writable`, 1286-1312; `_flush_write_buf_tls`,
-1213-1240). The model follows the bytes of one request with
-`Expect: 100-continue`, after `pre` (everything sent before it).
+`_maybe_send_continue` writes `HTTP/1.1 100 Continue\r\n\r\n` once, from
+STATE_READING, with a single non-blocking write. Whatever of it the write
+does not take is kept and sent before the final response (APP-49). The
+model follows the bytes of one request with `Expect: 100-continue`, after
+`pre` (everything sent before it).
 
 **Cleartext (`Plain`).** The kernel oracle `k` is how many of the interim
 bytes the one `send` takes (0 is EAGAIN). On Linux any `k` up to the
@@ -30,13 +27,9 @@ messages, and the request is answered: after `pre` the wire is the final
 response `R`, or the whole interim `I` and then `R`, and the connection
 is not torn down.
 
-* `Plain.violates`: for every `0 < k < |I|` flare's wire is
-  `pre ++ I.take k ++ R`, which is neither (by length).
-* `Plain.fixed_spec`: keeping the unsent tail and putting it in front of
-  the response meets the spec for every `k`.
-* `Tls.violates`: when the record does not go out whole, flare's flush of
-  the response fails and the connection closes with `R` unsent.
-* `Tls.fixed_spec`: retrying from the connection's own copy of the interim
+* `Plain.run_spec`: keeping the unsent tail and putting it in front of the
+  response meets the spec for every `k`.
+* `Tls.run_spec`: retrying from the connection's own copy of the interim
   before the response meets the spec for both outcomes.
 -/
 namespace Flare.L4.Continue
@@ -53,56 +46,29 @@ structure St where
   wbuf : Bytes
   rest : Bytes
 
-/-- Pre-fix `_maybe_send_continue`, cleartext: the `_send` result is dropped.
-mirrors flare/http/_reactor/conn_handle.mojo:556-576 @59bda50 -/
-def sendContinue (I : Bytes) (k : Nat) (s : St) : St :=
-  { s with wire := s.wire ++ I.take k }
-
-/-- Pre-fix: `write_buf` is serialised from scratch, `write_pos := 0`.
-mirrors flare/http/_reactor/conn_handle.mojo:718-756,1423-1435 @59bda50 -/
-def finalise (R : Bytes) (s : St) : St :=
-  { s with wbuf := R }
-
-/-- mirrors flare/http/_reactor/conn_handle.mojo:1286-1312 @59bda50
+/-- mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle.on_writable sha=97ab3b583fa2 at=59bda50f
 (the flush loop, run until `write_pos = len(write_buf)`) -/
 def flush (s : St) : St :=
   { s with wire := s.wire ++ s.wbuf, wbuf := [] }
 
-def run (pre I R : Bytes) (k : Nat) : Bytes :=
-  (flush (finalise R (sendContinue I k ⟨pre, [], []⟩))).wire
-
-/-- Shipped: keep the tail the kernel did not take (only after a short
+/-- Keep the tail the kernel did not take (only after a short
 send; EAGAIN leaves the client's own fallback in charge).
-mirrors flare/http/_reactor/conn_handle.mojo:556-620 (fixed, APP-49) -/
-def sendContinueFixed (I : Bytes) (k : Nat) (s : St) : St :=
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._maybe_send_continue+ConnHandle._keep_unsent_interim+ConnHandle._check_request_complete sha=9d1bf7e21ed4 at=405105c0 (fixed, APP-49) -/
+def sendContinue (I : Bytes) (k : Nat) (s : St) : St :=
   { s with wire := s.wire ++ I.take k,
            rest := if 0 < k ∧ k < I.length then I.drop k else [] }
 
-/-- Shipped: the kept tail goes in front of the response.
-mirrors flare/http/_reactor/conn_handle.mojo:1492-1512 (fixed, APP-49) -/
-def finaliseFixed (R : Bytes) (s : St) : St :=
+/-- The kept tail goes in front of the response.
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle.close+ConnHandle._transition_to_writing sha=912a371744c0 at=405105c0 (fixed, APP-49) -/
+def finalise (R : Bytes) (s : St) : St :=
   { s with wbuf := s.rest ++ R, rest := [] }
 
-def runFixed (pre I R : Bytes) (k : Nat) : Bytes :=
-  (flush (finaliseFixed R (sendContinueFixed I k ⟨pre, [], []⟩))).wire
+def run (pre I R : Bytes) (k : Nat) : Bytes :=
+  (flush (finalise R (sendContinue I k ⟨pre, [], []⟩))).wire
 
-theorem run_eq (pre I R : Bytes) (k : Nat) : run pre I R k = pre ++ I.take k ++ R := by
-  simp [run, flush, finalise, sendContinue]
-
-theorem violates (pre I R : Bytes) (k : Nat) (h0 : 0 < k) (hk : k < I.length) :
-    ¬ Spec pre I R (run pre I R k) false := by
-  rw [run_eq]
-  rintro ⟨-, h | h⟩
-  · have := congrArg List.length h
-    simp only [List.length_append, List.length_take] at this
-    omega
-  · have := congrArg List.length h
-    simp only [List.length_append, List.length_take] at this
-    omega
-
-theorem fixed_spec (pre I R : Bytes) (k : Nat) : Spec pre I R (runFixed pre I R k) false := by
+theorem run_spec (pre I R : Bytes) (k : Nat) : Spec pre I R (run pre I R k) false := by
   refine ⟨rfl, ?_⟩
-  simp only [runFixed, flush, finaliseFixed, sendContinueFixed]
+  simp only [run, flush, finalise, sendContinue]
   by_cases h : 0 < k ∧ k < I.length
   · right
     rw [if_pos h, ← List.append_assoc, List.append_assoc pre, List.take_append_drop]
@@ -119,8 +85,7 @@ namespace Tls
 
 /-- Which buffer an `SSL_write` was given. -/
 inductive Buf
-  | interim  -- the local `String` in `_maybe_send_continue`
-  | own      -- a buffer the connection keeps (the fix)
+  | own      -- the interim, in a buffer the connection keeps
   | wbuf     -- `write_buf`
   deriving DecidableEq
 
@@ -140,43 +105,24 @@ def sslWrite (b : Buf) (data : Bytes) (ok : Bool) (s : St) : St :=
   | none =>
     if ok then { s with wire := s.wire ++ data } else { s with pending := some b }
 
-/-- Pre-fix: `tls.send(bytes)` from a local buffer, result dropped.
-mirrors flare/http/_reactor/conn_handle.mojo:564-569 @59bda50 -/
-def sendContinue (I : Bytes) (ok : Bool) (s : St) : St :=
-  sslWrite .interim I ok s
-
-/-- Pre-fix flush: `SSL_write` of `write_buf` only; the socket has drained,
-so it would go out.
-mirrors flare/http/_reactor/conn_handle.mojo:1213-1240 @59bda50 -/
-def flush (R : Bytes) (s : St) : St :=
-  if s.closed then s else sslWrite .wbuf R true s
-
-def run (pre I R : Bytes) (ok : Bool) : St :=
-  flush R (sendContinue I ok ⟨pre, none, false⟩)
-
-/-- Shipped: write the interim from a buffer the connection keeps
+/-- Write the interim from a buffer the connection keeps
 (`continue_pending`).
-mirrors flare/http/_reactor/conn_handle.mojo:556-600 (fixed, APP-49) -/
-def sendContinueFixed (I : Bytes) (ok : Bool) (s : St) : St :=
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._maybe_send_continue sha=ea4e768d08f0 at=405105c0 (fixed, APP-49) -/
+def sendContinue (I : Bytes) (ok : Bool) (s : St) : St :=
   sslWrite .own I ok s
 
-/-- Shipped: retry the kept interim from the same buffer before the response.
-mirrors flare/http/_reactor/conn_handle.mojo:1260-1310 (fixed, APP-49) -/
-def flushFixed (I R : Bytes) (s : St) : St :=
+/-- Retry the kept interim from the same buffer before the response.
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle.on_readable_static+ConnHandle._flush_write_buf_tls sha=e3dacdd25bb9 at=405105c0 (fixed, APP-49) -/
+def flush (I R : Bytes) (s : St) : St :=
   let s' := if s.pending = some .own then sslWrite .own I true s else s
   if s'.closed then s' else sslWrite .wbuf R true s'
 
-def runFixed (pre I R : Bytes) (ok : Bool) : St :=
-  flushFixed I R (sendContinueFixed I ok ⟨pre, none, false⟩)
+def run (pre I R : Bytes) (ok : Bool) : St :=
+  flush I R (sendContinue I ok ⟨pre, none, false⟩)
 
-theorem violates (pre I R : Bytes) :
-    (run pre I R false).closed = true ∧ (run pre I R false).wire = pre ∧
-      ¬ Spec pre I R (run pre I R false).wire (run pre I R false).closed := by
-  simp [run, flush, sendContinue, sslWrite, Spec]
-
-theorem fixed_spec (pre I R : Bytes) (ok : Bool) :
-    Spec pre I R (runFixed pre I R ok).wire (runFixed pre I R ok).closed := by
-  cases ok <;> simp [runFixed, flushFixed, sendContinueFixed, sslWrite, Spec]
+theorem run_spec (pre I R : Bytes) (ok : Bool) :
+    Spec pre I R (run pre I R ok).wire (run pre I R ok).closed := by
+  cases ok <;> simp [run, flush, sendContinue, sslWrite, Spec]
 
 end Tls
 

@@ -10,7 +10,7 @@ abbrev Bytes := List UInt8
 
 namespace Bytes
 
-/-- ASCII string → bytes (only used for literals in specs/counterexamples). -/
+/-- ASCII string → bytes (only used for literals in specs and examples). -/
 def ofString (s : String) : Bytes := s.toUTF8.toList
 
 /-- Read byte `i`, or `0` out of bounds (mirrors an unchecked read only where

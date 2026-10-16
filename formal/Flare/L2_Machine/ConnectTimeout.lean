@@ -39,7 +39,7 @@ inductive Out where
   | refused | timedOut | netError (errno : Nat)
   deriving DecidableEq, Repr
 
-/-- mirrors flare/tcp/stream.mojo:255-334 @59bda50 -/
+/-- mirrors flare/tcp/stream.mojo#TcpStream.connect_timeout sha=a1f63793a159 at=59bda50f -/
 def run (o : Oracle) : List FlagOp × Out :=
   if o.getfl < 0 then ([], .netError 0)                     -- F_GETFL failed
   else

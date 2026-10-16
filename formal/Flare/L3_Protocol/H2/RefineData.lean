@@ -3,7 +3,7 @@ import Flare.L3_Protocol.H2.RefineAbs
 /-!
 # §5.1 refinement: WINDOW_UPDATE, RST_STREAM, PRIORITY and DATA
 
-Per-handler proofs that the fixed model `F` answers a frame on stream `k`
+Per-handler proofs that the model answers a frame on stream `k`
 as §5.1 prescribes for the spec state `abs c k` (`SGood`), from a live
 state with no header block open.
 -/
@@ -22,7 +22,7 @@ theorem entry_nonidle {c : Conn} {k : Nat} {s : Stream} (hI : Inv c) (h0 : c.con
   omega
 
 theorem abs_ne_idle_of {c : Conn} {k : Nat} (hI : Inv c) (h0 : c.continuing = 0)
-    (h : mem c k = true ∨ idleAbs c k = false) : abs c k ≠ .idle := by
+    (h : mem c k = true ∨ isIdleId c k = false) : abs c k ≠ .idle := by
   unfold abs
   cases hg : get c k with
   | some s => simp only; have := entry_nonidle hI h0 hg; cases hs : s.state <;> simp_all [ofSt]
@@ -158,14 +158,14 @@ theorem okPost_prio (b r : Bool) (s : SS) (hs : s ≠ .resR ∧ s ≠ .resL ∨ 
   cases s <;> simp [okPost]
 
 theorem sgood_wuH (c : Conn) (f : Fr) (hI : Inv c) (hg : c.goawaySent = false) (h0 : c.continuing = 0)
-    (hk : f.sid ≠ 0) : SGood c f.sid .wu (wuH F c f) := by
+    (hk : f.sid ≠ 0) : SGood c f.sid .wu (wuH c f) := by
   unfold wuH
-  simp only [isIdleId_F]
+  simp only
   split
   · try rw [if_neg hk]
     split
     · rename_i h
-      simp only [F, Bool.true_and, Bool.and_eq_true, Bool.not_eq_true'] at h
+      simp only [Bool.true_and, Bool.and_eq_true, Bool.not_eq_true'] at h
       apply sgood_conn c _ _ _ hg
       have : abs c f.sid = .idle := by
         rw [abs_none ((mem_false c f.sid).mp h.1), h.2]; rfl
@@ -173,9 +173,9 @@ theorem sgood_wuH (c : Conn) (f : Fr) (hI : Inv c) (hg : c.goawaySent = false) (
     · rename_i h
       apply sgood_closeRst c f.sid _ _ hI h0
       · apply abs_ne_idle_of hI h0
-        simp only [F, Bool.true_and, Bool.and_eq_true, Bool.not_eq_true', not_and] at h
+        simp only [Bool.true_and, Bool.and_eq_true, Bool.not_eq_true', not_and] at h
         cases hm : mem c f.sid
-        · right; cases hi : idleAbs c f.sid
+        · right; cases hi : isIdleId c f.sid
           · rfl
           · exact absurd hi (h hm)
         · left; rfl
@@ -349,12 +349,12 @@ theorem sgood_finish (c c1 : Conn) (f : Fr) (s s4 : Stream) (cr' : Nat) (hI : In
 
 theorem sgood_dataBody (c : Conn) (f : Fr) (s : Stream) (body : Nat) (hI : Inv c) (h0 : c.continuing = 0)
     (hs : get c f.sid = some s) (hst : s.state = .open_ ∨ s.state = .hcl) (hr : f.sid ∉ c.resetByUs) :
-    SGood c f.sid (.data f.f1) (dataBody F c f { s with recvW := s.recvW - f.plen } body) := by
+    SGood c f.sid (.data f.f1) (dataBody c f { s with recvW := s.recvW - f.plen } body) := by
   have hrk : strmOK (ofSt s.state) (.data f.f1) = true := by rcases hst with h | h <;> simp [h, ofSt, strmOK]
   have hsrv : c.isClient = false → s.state ≠ .hcl := fun hc => hI.srv hc _ _ hs
   unfold dataBody
   split
-  · exact sgood_rstCloseX c _ _ s _ _ _ hI h0 hs hrk (by simp [F])
+  · exact sgood_rstCloseX c _ _ s _ _ _ hI h0 hs hrk (wu0If_shape _)
   split
   · exact sgood_rstCloseX c _ _ s _ _ _ hI h0 hs hrk (wu0If_shape _)
   split
@@ -367,16 +367,15 @@ theorem sgood_dataBody (c : Conn) (f : Fr) (s : Stream) (body : Nat) (hI : Inv c
     split <;> rfl
   split
   · obtain ⟨e1, e2⟩ := rstCloseX_congr c _ f.sid ePROTOCOL _ _ hiv1
-    exact sgood_congr e1 e2 (sgood_rstCloseX c f.sid ePROTOCOL s _ _ _ hI h0 hs hrk (by simp [F]))
+    exact sgood_congr e1 e2 (sgood_rstCloseX c f.sid ePROTOCOL s _ _ _ hI h0 hs hrk (wu0If_shape _))
   · exact sgood_finish c _ f s _ _ hI h0 hs hst hr hiv1 (by split <;> rfl)
       (by intro hpos hcon; obtain ⟨a, b, d⟩ := hcon
           have hb : c.isClient = true := by revert b; split <;> simp
-          rw [if_pos (by simp [F, a, hb, d])] at hpos; exact Nat.lt_irrefl 0 hpos)
+          rw [if_pos (by simp [a, hb, d])] at hpos; exact Nat.lt_irrefl 0 hpos)
 
 theorem sgood_dataH (c : Conn) (f : Fr) (hI : Inv c) (hg : c.goawaySent = false) (h0 : c.continuing = 0)
-    (hk : f.sid ≠ 0) : SGood c f.sid (.data f.f1) (dataH F c f) := by
+    (hk : f.sid ≠ 0) : SGood c f.sid (.data f.f1) (dataH c f) := by
   unfold dataH
-  simp only [isIdleId_F]
   split
   · rename_i hr
     have hcl := hI.rbu _ hr
@@ -400,18 +399,18 @@ theorem sgood_dataH (c : Conn) (f : Fr) (hI : Inv c) (hg : c.goawaySent = false)
       · rename_i hcl
         apply sgood_conn c _ _ _ hg
         rw [abs_some hs]
-        simp only [F, Bool.true_and, Bool.or_eq_true, beq_iff_eq] at hcl
+        simp only [Bool.true_and, Bool.or_eq_true, beq_iff_eq] at hcl
         rcases hcl with h | h <;> simp [h, ofSt, connCodes]
       · rename_i hcl
-        simp only [F, Bool.true_and, Bool.or_eq_true, beq_iff_eq, not_or] at hcl
+        simp only [Bool.true_and, Bool.or_eq_true, beq_iff_eq, not_or] at hcl
         have hst : s.state = .open_ ∨ s.state = .hcl := by
           cases ht : s.state <;> simp_all
         have hconn : ∀ e, (connAny e || connCodes (pid c f.sid) (abs c f.sid) (.data f.f1) e) = true := by
           intro e; rw [abs_some hs]; rcases hst with h | h <;> simp [h, ofSt, connCodes]
         split
-        · exact sgood_conn c _ _ _ hg (hconn _)
-        split
-        · exact sgood_conn c _ _ _ hg (hconn _)
+        · have hrk : strmOK (ofSt s.state) (.data f.f1) = true := by
+            rcases hst with h | h <;> simp [h, ofSt, strmOK]
+          exact sgood_rstCloseX c f.sid ePROTOCOL s _ _ _ hI h0 hs hrk (wu0If_shape _)
         split
         · exact sgood_conn c _ _ _ hg (hconn _)
         · exact sgood_dataBody c f s _ hI h0 hs hst hr

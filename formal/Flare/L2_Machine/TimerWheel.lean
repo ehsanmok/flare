@@ -48,7 +48,7 @@ theorem upd_apply {α : Type} (f : Nat → α) (k : Nat) (v : α) (x : Nat) :
 theorem upd_ne {α : Type} (f : Nat → α) {k x : Nat} (v : α) (h : x ≠ k) : upd f k v x = f x := by
   simp [upd, h]
 
-/-- mirrors flare/runtime/timer_wheel.mojo:102-117 @59bda50 -/
+/-- mirrors flare/runtime/timer_wheel.mojo#TimerWheel.__init__ sha=40a1c6853dad at=59bda50f -/
 def init (now : Nat) : TW :=
   { wheel := fun _ => [], overflow := [], entries := fun _ => none,
     slot := 0, tick := now, nextId := 0 }
@@ -56,7 +56,7 @@ def init (now : Nat) : TW :=
 /-- the clamp `delay = after_ms if after_ms >= 1 else 1` -/
 def delayOf (after : Int) : Nat := if after ≥ 1 then after.toNat else 1
 
-/-- mirrors flare/runtime/timer_wheel.mojo:119-144 @59bda50 -/
+/-- mirrors flare/runtime/timer_wheel.mojo#TimerWheel.schedule sha=be80fbb233f3 at=59bda50f -/
 def schedule (s : TW) (after : Int) (token : Nat) : TW × Nat :=
   let id := s.nextId + 1
   let delay := delayOf after
@@ -68,7 +68,7 @@ def schedule (s : TW) (after : Int) (token : Nat) : TW × Nat :=
   else
     ({ s with nextId := id, entries := entries, overflow := s.overflow ++ [id] }, id)
 
-/-- mirrors flare/runtime/timer_wheel.mojo:146-167 @59bda50 -/
+/-- mirrors flare/runtime/timer_wheel.mojo#TimerWheel.cancel sha=ec78cc43d036 at=59bda50f -/
 def cancel (s : TW) (id : Nat) : TW × Bool :=
   match s.entries id with
   | some e =>
@@ -79,7 +79,7 @@ def cancel (s : TW) (id : Nat) : TW × Bool :=
 /-! ## The per-tick drain and the overflow promotion -/
 
 /-- one iteration of the slot drain loop.
-mirrors flare/runtime/timer_wheel.mojo:221-227 @59bda50 -/
+mirrors flare/runtime/timer_wheel.mojo#TimerWheel.advance sha=d5c643b2869a at=59bda50f -/
 def drainOne (st : (Nat → Option Entry) × List Nat) (eid : Nat) :
     (Nat → Option Entry) × List Nat :=
   match st.1 eid with
@@ -88,7 +88,7 @@ def drainOne (st : (Nat → Option Entry) × List Nat) (eid : Nat) :
 
 /-- Re-bucketing of one live timer `eid` (entry `e`) against tick `T`; the
 callers guarantee `T < e.fireAt`.
-mirrors flare/runtime/timer_wheel.mojo:248-255 and :287-293 @59bda50 -/
+mirrors flare/runtime/timer_wheel.mojo#TimerWheel.advance+TimerWheel._jump sha=00654bcfedc6 at=59bda50f -/
 def putB (T slot : Nat) (r : (Nat → List Nat) × List Nat) (eid : Nat) (e : Entry) :
     (Nat → List Nat) × List Nat :=
   if e.fireAt - T < 512 then
@@ -104,7 +104,7 @@ structure TState (σ : Type) where
 /-- The per-id decision shared by the overflow-promotion loop and the
 classification loop of `_jump`: skip a missing id, drop a cancelled one,
 fire a due one, otherwise hand the live entry to `put`.
-mirrors flare/runtime/timer_wheel.mojo:238-255 and :274-285 @59bda50 -/
+mirrors flare/runtime/timer_wheel.mojo#TimerWheel.advance+TimerWheel._jump sha=00654bcfedc6 at=59bda50f -/
 def triage {σ : Type} (T : Nat) (put : σ → Nat → Entry → σ) (st : TState σ) (eid : Nat) :
     TState σ :=
   match st.entries eid with
@@ -116,7 +116,7 @@ def triage {σ : Type} (T : Nat) (put : σ → Nat → Entry → σ) (st : TStat
     else { st with rest := put st.rest eid e }
 
 /-- One tick: advance the clock FIRST, drain the slot, promote at slot 0.
-mirrors flare/runtime/timer_wheel.mojo:208-256 @59bda50 -/
+mirrors flare/runtime/timer_wheel.mojo#TimerWheel.advance sha=d5c643b2869a at=59bda50f -/
 def stepTick (s : TW) : TW × List Nat :=
   let tick := s.tick + 1
   let slot := (s.slot + 1) % 512
@@ -140,7 +140,7 @@ def ticks : Nat → TW → TW × List Nat
 
 /-! ## `_jump` -/
 
-/-- mirrors flare/runtime/timer_wheel.mojo:286-293 @59bda50 -/
+/-- mirrors flare/runtime/timer_wheel.mojo#TimerWheel._jump sha=33f7786d7db4 at=59bda50f -/
 def rebucketOne (now slot : Nat) (E : Nat → Option Entry)
     (st : (Nat → List Nat) × List Nat) (eid : Nat) : (Nat → List Nat) × List Nat :=
   match E eid with
@@ -149,7 +149,7 @@ def rebucketOne (now slot : Nat) (E : Nat → Option Entry)
 
 /-- ids collected by `_jump`: slots `slot+1 .. slot+512` (mod 512) in that
 order, then the overflow list.
-mirrors flare/runtime/timer_wheel.mojo:261-271 @59bda50 -/
+mirrors flare/runtime/timer_wheel.mojo#TimerWheel._jump sha=33f7786d7db4 at=59bda50f -/
 def jumpIds (s : TW) : List Nat :=
   (List.range 512).flatMap (fun d => s.wheel ((s.slot + (d + 1)) % 512)) ++ s.overflow
 
@@ -159,14 +159,14 @@ theorem jump_visits_every_slot (slot j : Nat) (hj : j < 512) :
     ∃ d, d < 512 ∧ (slot + (d + 1)) % 512 = j :=
   ⟨(j + 511 * 512 + 511 - slot % 512) % 512, by omega, by omega⟩
 
-/-- mirrors flare/runtime/timer_wheel.mojo:258-293 @59bda50 -/
+/-- mirrors flare/runtime/timer_wheel.mojo#TimerWheel._jump sha=33f7786d7db4 at=59bda50f -/
 def jump (s : TW) (now : Nat) : TW × List Nat :=
   let c := (jumpIds s).foldl (triage now (fun (later : List Nat) eid _ => later ++ [eid]))
     ⟨s.entries, [], []⟩
   let r := c.rest.foldl (rebucketOne now s.slot c.entries) (fun _ => [], [])
   ({ s with tick := now, wheel := r.1, overflow := r.2, entries := c.entries }, c.fired)
 
-/-- mirrors flare/runtime/timer_wheel.mojo:169-256 @59bda50 -/
+/-- mirrors flare/runtime/timer_wheel.mojo#TimerWheel.advance sha=d5c643b2869a at=59bda50f -/
 def advance (s : TW) (now : Nat) : TW × List Nat :=
   if now > s.tick ∧ now - s.tick > 512 then jump s now
   else ticks (now - s.tick) s
@@ -178,21 +178,13 @@ def scan (s : TW) : Nat → Nat → Option Nat
   | 0, _ => none
   | n + 1, d => if s.wheel ((s.slot + d) % 512) ≠ [] then some d else scan s n (d + 1)
 
-/-- Pre-fix `next_fire_ms` (flare/runtime/timer_wheel.mojo:310-333 @59bda50), kept for the
-RT-01 counterexample: it scans a full rotation and falls back to `tick + 512`
-when only overflow timers remain. -/
-def nextFireOld (s : TW) : Nat :=
-  match scan s 512 1 with
-  | some d => s.tick + d
-  | none => if s.overflow ≠ [] then s.tick + 512 else s.tick + 0xFFFFFFFF
-
 /-- How far `next_fire_ms` scans, and its fallback when only overflow timers
 remain: an overflow timer is promoted (and can fire) at the next slot-0
 boundary `tick + (512 - slot)`, so while the overflow list is non-empty the
 scan and the fallback stop there. -/
 def hintLimit (s : TW) : Nat := if s.overflow ≠ [] then 512 - s.slot else 512
 
-/-- mirrors flare/runtime/timer_wheel.mojo `next_fire_ms` (fixed, RT-01) -/
+/-- mirrors flare/runtime/timer_wheel.mojo#TimerWheel.next_fire_ms sha=db47299912c9 at=8fbcfc85 (fixed, RT-01) -/
 def nextFire (s : TW) : Nat :=
   match scan s (hintLimit s) 1 with
   | some d => s.tick + d
@@ -1377,18 +1369,5 @@ theorem nextFire_lower_bound {s : TW} (h : Inv s) {x : Nat} {e : Entry} (hx : Ac
       simp only
       omega
     · rw [hov'] at ho; cases ho
-
-/-- with an empty overflow list the shipped hint is the pre-fix one -/
-theorem nextFire_eq_old_no_overflow (s : TW) (hov : s.overflow = []) : nextFire s = nextFireOld s := by
-  have hl : hintLimit s = 512 := by simp [hintLimit, hov]
-  unfold nextFire nextFireOld
-  rw [hl, hov]
-
-/-- with an empty overflow list the pre-fix hint is already a lower bound;
-RT-01 needs a non-empty overflow list -/
-theorem nextFireOld_lower_bound_no_overflow {s : TW} (h : Inv s) (hov : s.overflow = [])
-    {x : Nat} {e : Entry} (hx : Act s x e) : nextFireOld s ≤ e.fireAt := by
-  rw [← nextFire_eq_old_no_overflow s hov]
-  exact nextFire_lower_bound h hx
 
 end Flare.L2.TimerWheel

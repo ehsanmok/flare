@@ -16,12 +16,9 @@ handle the client's unidirectional streams:
 * `feedUni` — `feed_uni_stream_chunk` (per-stream buffering of the type
   varint, routing by kind).
 
-Each function takes a `Fixes` switch: `Fixes.none` is flare as it was at
-59bda50 (the pre-fix behaviour the Bugs counterexamples are about),
-`Fixes.shipped` is flare as shipped on this branch (the fixes landed so
-far), `Fixes.all` adds the minimal fixes of H3-03 (forbidden control-stream frame
-types), H3-04 (HTTP/2-reserved setting identifiers), H3-05 (second QPACK
-streams, client push stream) and H3-06 (bytes after the GOAWAY id). The QPACK encoder-stream payload is modelled
+The model includes the fixes of H3-03 (forbidden control-stream frame types),
+H3-04 (HTTP/2-reserved setting identifiers), H3-05 (second QPACK streams,
+client push stream) and H3-06 (bytes after the GOAWAY id). The QPACK encoder-stream payload is modelled
 in `Flare.L3.Qpack`; here those bytes are consumed without effect, like the
 decoder / push / unknown streams flare drops.
 
@@ -40,9 +37,9 @@ Spec (RFC 9114 §6.2, §7.2, §11.2; RFC 9204 §4.2), server receiving:
   (§7.2.4.1, §11.2.2); others update the peer view or are ignored.
 
 Results: `dispatchControlFixed_eq_spec`, `goawayFixed_eq_spec`, `applySettingsFixed_eq_spec`,
-`classifyFixed_eq_spec` (the fixes equal the spec on every input),
-`runClassifyFixed_unique` (with the fix at most one stream of each critical
-type is ever accepted and no push stream), `feedControl_le` (the carry is a
+`classifyFixed_eq_spec` (the model equals the spec on every input),
+`runClassifyFixed_unique` (at most one stream of each critical type is ever
+accepted and no push stream), `feedControl_le` (the carry is a
 suffix of the input).
 -/
 namespace Flare.L3.H3.Control
@@ -53,23 +50,9 @@ inductive H3Err
   | excessiveLoad | idError
   deriving DecidableEq, Repr
 
-/-- Which minimal fixes are applied. -/
-structure Fixes where
-  frames : Bool    -- H3-03
-  settings : Bool  -- H3-04
-  streams : Bool   -- H3-05
-  goawayLen : Bool -- H3-06
-  deriving DecidableEq, Repr
-
-def Fixes.none : Fixes := ⟨false, false, false, false⟩
-def Fixes.all : Fixes := ⟨true, true, true, true⟩
-/-- flare as shipped: one field flips to `true` with each of H3-03 (frames),
-H3-04 (settings), H3-05 (streams) and H3-06 (goawayLen). -/
-def Fixes.shipped : Fixes := ⟨true, true, true, true⟩
-
 /-! ## SETTINGS -/
 
-/-- mirrors flare/http3/server.mojo:1213-1228 @59bda50 (the fields of
+/-- mirrors flare/http3/server.mojo#Http3Connection._apply_peer_settings+Http3Connection sha=0328217723d2 at=59bda50f (the fields of
 `Http3Connection` it writes) -/
 structure PeerSettings where
   maxFieldSection : Option Nat := none
@@ -78,7 +61,7 @@ structure PeerSettings where
   connect : Option Bool := none
   deriving DecidableEq, Repr
 
-/-- mirrors flare/http3/server.mojo:1219-1228 @59bda50 -/
+/-- mirrors flare/http3/server.mojo#Http3Connection._apply_peer_settings sha=c6b676a3412f at=59bda50f -/
 def applySetting (ps : PeerSettings) (p : Nat × Nat) : PeerSettings :=
   if p.1 = 0x06 then { ps with maxFieldSection := some p.2 }
   else if p.1 = 0x01 then { ps with qpackCap := some p.2 }
@@ -89,11 +72,11 @@ def applySetting (ps : PeerSettings) (p : Nat × Nat) : PeerSettings :=
 /-- HTTP/2 setting identifiers reserved by RFC 9114 §7.2.4.1 / §11.2.2. -/
 def isH2Setting (id : Nat) : Bool := 2 ≤ id && id ≤ 5
 
-/-- mirrors flare/http3/server.mojo:1338-1365 (fixed, H3-04); `fx.settings` is
-the H3-04 check (absent at 59bda50, where it never raised). -/
-def applySettings (fx : Fixes) (ps : PeerSettings) (ss : List (Nat × Nat)) :
+/-- mirrors flare/http3/server.mojo#Http3Connection._apply_peer_settings sha=f5cf4d5f729f at=4ec4b5c2 (fixed, H3-04): reserved
+identifiers raise. -/
+def applySettings (ps : PeerSettings) (ss : List (Nat × Nat)) :
     Except H3Err PeerSettings :=
-  if fx.settings ∧ ss.any (fun p => isH2Setting p.1) then .error .settingsError
+  if ss.any (fun p => isH2Setting p.1) then .error .settingsError
   else .ok (ss.foldl applySetting ps)
 
 /-- RFC 9114 §7.2.4.1: reserved identifiers are an error, every other
@@ -105,13 +88,13 @@ def specApplySettings (ps : PeerSettings) : List (Nat × Nat) → Except H3Err P
     else specApplySettings (applySetting ps (id, v)) ss
 
 theorem applySettingsFixed_eq_spec (ps : PeerSettings) (ss : List (Nat × Nat)) :
-    applySettings Fixes.all ps ss = specApplySettings ps ss := by
+    applySettings ps ss = specApplySettings ps ss := by
   induction ss generalizing ps with
   | nil => rfl
   | cons p ss ih =>
     obtain ⟨id, v⟩ := p
     have e := ih (applySetting ps (id, v))
-    simp only [applySettings, Fixes.all, true_and, List.any_cons, Bool.or_eq_true,
+    simp only [applySettings, List.any_cons, Bool.or_eq_true,
       List.foldl_cons, specApplySettings] at e ⊢
     by_cases h : 2 ≤ id ∧ id ≤ 5
     · have : isH2Setting id = true := by simp [isH2Setting]; omega
@@ -122,8 +105,8 @@ theorem applySettingsFixed_eq_spec (ps : PeerSettings) (ss : List (Nat × Nat)) 
 
 /-! ## Control-stream frames -/
 
-/-- mirrors flare/http3/server.mojo:591-598 (initial values),
-1170-1211 (fields read and written) @59bda50 -/
+/-- mirrors flare/http3/server.mojo#Http3Connection.__init__ sha=b6dddccf88c5 at=59bda50f (initial values),
+1170-1211 (fields read and written) -/
 structure CtlState where
   settingsReceived : Bool := false
   goawayMax : Option Nat := none
@@ -147,23 +130,22 @@ def specGoaway (s : CtlState) (p : Bytes) : Except H3Err CtlState :=
   | none => .error .frameError
   | some (id, k) => if k = p.length then goawayId s id else .error .frameError
 
-/-- mirrors flare/http3/server.mojo:1322-1353 (fixed, H3-06): one varint is
-decoded; `fx.goawayLen` is the `goaway_id.consumed != len(payload)` check
-(absent at 59bda50, where the bytes after the id were ignored). -/
-def goaway (fx : Fixes) (s : CtlState) (p : Bytes) : Except H3Err CtlState :=
+/-- mirrors flare/http3/server.mojo#Http3Connection._dispatch_control_frame sha=ee593a4f5552 at=dbaf85ab (fixed, H3-06): one varint is
+decoded, then the `goaway_id.consumed != len(payload)` check. -/
+def goaway (s : CtlState) (p : Bytes) : Except H3Err CtlState :=
   if p.length = 0 then .error .frameError
   else match decVarint p with
     | none => .error .frameError
     | some (id, k) =>
-      if fx.goawayLen ∧ k ≠ p.length then .error .frameError else goawayId s id
+      if k ≠ p.length then .error .frameError else goawayId s id
 
 theorem goawayFixed_eq_spec (s : CtlState) (p : Bytes) :
-    goaway Fixes.all s p = specGoaway s p := by
+    goaway s p = specGoaway s p := by
   unfold goaway specGoaway
   cases p with
   | nil => simp [decVarint]
   | cons b tl =>
-    simp only [List.length_cons, Nat.add_one_ne_zero, ↓reduceIte, Fixes.all, true_and]
+    simp only [List.length_cons, Nat.add_one_ne_zero, ↓reduceIte]
     cases decVarint (b :: tl) with
     | none => rfl
     | some r =>
@@ -171,19 +153,19 @@ theorem goawayFixed_eq_spec (s : CtlState) (p : Bytes) :
       simp only
       by_cases hk : k = tl.length + 1 <;> simp [hk]
 
-/-- mirrors flare/http3/server.mojo:1272-1337 (fixed, H3-03); `fx.frames` is the
-H3-03 check after the SETTINGS-first check (absent at 59bda50). -/
-def dispatchControl (fx : Fixes) (s : CtlState) (t : Nat) (p : Bytes) : Except H3Err CtlState :=
+/-- mirrors flare/http3/server.mojo#Http3Connection._dispatch_control_frame sha=9b3d3ec5bd47 at=6254ba56 (fixed, H3-03): the forbidden-type
+check comes after the SETTINGS-first check. -/
+def dispatchControl (s : CtlState) (t : Nat) (p : Bytes) : Except H3Err CtlState :=
   if t = 0x04 then
     if s.settingsReceived then .error .frameUnexpected
     else match decodeSettings p with
       | none => .error .frameError
-      | some ss => match applySettings fx s.peer ss with
+      | some ss => match applySettings s.peer ss with
         | .error e => .error e
         | .ok ps => .ok { s with peer := ps, settingsReceived := true }
   else if s.settingsReceived = false then .error .missingSettings
-  else if t = 0x07 then goaway fx s p
-  else if fx.frames ∧ isForbiddenOnControl t then .error .frameUnexpected
+  else if t = 0x07 then goaway s p
+  else if isForbiddenOnControl t then .error .frameUnexpected
   else .ok s
 
 inductive CtlClass | settings | goaway | forbidden | other
@@ -213,7 +195,7 @@ def specControl (s : CtlState) (t : Nat) (p : Bytes) : Except H3Err CtlState :=
       | _ => .ok s
 
 theorem dispatchControlFixed_eq_spec (s : CtlState) (t : Nat) (p : Bytes) :
-    dispatchControl Fixes.all s t p = specControl s t p := by
+    dispatchControl s t p = specControl s t p := by
   unfold dispatchControl specControl ctlClass
   by_cases h4 : t = 0x04
   · simp only [h4, ↓reduceIte, applySettingsFixed_eq_spec]
@@ -227,15 +209,15 @@ theorem dispatchControlFixed_eq_spec (s : CtlState) (t : Nat) (p : Bytes) :
         · simp only [hc, decide_true]; rcases hc with h | h | h | h | h | h | h <;> subst h <;> rfl
         · simp only [hc, decide_false]; simp only [not_or] at hc
           simp [hc.1, hc.2.1, hc.2.2.1, hc.2.2.2.1, hc.2.2.2.2.1, hc.2.2.2.2.2.1, hc.2.2.2.2.2.2]
-      simp only [h4, h7, ↓reduceIte, Fixes.all, true_and, hf]
+      simp only [h4, h7, ↓reduceIte, hf]
       by_cases hc : t = 0x00 ∨ t = 0x01 ∨ t = 0x05 ∨ t = 0x02 ∨ t = 0x06 ∨ t = 0x08 ∨ t = 0x09
       · simp only [hc, ↓reduceIte, decide_true]; cases s.settingsReceived <;> simp
       · simp only [hc, ↓reduceIte, decide_false]; cases s.settingsReceived <;> simp
 
 /-- The frame loop of the control stream: returns the new state and the
 carry (an incomplete trailing frame).
-mirrors flare/http3/server.mojo:1071-1120 @59bda50 -/
-def feedControlLoop (fx : Fixes) : Nat → CtlState → Bytes → Except H3Err (CtlState × Bytes)
+mirrors flare/http3/server.mojo#Http3Connection._feed_peer_control_stream sha=98223f54c12e at=59bda50f -/
+def feedControlLoop : Nat → CtlState → Bytes → Except H3Err (CtlState × Bytes)
   | 0, s, b => .ok (s, b)
   | fuel + 1, s, b =>
     if b.length = 0 then .ok (s, [])
@@ -244,17 +226,17 @@ def feedControlLoop (fx : Fixes) : Nat → CtlState → Bytes → Except H3Err (
       | some (t, l, hs) =>
         if l > 16384 then .error .excessiveLoad
         else if hs + l > b.length then .ok (s, b)
-        else match dispatchControl fx s t ((b.drop hs).take l) with
+        else match dispatchControl s t ((b.drop hs).take l) with
           | .error e => .error e
-          | .ok s' => feedControlLoop fx fuel s' (b.drop (hs + l))
+          | .ok s' => feedControlLoop fuel s' (b.drop (hs + l))
 
 /-- Fuel = buffer length suffices: every frame consumes `hs ≥ 2` bytes. -/
-def feedControl (fx : Fixes) (s : CtlState) (b : Bytes) : Except H3Err (CtlState × Bytes) :=
-  feedControlLoop fx b.length s b
+def feedControl (s : CtlState) (b : Bytes) : Except H3Err (CtlState × Bytes) :=
+  feedControlLoop b.length s b
 
 /-- The carry is a suffix of the input (so its length never exceeds it). -/
-theorem feedControlLoop_suffix (fx : Fixes) (fuel : Nat) :
-    ∀ s b s' c, feedControlLoop fx fuel s b = .ok (s', c) → ∃ k, c = b.drop k := by
+theorem feedControlLoop_suffix (fuel : Nat) :
+    ∀ s b s' c, feedControlLoop fuel s b = .ok (s', c) → ∃ k, c = b.drop k := by
   induction fuel with
   | zero => intro s b s' c h; simp only [feedControlLoop, Except.ok.injEq, Prod.mk.injEq] at h;
               exact ⟨0, by simp [h.2]⟩
@@ -275,38 +257,36 @@ theorem feedControlLoop_suffix (fx : Fixes) (fuel : Nat) :
               obtain ⟨k, hk⟩ := ih _ _ s' c h
               exact ⟨_ + k, by rw [hk, List.drop_drop]⟩
 
-theorem feedControl_le (fx : Fixes) (s : CtlState) (b : Bytes) (s' : CtlState) (c : Bytes)
-    (h : feedControl fx s b = .ok (s', c)) : c.length ≤ b.length := by
-  obtain ⟨k, hk⟩ := feedControlLoop_suffix fx _ s b s' c h
+theorem feedControl_le (s : CtlState) (b : Bytes) (s' : CtlState) (c : Bytes)
+    (h : feedControl s b = .ok (s', c)) : c.length ≤ b.length := by
+  obtain ⟨k, hk⟩ := feedControlLoop_suffix _ s b s' c h
   rw [hk]; simp
 
 /-! ## Unidirectional stream types -/
 
-/-- mirrors flare/http3/server.mojo:103-125 @59bda50 -/
+/-- mirrors flare/http3/server.mojo#Http3StreamType sha=34043455cbab at=59bda50f -/
 inductive UKind | control | push | qpackEnc | qpackDec | unknown
   deriving DecidableEq, Repr
 
-/-- mirrors flare/http3/server.mojo:591-593 @59bda50 -/
+/-- mirrors flare/http3/server.mojo#Http3Connection.__init__ sha=b6dddccf88c5 at=59bda50f -/
 structure UniState where
   ctrl : Option Nat := none
   enc : Option Nat := none
   dec : Option Nat := none
   deriving DecidableEq, Repr
 
-/-- mirrors flare/http3/server.mojo:1152-1191 (fixed, H3-05); `fx.streams` is
-the H3-05 checks (absent at 59bda50, where only a second control stream
-raised). -/
-def classify (fx : Fixes) (u : UniState) (code sid : Nat) : Except H3Err (UniState × UKind) :=
+/-- mirrors flare/http3/server.mojo#Http3Connection._classify_uni_kind sha=7251d5d92cee at=4304b15a (fixed, H3-05). -/
+def classify (u : UniState) (code sid : Nat) : Except H3Err (UniState × UKind) :=
   if code = 0x00 then
     if u.ctrl.isSome then .error .streamCreation
     else .ok ({ u with ctrl := some sid }, .control)
   else if code = 0x01 then
-    if fx.streams then .error .streamCreation else .ok (u, .push)
+    .error .streamCreation
   else if code = 0x02 then
-    if fx.streams ∧ u.enc.isSome then .error .streamCreation
+    if u.enc.isSome then .error .streamCreation
     else .ok ({ u with enc := some sid }, .qpackEnc)
   else if code = 0x03 then
-    if fx.streams ∧ u.dec.isSome then .error .streamCreation
+    if u.dec.isSome then .error .streamCreation
     else .ok ({ u with dec := some sid }, .qpackDec)
   else .ok (u, .unknown)
 
@@ -326,8 +306,8 @@ def specClassify (u : UniState) (code sid : Nat) : Except H3Err (UniState × UKi
   | _ => .ok (u, .unknown)
 
 theorem classifyFixed_eq_spec (u : UniState) (code sid : Nat) :
-    classify Fixes.all u code sid = specClassify u code sid := by
-  unfold classify specClassify Fixes.all
+    classify u code sid = specClassify u code sid := by
+  unfold classify specClassify
   rcases u with ⟨c, e, d⟩
   match code with
   | 0 => cases c <;> rfl
@@ -337,11 +317,11 @@ theorem classifyFixed_eq_spec (u : UniState) (code sid : Nat) :
   | n + 4 => simp
 
 /-- Successive new uni streams `(sid, type code)`. -/
-def runClassify (fx : Fixes) : UniState → List (Nat × Nat) → Except H3Err (List UKind)
+def runClassify : UniState → List (Nat × Nat) → Except H3Err (List UKind)
   | _, [] => .ok []
-  | u, (sid, code) :: xs => match classify fx u code sid with
+  | u, (sid, code) :: xs => match classify u code sid with
     | .error e => .error e
-    | .ok (u', k) => match runClassify fx u' xs with
+    | .ok (u', k) => match runClassify u' xs with
       | .error e => .error e
       | .ok ks => .ok (k :: ks)
 
@@ -349,12 +329,12 @@ def slot : Option Nat → Nat
   | some _ => 0
   | none => 1
 
-/-- **Uniqueness with the fix.** However many uni streams a client opens,
+/-- **Uniqueness.** However many uni streams a client opens,
 the accepted kinds contain at most one control, one QPACK encoder and one
 QPACK decoder stream (counting those already open in `u`) and no push
 stream. -/
 theorem runClassifyFixed_unique (xs : List (Nat × Nat)) :
-    ∀ u ks, runClassify Fixes.all u xs = .ok ks →
+    ∀ u ks, runClassify u xs = .ok ks →
       ks.count .control ≤ slot u.ctrl ∧ ks.count .qpackEnc ≤ slot u.enc ∧
       ks.count .qpackDec ≤ slot u.dec ∧ ks.count .push = 0 := by
   induction xs with
@@ -398,27 +378,27 @@ structure Conn where
   ctl : CtlState := {}
 
 /-- Route a resolved stream's bytes by kind.
-mirrors flare/http3/server.mojo:1034-1043 @59bda50 -/
-def route (fx : Fixes) (c : Conn) (k : UKind) (buf : Bytes) : Except H3Err Conn :=
+mirrors flare/http3/server.mojo#Http3Connection.feed_uni_stream_chunk sha=fafab470df20 at=59bda50f -/
+def route (c : Conn) (k : UKind) (buf : Bytes) : Except H3Err Conn :=
   match k with
-  | .control => match feedControl fx c.ctl buf with
+  | .control => match feedControl c.ctl buf with
     | .error e => .error e
     | .ok (ctl', carry) =>
       .ok { c with ctl := ctl',
                    bufs := if carry = [] then c.bufs else set c.bufs (c.uni.ctrl.getD 0) carry }
   | _ => .ok c
 
-/-- mirrors flare/http3/server.mojo:975-1043 @59bda50 -/
-def feedUni (fx : Fixes) (c : Conn) (sid : Nat) (chunk : Bytes) : Except H3Err Conn :=
+/-- mirrors flare/http3/server.mojo#Http3Connection.feed_uni_stream_chunk sha=fafab470df20 at=59bda50f -/
+def feedUni (c : Conn) (sid : Nat) (chunk : Bytes) : Except H3Err Conn :=
   let buf := (lookup c.bufs sid).getD [] ++ chunk
   let c := { c with bufs := erase c.bufs sid }
   match lookup c.kinds sid with
-  | some k => route fx c k buf
+  | some k => route c k buf
   | none => match decVarint buf with
     | none => .ok { c with bufs := set c.bufs sid buf }
-    | some (code, n) => match classify fx c.uni code sid with
+    | some (code, n) => match classify c.uni code sid with
       | .error e => .error e
-      | .ok (u', k) => route fx { c with uni := u', kinds := set c.kinds sid k } k (buf.drop n)
+      | .ok (u', k) => route { c with uni := u', kinds := set c.kinds sid k } k (buf.drop n)
 
 /-- The raised error, if any (`Except` has no decidable equality). -/
 def errOf {α : Type} : Except H3Err α → Option H3Err
@@ -426,10 +406,10 @@ def errOf {α : Type} : Except H3Err α → Option H3Err
   | .ok _ => none
 
 /-- A sequence of `feed_uni_stream_chunk(sid, chunk)` calls. -/
-def feedUnis (fx : Fixes) : Conn → List (Nat × Bytes) → Except H3Err Conn
+def feedUnis : Conn → List (Nat × Bytes) → Except H3Err Conn
   | c, [] => .ok c
-  | c, (sid, ch) :: xs => match feedUni fx c sid ch with
+  | c, (sid, ch) :: xs => match feedUni c sid ch with
     | .error e => .error e
-    | .ok c' => feedUnis fx c' xs
+    | .ok c' => feedUnis c' xs
 
 end Flare.L3.H3.Control

@@ -8,10 +8,9 @@ import Flare.L3_Protocol.H2.ConnSpec
 SETTINGS_INITIAL_WINDOW_SIZE is in `0 .. 2^31-1`, and every stream send
 window is at most `2^31-1`.
 
-`win_reachable`: `WinInv` holds in every reachable state, for every fix
-selection (the fixes do not touch send windows), every HPACK outcome and
-every interleaving of inbound frames and local actions (`send`,
-`respond`, `openLocal`, `pop`, `release`). Stream send windows may go
+`win_reachable`: `WinInv` holds in every reachable state, for every HPACK
+outcome and every interleaving of inbound frames and local actions
+(`send`, `respond`, `openLocal`, `pop`, `release`). Stream send windows may go
 negative (§6.9.2 allows it after a SETTINGS decrease).
 -/
 namespace Flare.L3.H2.Conn
@@ -128,9 +127,9 @@ def WinT : Conn ⊕ (Conn × List Out) → Prop
 theorem win_rstCloseX (c : Conn) (k e : Nat) (s : Stream) (x : List Out) (h : WinInv c)
     (hs : s.sendW ≤ MAX_WINDOW) : WinInv (rstCloseX c k e s x).1 := win_put _ _ _ (win_rstC c k h) hs
 
-theorem win_commitTail (fx : Fix) (c : Conn) (k : Nat) (s : Stream) (isTr es : Bool)
+theorem win_commitTail (c : Conn) (k : Nat) (s : Stream) (isTr es : Bool)
     (hdrs : List Header) (h : WinInv c) (hs : s.sendW ≤ MAX_WINDOW) :
-    WinInv (commitTail fx c k s isTr es hdrs).1 := by
+    WinInv (commitTail c k s isTr es hdrs).1 := by
   unfold commitTail rstClose
   simp only
   repeat' split
@@ -138,8 +137,8 @@ theorem win_commitTail (fx : Fix) (c : Conn) (k : Nat) (s : Stream) (isTr es : B
     | exact win_rstCloseX _ _ _ _ _ h hs
     | exact win_put _ _ _ h hs
 
-theorem win_commit (fx : Fix) (dec : Dec) (c : Conn) (k : Nat) (h : WinInv c) :
-    WinInv (commit fx dec c k).1 := by
+theorem win_commit (dec : Dec) (c : Conn) (k : Nat) (h : WinInv c) :
+    WinInv (commit dec c k).1 := by
   unfold commit
   simp only
   split
@@ -153,14 +152,14 @@ theorem win_commit (fx : Fix) (dec : Dec) (c : Conn) (k : Nat) (h : WinInv c) :
       · split
         · split
           · exact win_rstClose _ _ _ _ he hs
-          · exact win_commitTail _ _ _ _ _ _ _ he hs
+          · exact win_commitTail _ _ _ _ _ _ he hs
         · split
           · exact win_rstClose _ _ _ _ he hs
           · exact win_put _ _ _ he hs
-          · exact win_commitTail _ _ _ _ _ _ _ he hs
+          · exact win_commitTail _ _ _ _ _ _ he hs
 
-theorem win_contBranch (fx : Fix) (dec : Dec) (c : Conn) (f : Fr) (h : WinInv c) :
-    WinInv (contBranch fx dec c f).1 := by
+theorem win_contBranch (dec : Dec) (c : Conn) (f : Fr) (h : WinInv c) :
+    WinInv (contBranch dec c f).1 := by
   unfold contBranch
   split
   · exact win_connErr _ _ h
@@ -173,9 +172,9 @@ theorem win_contBranch (fx : Fix) (dec : Dec) (c : Conn) (f : Fr) (h : WinInv c)
         · exact win_connErr _ _ h
         · split
           · exact h
-          · exact win_commit _ _ _ _ h
+          · exact win_commit _ _ _ h
 
-theorem win_shapeCheck (fx : Fix) (c : Conn) (f : Fr) (h : WinInv c) : WinO (shapeCheck fx c f) := by
+theorem win_shapeCheck (c : Conn) (f : Fr) (h : WinInv c) : WinO (shapeCheck c f) := by
   unfold shapeCheck
   repeat' split
   all_goals first
@@ -183,7 +182,7 @@ theorem win_shapeCheck (fx : Fix) (c : Conn) (f : Fr) (h : WinInv c) : WinO (sha
     | exact win_connErr _ _ h
     | exact win_closeIfKnown _ _ (win_rstC _ _ h)
 
-theorem win_idCheck (fx : Fix) (c : Conn) (f : Fr) (h : WinInv c) : WinS (idCheck fx c f) := by
+theorem win_idCheck (c : Conn) (f : Fr) (h : WinInv c) : WinS (idCheck c f) := by
   unfold idCheck
   repeat' split
   all_goals first
@@ -261,7 +260,7 @@ theorem win_settingsH (c : Conn) (f : Fr) (h : WinInv c) : WinInv (settingsH c f
     · rename_i c' hc; rw [hc] at hs; exact hs
     · rename_i r hr; rw [hr] at hs; exact hs
 
-theorem win_wuH (fx : Fix) (c : Conn) (f : Fr) (h : WinInv c) : WinInv (wuH fx c f).1 := by
+theorem win_wuH (c : Conn) (f : Fr) (h : WinInv c) : WinInv (wuH c f).1 := by
   unfold wuH
   simp only
   split
@@ -292,15 +291,15 @@ theorem win_ensure_put (c : Conn) (k : Nat) (h : WinInv c) :
     WinInv (put (ensure c k).1 k (ensure c k).2) :=
   win_put _ _ _ (win_ensure c k h).1 (win_ensure c k h).2
 
-theorem win_headersPre (fx : Fix) (c : Conn) (f : Fr) (h : WinInv c) : WinSN (headersPre fx c f) := by
+theorem win_headersPre (c : Conn) (f : Fr) (h : WinInv c) : WinSN (headersPre c f) := by
   unfold headersPre
   repeat' split
   all_goals first
     | exact win_connErr _ _ h
     | trivial
 
-theorem win_headersOpen (fx : Fix) (dec : Dec) (c : Conn) (f : Fr) (refuse : Nat) (h : WinInv c) :
-    WinInv (headersOpen fx dec c f refuse).1 := by
+theorem win_headersOpen (dec : Dec) (c : Conn) (f : Fr) (refuse : Nat) (h : WinInv c) :
+    WinInv (headersOpen dec c f refuse).1 := by
   unfold headersOpen
   simp only
   have h1 : WinInv (if refuse = 0 then
@@ -312,18 +311,18 @@ theorem win_headersOpen (fx : Fix) (dec : Dec) (c : Conn) (f : Fr) (refuse : Nat
     · exact h
   split
   · exact h1
-  · exact win_commit _ _ _ _ h1
+  · exact win_commit _ _ _ h1
 
-theorem win_headersH (fx : Fix) (dec : Dec) (c : Conn) (f : Fr) (h : WinInv c) :
-    WinE (headersH fx dec c f) := by
-  have hp : ∀ r, headersPre fx c f = .inl r → WinInv r.1 := by
-    intro r hr; have := win_headersPre fx c f h; rw [hr] at this; exact this
+theorem win_headersH (dec : Dec) (c : Conn) (f : Fr) (h : WinInv c) :
+    WinE (headersH dec c f) := by
+  have hp : ∀ r, headersPre c f = .inl r → WinInv r.1 := by
+    intro r hr; have := win_headersPre c f h; rw [hr] at this; exact this
   unfold headersH
   repeat' split
   all_goals first
     | exact win_connErr _ _ h
     | trivial
-    | exact win_headersOpen _ _ _ _ _ h
+    | exact win_headersOpen _ _ _ _ h
     | (apply hp; assumption)
 
 theorem win_dataCredit (c : Conn) (f : Fr) (n : Nat) (h : WinInv c) : WinInv (dataCredit c f n).1 := by
@@ -335,29 +334,29 @@ theorem win_dataCredit (c : Conn) (f : Fr) (n : Nat) (h : WinInv c) : WinInv (da
     · split <;> exact h
   · exact h
 
-theorem win_dataFinish (fx : Fix) (c : Conn) (f : Fr) (s : Stream) (cr : Nat) (h : WinInv c)
-    (hs : s.sendW ≤ MAX_WINDOW) : WinInv (dataFinish fx c f s cr).1 := by
+theorem win_dataFinish (c : Conn) (f : Fr) (s : Stream) (cr : Nat) (h : WinInv c)
+    (hs : s.sendW ≤ MAX_WINDOW) : WinInv (dataFinish c f s cr).1 := by
   unfold dataFinish
   split
   · exact win_rstCloseX _ _ _ _ _ h hs
   · exact win_dataCredit _ _ _ (win_put _ _ _ h (by split <;> exact hs))
 
-theorem win_dataAccept (fx : Fix) (c : Conn) (f : Fr) (s : Stream) (n : Nat) (h : WinInv c)
-    (hs : s.sendW ≤ MAX_WINDOW) : WinInv (dataAccept fx c f s n).1 := by
+theorem win_dataAccept (c : Conn) (f : Fr) (s : Stream) (n : Nat) (h : WinInv c)
+    (hs : s.sendW ≤ MAX_WINDOW) : WinInv (dataAccept c f s n).1 := by
   unfold dataAccept
   split
   · exact win_rstCloseX _ _ _ _ _ h hs
-  · exact win_dataFinish _ _ _ _ _ (by split <;> exact h) hs
+  · exact win_dataFinish _ _ _ _ (by split <;> exact h) hs
 
-theorem win_dataBody (fx : Fix) (c : Conn) (f : Fr) (s : Stream) (n : Nat) (h : WinInv c)
-    (hs : s.sendW ≤ MAX_WINDOW) : WinInv (dataBody fx c f s n).1 := by
+theorem win_dataBody (c : Conn) (f : Fr) (s : Stream) (n : Nat) (h : WinInv c)
+    (hs : s.sendW ≤ MAX_WINDOW) : WinInv (dataBody c f s n).1 := by
   unfold dataBody
   repeat' split
   all_goals first
     | exact win_rstCloseX _ _ _ _ _ h hs
-    | exact win_dataAccept _ _ _ _ _ h hs
+    | exact win_dataAccept _ _ _ _ h hs
 
-theorem win_dataH (fx : Fix) (c : Conn) (f : Fr) (h : WinInv c) : WinInv (dataH fx c f).1 := by
+theorem win_dataH (c : Conn) (f : Fr) (h : WinInv c) : WinInv (dataH c f).1 := by
   unfold dataH
   split
   · exact h
@@ -369,89 +368,83 @@ theorem win_dataH (fx : Fix) (c : Conn) (f : Fr) (h : WinInv c) : WinInv (dataH 
       all_goals first
         | exact win_connErr _ _ h
         | exact win_rstCloseX _ _ _ _ _ h hs
-        | exact win_dataBody _ _ _ _ _ h hs
+        | exact win_dataBody _ _ _ _ h hs
 
 theorem win_rstH (c : Conn) (f : Fr) (h : WinInv c) : WinInv (rstH c f).1 := by
   unfold rstH rstFlood
   have := win_closeIfKnown c f.sid h
   split <;> exact this
 
-theorem win_dispatch (fx : Fix) (dec : Dec) (c : Conn) (f : Fr) (h : WinInv c) :
-    WinE (dispatch fx dec c f) := by
+theorem win_dispatch (dec : Dec) (c : Conn) (f : Fr) (h : WinInv c) :
+    WinE (dispatch dec c f) := by
   unfold dispatch
   split
   · exact win_settingsH c f h
   · split
     · show WinInv _; split <;> exact h
     · split
-      · exact win_wuH fx c f h
+      · exact win_wuH c f h
       · split
-        · exact win_headersH fx dec c f h
+        · exact win_headersH dec c f h
         · split
           · exact win_connErr _ _ h
           · split
-            · exact win_dataH fx c f h
+            · exact win_dataH c f h
             · split
               · exact h
               · split
                 · exact win_rstH c f h
                 · exact h
 
-theorem win_handle (fx : Fix) (dec : Dec) (c : Conn) (f : Fr) (h : WinInv c) :
-    WinE (handle fx dec c f) := by
+theorem win_handle (dec : Dec) (c : Conn) (f : Fr) (h : WinInv c) :
+    WinE (handle dec c f) := by
   unfold handle
   split
-  · exact win_contBranch fx dec c f h
-  · have hs := win_shapeCheck fx c f h
+  · exact win_contBranch dec c f h
+  · have hs := win_shapeCheck c f h
     split
     · rename_i r' hr; rw [hr] at hs; exact hs
     · split
       · exact win_connErr _ _ h
-      · have hi := win_idCheck fx c f h
+      · have hi := win_idCheck c f h
         split
         · rename_i r' hid; rw [hid] at hi; exact hi
-        · rename_i c' hid; rw [hid] at hi; exact win_dispatch fx dec c' f hi
+        · rename_i c' hid; rw [hid] at hi; exact win_dispatch dec c' f hi
 
-theorem win_handleW (fx : Fix) (dec : Dec) (c : Conn) (f : Fr) (h : WinInv c) :
-    WinE (handleW fx dec c f) := by
+theorem win_handleW (dec : Dec) (c : Conn) (f : Fr) (h : WinInv c) :
+    WinE (handleW dec c f) := by
   unfold handleW
   split
   · exact win_connErr _ _ h
-  · have hh := win_handle fx dec c f h
+  · have hh := win_handle dec c f h
     split
     · rename_i c' o heq; rw [heq] at hh; exact hh
     · trivial
 
-theorem win_prefaceGate (fx : Fix) (dec : Dec) (c : Conn) (f : Fr) (h : WinInv c) :
-    WinE (prefaceGate fx dec c f) := by
+theorem win_prefaceGate (dec : Dec) (c : Conn) (f : Fr) (h : WinInv c) :
+    WinE (prefaceGate dec c f) := by
   unfold prefaceGate
   split
   · split
-    · exact win_handleW fx dec _ f h
-    · split
-      · exact win_connErr _ _ h
-      · exact win_handleW fx dec c f h
-  · exact win_handleW fx dec c f h
+    · exact win_handleW dec _ f h
+    · exact win_connErr _ _ h
+  · exact win_handleW dec c f h
 
-theorem win_driveFrame (fx : Fix) (dec : Dec) (c : Conn) (f : Fr) (h : WinInv c) :
-    WinE (driveFrame fx dec c f) := by
+theorem win_driveFrame (dec : Dec) (c : Conn) (f : Fr) (h : WinInv c) :
+    WinE (driveFrame dec c f) := by
   unfold driveFrame
   split
   · exact h
   · split
     · exact win_connErr _ _ h
-    · exact win_prefaceGate fx dec c f h
+    · exact win_prefaceGate dec c f h
 
-theorem win_driveClient (fx : Fix) (dec : Dec) (c : Conn) (f : Fr) (h : WinInv c) :
-    WinE (driveClient fx dec c f) := by
+theorem win_driveClient (dec : Dec) (c : Conn) (f : Fr) (h : WinInv c) :
+    WinE (driveClient dec c f) := by
   unfold driveClient
   split
-  · split
-    · exact win_connErr _ _ h
-    · trivial
-  · split
-    · exact h
-    · exact win_prefaceGate fx dec c f h
+  · exact win_connErr _ _ h
+  · exact win_prefaceGate dec c f h
 
 theorem win_send (c : Conn) (k n : Nat) (h : WinInv c) : WinInv (send c k n).1 := by
   unfold send
@@ -502,15 +495,15 @@ theorem win_respond (c : Conn) (k n : Nat) (h : WinInv c) : WinInv (respond c k 
       · show 0 ≤ c.sendW - ↑n; omega
       · show c.sendW - ↑n ≤ MAX_WINDOW; omega
 
-theorem win_step (fx : Fix) (dec : Dec) (c : Conn) (e : Ev) (r : Conn × List Out) (h : WinInv c)
-    (hr : step fx dec c e = .ok r) : WinInv r.1 := by
+theorem win_step (dec : Dec) (c : Conn) (e : Ev) (r : Conn × List Out) (h : WinInv c)
+    (hr : step dec c e = .ok r) : WinInv r.1 := by
   cases e with
   | frame f =>
     simp only [step] at hr
     split at hr
-    · have := win_driveClient fx dec c f h
+    · have := win_driveClient dec c f h
       rw [hr] at this; exact this
-    · have := win_driveFrame fx dec c f h
+    · have := win_driveFrame dec c f h
       rw [hr] at this; exact this
   | release n =>
     simp only [step, Except.ok.injEq] at hr; subst hr
@@ -523,7 +516,7 @@ theorem win_step (fx : Fix) (dec : Dec) (c : Conn) (e : Ev) (r : Conn × List Ou
   | pop k =>
     simp only [step, Except.ok.injEq] at hr; subst hr
     exact ⟨h.1, h.2.1, h.2.2.1, h.2.2.2.1, sok_filter _ _ h.2.2.2.2⟩
-  | endLocal k em =>
+  | endLocal k =>
     simp only [step, Except.ok.injEq] at hr; subst hr
     unfold endLocal; split
     · exact h
@@ -544,12 +537,11 @@ theorem win_step (fx : Fix) (dec : Dec) (c : Conn) (e : Ev) (r : Conn × List Ou
       · exact h
       · rename_i s hg; exact win_put _ _ _ h (win_get c k s h hg)
 
-/-- **Window bound.** In every reachable state of every fix selection,
-the connection send window is in `0 .. 2^31-1`, the peer's initial window
+/-- **Window bound.** In every reachable state, the connection send window is in `0 .. 2^31-1`, the peer's initial window
 is in `0 .. 2^31-1`, and every stream send window is at most `2^31-1`. -/
-theorem win_reachable (fx : Fix) : ∀ c, (lts fx Fresh).Reachable c → WinInv c := by
-  have hI : (lts fx Fresh).Inductive WinInv :=
-    ⟨fun s h => fresh_win s h, fun s l s' hp ⟨o, hs⟩ => win_step fx l.1 s l.2 (s', o) hp hs⟩
+theorem win_reachable : ∀ c, (lts Fresh).Reachable c → WinInv c := by
+  have hI : (lts Fresh).Inductive WinInv :=
+    ⟨fun s h => fresh_win s h, fun s l s' hp ⟨o, hs⟩ => win_step l.1 s l.2 (s', o) hp hs⟩
   exact hI.reachable
 
 end Flare.L3.H2.Conn

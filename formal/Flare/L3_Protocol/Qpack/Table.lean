@@ -36,14 +36,14 @@ def sumSize : List α → Nat
   | [] => 0
   | e :: es => esz e + sumSize es
 
-/-- mirrors flare/qpack/dynamic.mojo:93-98 @59bda50 -/
+/-- mirrors flare/qpack/dynamic.mojo#QpackDynamicTable.__init__ sha=947588788269 at=59bda50f -/
 def Table.init (cap : Nat) : Table α :=
   { entries := [], capacity := cap, maxCapacity := cap, size := 0, dropped := 0 }
 
-/-- mirrors flare/qpack/dynamic.mojo:100-102 @59bda50 -/
+/-- mirrors flare/qpack/dynamic.mojo#QpackDynamicTable.insert_count sha=468736c299c7 at=59bda50f -/
 def Table.insertCount (t : Table α) : Nat := t.dropped + t.entries.length
 
-/-- mirrors flare/qpack/dynamic.mojo:126-136 @59bda50 (the `while` loop,
+/-- mirrors flare/qpack/dynamic.mojo#QpackDynamicTable._evict_to sha=d903b661c685 at=59bda50f (the `while` loop,
 by structural recursion on the entry list). -/
 def evictTo (target : Nat) : Table α → Table α
   | ⟨[], c, m, s, d⟩ => ⟨[], c, m, s, d⟩
@@ -52,13 +52,13 @@ def evictTo (target : Nat) : Table α → Table α
     else ⟨e :: es, c, m, s, d⟩
 termination_by t => t.entries.length
 
-/-- mirrors flare/qpack/dynamic.mojo:108-124 @59bda50 (`none` = raised
+/-- mirrors flare/qpack/dynamic.mojo#QpackDynamicTable.set_capacity sha=1d11315c674c at=59bda50f (`none` = raised
 QPACK_ENCODER_STREAM_ERROR). -/
 def setCapacity (t : Table α) (cap : Nat) : Option (Table α) :=
   if cap > t.maxCapacity then none
   else some (evictTo esz cap { t with capacity := cap })
 
-/-- mirrors flare/qpack/dynamic.mojo:138-148 @59bda50 (`none` = `False`). -/
+/-- mirrors flare/qpack/dynamic.mojo#QpackDynamicTable.insert sha=1d6453e62857 at=59bda50f (`none` = `False`). -/
 def insert (t : Table α) (h : α) : Option (Table α) :=
   let sz := esz h
   if sz > t.capacity then none
@@ -66,7 +66,7 @@ def insert (t : Table α) (h : α) : Option (Table α) :=
     let t' := evictTo esz (t.capacity - sz) t
     some { t' with size := t'.size + sz, entries := t'.entries ++ [h] }
 
-/-- mirrors flare/qpack/dynamic.mojo:150-158 @59bda50 -/
+/-- mirrors flare/qpack/dynamic.mojo#QpackDynamicTable.get_abs sha=91ea4a5c7b8b at=59bda50f -/
 def Table.getAbs (t : Table α) (i : Nat) : Option α :=
   if i < t.dropped ∨ i ≥ t.dropped + t.entries.length then none
   else t.entries[i - t.dropped]?

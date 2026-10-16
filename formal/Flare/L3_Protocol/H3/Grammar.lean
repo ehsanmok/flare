@@ -11,7 +11,7 @@ Results:
 * `run_accept_impl` / `run_reject_impl`: flare's `stepFrame` run reports no
   error and tracks the spec state exactly on spec-accepted sequences, and
   reports an error on spec-rejected ones, for every sequence (H3-02 made the
-  HTTP/2-reserved types rejected; see `Flare.Bugs.H3_02` for the pre-fix reader).
+  HTTP/2-reserved types rejected; `implRejects_reserved`).
 -/
 namespace Flare.L3.H3
 
@@ -265,5 +265,18 @@ theorem run_reject_impl (qd : Bytes → Option Hdrs) (fs : List (Nat × Bytes)) 
     ∃ e ∈ (runFrames (stepFrame qd) r fs).2, e.isError = true :=
   runFrames_reject (P := fun _ => True) qd (stepFrame qd)
     (fun r t p hg _ => stepFrame_agrees qd r t p hg) fs r q hq hgood (fun _ _ => trivial) hrej
+
+/-- The grammar rejects the HTTP/2-reserved types in every state. -/
+theorem spec_rejects (q : Q) (t : Nat) (ht : t = 0x02 ∨ t = 0x06 ∨ t = 0x08 ∨ t = 0x09) :
+    specStep q t = none := by
+  rcases ht with rfl | rfl | rfl | rfl <;> simp [specStep]
+
+/-- The dispatch rejects every HTTP/2-reserved type, in any state (H3-02). -/
+theorem implRejects_reserved (qd : Bytes → Option Hdrs) (r : Reader) (t : Nat) (p : Bytes)
+    (ht : t = 0x02 ∨ t = 0x06 ∨ t = 0x08 ∨ t = 0x09) :
+    (stepFrame qd r t p).2.isError = true ∧ (stepFrame qd r t p).1.st = .done := by
+  rcases ht with rfl | rfl | rfl | rfl <;>
+    simp [stepFrame, T_HEADERS, T_DATA, isControlType, T_SETTINGS, T_GOAWAY, T_MAX_PUSH_ID,
+      T_CANCEL_PUSH, T_PUSH_PROMISE, isH2Reserved, Ev.isError]
 
 end Flare.L3.H3

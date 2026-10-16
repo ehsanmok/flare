@@ -33,14 +33,14 @@ open Flare.L1.Decimal
 
 set_option linter.unusedSimpArgs false
 
-/-- ASCII `HttpStatusError(`. mirrors flare/errors.mojo:87 @59bda50 -/
+/-- ASCII `HttpStatusError(`. mirrors flare/errors.mojo#HTTP_STATUS_ERROR_PREFIX sha=1c5f1f143756 at=59bda50f -/
 def PREFIX : Bytes := [72, 116, 116, 112, 83, 116, 97, 116, 117, 115, 69, 114, 114, 111, 114, 40]
 
 /-- `)` and `): ` -/
 def RP : Bytes := [41]
 def MARK : Bytes := [41, 58, 32]
 
-/-- mirrors flare/errors.mojo:217-231 @59bda50 (`write_to`, non-negative status) -/
+/-- mirrors flare/errors.mojo#HttpStatusError.__init__+HttpStatusError.write_to sha=ed8f66acbd55 at=59bda50f (`write_to`, non-negative status) -/
 def render (status : Nat) (msg : Bytes) : Bytes := PREFIX ++ dec status ++ MARK ++ msg
 
 /-- `String.find(pat, start)`: first match at or after `i`. -/
@@ -52,7 +52,7 @@ termination_by s.length - i
 
 def AtolDec (atol : Bytes → Option Int) : Prop := ∀ n : Nat, atol (dec n) = some (n : Int)
 
-/-- mirrors flare/errors.mojo:246-273 @59bda50 -/
+/-- mirrors flare/errors.mojo#parse_status_error sha=c49b8b0f9b69 at=59bda50f -/
 def parse (atol : Bytes → Option Int) (reason : Int → Bytes) (s : Bytes) : Option (Int × Bytes) :=
   if !PREFIX.isPrefixOf s then none
   else

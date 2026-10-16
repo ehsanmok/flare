@@ -9,17 +9,16 @@ import Flare.L3_Protocol.H1.ClientChunked
   buffered, framed and streaming readers; the `*_iff` theorems prove it
   implements §6.3 (with flare's stricter choices: TE + CL and a repeated
   CL are refused).
-* `parseStatusOld` mirrors `_parse_status_line` before the H1-08 fix;
-  `parseStatus` is the shipped parser (finding H1-08).
-* `canReuseOld` mirrors the keep-alive decision of the framed reader before
-  the H1-09 fix; `canReuse` is the shipped decision (HTTP/1.1 only).
-* `splitGo`/`headOld` mirror `_find_crlf2_from`, `_split_lines` and the
-  line loop of `_parse_response_head` before the H1-07 fix; `headImpl` is the
-  shipped head parser (bare LF and empty lines refused); `lfHead` is an RFC 9112 §2.2
-  recipient that recognises a bare LF as a line terminator (finding H1-07).
-* `dlCloseOld` mirrors `HttpDownload._read_close` over the pre-fix transport,
-  `dlClose` the shipped transport read with the close_notify guard
-  (finding H1-11).
+* `parseStatus` mirrors `_parse_status_line`; `parseStatus_delimited`: the
+  code it returns is the three digits delimited by the first space.
+* `canReuse` mirrors the keep-alive decision of the framed reader
+  (HTTP/1.1 only); `canReuse_ok`.
+* `splitGo` mirrors `_find_crlf2_from` and `_split_lines`; `headImpl` is the
+  head parser (bare LF and empty lines refused); `headImpl_agrees`: it agrees
+  with `lfHead`, an RFC 9112 §2.2 recipient that recognises a bare LF as a
+  line terminator, on every head it accepts.
+* `bufferedClose` is the close-delimited read with the close_notify guard;
+  `bufferedClose_safe`: a truncated read never returns a body.
 -/
 namespace Flare.L3.H1.ClientResponse
 open Flare Flare.L3.H1.Text Flare.L3.H1.ClientChunked
@@ -42,7 +41,7 @@ def CHUNKED : Bytes := Bytes.ofString "chunked"
 
 /-- `cls`/`tes` are the (stripped) Content-Length and Transfer-Encoding
 field values in order.
-mirrors flare/http/_client/parse.mojo:128-170 @59bda50 -/
+mirrors flare/http/_client/parse.mojo#_response_framing sha=d0dcf27b09c1 at=59bda50f -/
 def respFraming (isHead isConnect : Bool) (status : Nat) (cls tes : List Bytes) : RFraming :=
   if bodyless isHead isConnect status then .none
   else if cls.length > 1 then .reject
@@ -125,25 +124,9 @@ theorem framing_close_iff (isHead isConnect : Bool) (status : Nat) (cls tes : Li
 def isDig (c : UInt8) : Bool := 48 ≤ c && c ≤ 57
 def HTTP_ : Bytes := Bytes.ofString "HTTP/"
 
-/-- `_parse_status_line`: `HTTP/` prefix, first SP, `lstrip`, three digits;
-the reason is whatever follows byte 4. This is the parser before the H1-08
-fix; kept for the counterexample.
-mirrors flare/http/_client/parse.mojo:318-352 @59bda50 -/
-def parseStatusOld (line : Bytes) : Option Nat :=
-  if line.take 5 ≠ HTTP_ then none else
-  match findB 32 line with
-  | none => none
-  | some sp =>
-    match (line.drop (sp + 1)).dropWhile isSWS with
-    | a :: b :: c :: _ =>
-      if isDig a && isDig b && isDig c then
-        some ((a.toNat - 48) * 100 + (b.toNat - 48) * 10 + (c.toNat - 48))
-      else none
-    | _ => none
-
 /-- The shipped `_parse_status_line` (H1-08 fix): the code must be followed by
 SP or the end of line.
-mirrors flare/http/_client/parse.mojo:362-403 (fixed, H1-08) -/
+mirrors flare/http/_client/parse.mojo#_parse_status_line+_str_find sha=2c7c574750d9 at=ea1b9282 (fixed, H1-08) -/
 def parseStatus (line : Bytes) : Option Nat :=
   if line.take 5 ≠ HTTP_ then none else
   match findB 32 line with
@@ -212,19 +195,13 @@ def HTTP10 : Bytes := Bytes.ofString "HTTP/1.0"
 def hasTok (tok : Bytes) (vals : List Bytes) : Bool :=
   vals.any fun v => (splitComma v).any fun t => lowerB (pyStrip t) == tok
 
-/-- The framed reader's verdict before the H1-09 fix: `clean` (no bytes past the message),
-no `close` token, and not close-delimited. The response's HTTP version is
-never consulted.
-mirrors flare/http/_client/parse.mojo:836-884 @59bda50 -/
-def canReuseOld (_version : Bytes) (clean : Bool) (conn : List Bytes) (fr : RFraming) : Bool :=
-  clean && !(hasTok CLOSE conn) && fr != .close
-
 /-- The shipped decision (finding H1-09): only an HTTP/1.1 response leaves the
 connection open. An HTTP/1.0 response with `keep-alive` is not pooled either,
 which is stricter than RFC 9112 §9.3 allows and still meets `PersistOK`.
-mirrors flare/http/_client/parse.mojo `can_reuse = clean and not conn_close and http11` -/
+`version` is the status line up to its first SP (`http11` in Mojo).
+mirrors flare/http/_client/parse.mojo#_read_http_response_framed sha=4fbda9f3d399 at=ea1b9282 (fixed, H1-09) -/
 def canReuse (version : Bytes) (clean : Bool) (conn : List Bytes) (fr : RFraming) : Bool :=
-  canReuseOld version clean conn fr && version == HTTP11
+  clean && !(hasTok CLOSE conn) && fr != .close && version == HTTP11
 
 /-- RFC 9112 §9.3: the connection persists after a response only if it is
 HTTP/1.1 without `close`, or HTTP/1.0 with `keep-alive`. -/
@@ -234,18 +211,18 @@ def PersistOK (reuse : Bytes → Bool → List Bytes → RFraming → Bool) : Pr
 
 theorem canReuse_ok : PersistOK canReuse := by
   intro v clean conn fr h
-  simp only [canReuse, canReuseOld, Bool.and_eq_true, Bool.not_eq_true', beq_iff_eq,
+  simp only [canReuse, Bool.and_eq_true, Bool.not_eq_true', beq_iff_eq,
     bne_iff_ne, ne_eq] at h
   exact ⟨by simp [h.1.1.2], Or.inl h.2⟩
 
 /-! ## Response head lines (RFC 9112 §2.1, §2.2) -/
 
 /-- `_bytes_to_str`: NUL and bytes ≥ 0x80 become `?`.
-mirrors flare/http/_client/parse.mojo:262-280 @59bda50 -/
+mirrors flare/http/_client/parse.mojo#_bytes_to_str sha=5cf718ab0175 at=59bda50f -/
 def san (c : UInt8) : UInt8 := if c = 0 ∨ 128 ≤ c then 63 else c
 
 /-- First `CR LF CR LF`.
-mirrors flare/http/_client/parse.mojo:233-245 @59bda50 -/
+mirrors flare/http/_client/parse.mojo#_find_crlf2_from sha=098c3b0a6677 at=59bda50f -/
 def findCRLF2 : Bytes → Option Nat
   | a :: b :: c :: d :: t =>
     if a = 13 ∧ b = 10 ∧ c = 13 ∧ d = 10 then some 0 else (findCRLF2 (b :: c :: d :: t)).map (· + 1)
@@ -253,7 +230,7 @@ def findCRLF2 : Bytes → Option Nat
 
 /-- `_split_lines`: CRLF or a bare LF ends a line; a non-empty last segment
 is kept. `acc` is the current segment, reversed.
-mirrors flare/http/_client/parse.mojo:283-306 @59bda50 -/
+mirrors flare/http/_client/parse.mojo#_split_lines sha=045f4376f6fa at=59bda50f -/
 def splitGo (acc : Bytes) : Bytes → List Bytes
   | [] => if acc = [] then [] else [acc.reverse]
   | c :: t =>
@@ -270,19 +247,6 @@ theorem splitGo_cons (acc : Bytes) (c : UInt8) (t : Bytes) : splitGo acc (c :: t
     else if c = 13 ∧ t.head? = some 10 then acc.reverse :: splitGo [] t.tail
     else splitGo (c :: acc) t := by
   rw [splitGo.eq_2]
-
-/-- Mojo sanitises the head before splitting; `san` fixes CR and LF and
-maps every other byte to a non-CR/LF byte, so splitting first is the same
-(`splitLines_san`). The head parser skips empty lines.
-This is the head parser before the H1-07 fix; kept for the counterexample.
-mirrors flare/http/_client/parse.mojo:89-125, 195-204 @59bda50 -/
-def headOld (m : Bytes) : Option (List Bytes × Bytes) :=
-  match findCRLF2 m with
-  | none => none
-  | some p =>
-    match splitLines (m.take p) with
-    | [] => none
-    | s :: fs => if s = [] then none else some ((s :: fs.filter (· ≠ [])).map (·.map san), m.drop (p + 4))
 
 /-- A LF not preceded by CR. -/
 def hasBareLF : Bytes → Bool
@@ -302,7 +266,7 @@ theorem hasBareLF_cons (c : UInt8) (t : Bytes) : hasBareLF (c :: t) =
 
 /-- The shipped head parser (H1-07 fix): a head holding a bare LF, or an empty
 line before its end, is refused.
-mirrors flare/http/_client/parse.mojo:98-148 (fixed, H1-07) -/
+mirrors flare/http/_client/parse.mojo#_parse_response_head+_response_framing sha=1c48ba592512 at=ea1b9282 (fixed, H1-07) -/
 def headImpl (m : Bytes) : Option (List Bytes × Bytes) :=
   match findCRLF2 m with
   | none => none
@@ -538,21 +502,15 @@ theorem headImpl_agrees : HeadAgrees headImpl := by
 
 /-! ## TLS end of stream (finding H1-11) -/
 
-/-- `HttpDownload._read_close` over the pre-fix transport: a close-delimited
-body ends at the first `read` returning 0, clean or not. Kept for the
-H1-11 counterexample.
-mirrors flare/http/_client/download.mojo:215-220 @59bda50 -/
-def dlCloseOld (reads : List Bytes) (_unclean : Bool) : Except String Bytes := .ok reads.flatten
-
 /-- The buffered readers' guard: a close-delimited body that ended without
 close_notify raises.
-mirrors flare/http/_client/parse.mojo:665-683 @59bda50 -/
+mirrors flare/http/_client/parse.mojo#_refuse_truncated_tls sha=5b61f32ac8ac at=59bda50f -/
 def bufferedClose (reads : List Bytes) (unclean : Bool) : Except String Bytes :=
   if unclean then .error "TLS connection closed without close_notify" else .ok reads.flatten
 
 /-- The shipped streaming reader: `_H2Transport.read` raises when a TLS read
 returns 0 without close_notify, so `_read_close` never sees that end.
-mirrors flare/http/_client/h2_transport.mojo:69-96 (fixed, H1-11) -/
+mirrors flare/http/_client/h2_transport.mojo#_H2Transport.read sha=fbf0a788d80f at=c0567415 (fixed, H1-11) -/
 abbrev dlClose := bufferedClose
 
 /-- A close-delimited TLS body is complete only if the stream ended with

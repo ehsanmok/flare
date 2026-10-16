@@ -27,20 +27,20 @@ namespace Flare.L1.UringTag
 
 set_option linter.unusedSimpArgs false
 
-/-- mirrors flare/runtime/_uring_optag.mojo:57-58 @59bda50 -/
+/-- mirrors flare/runtime/_uring_optag.mojo#_OP_SHIFT+_CONN_MASK sha=669aad965507 at=59bda50f -/
 def CONN_MASK : UInt64 := 0x00FFFFFFFFFFFFFF
 
-/-- mirrors flare/runtime/_uring_optag.mojo:62-78 @59bda50 (asserts separate) -/
+/-- mirrors flare/runtime/_uring_optag.mojo#pack_user_data sha=3882d09b5815 at=59bda50f (asserts separate) -/
 def pack (op conn : UInt64) : UInt64 := (op <<< 56) ||| (conn &&& CONN_MASK)
 
-/-- mirrors flare/runtime/_uring_optag.mojo:82-84 @59bda50 -/
+/-- mirrors flare/runtime/_uring_optag.mojo#unpack_op sha=cbcaca27b445 at=59bda50f -/
 def unpackOp (u : UInt64) : UInt64 := (u >>> 56) &&& 0xFF
 
-/-- mirrors flare/runtime/_uring_optag.mojo:88-90 @59bda50 -/
+/-- mirrors flare/runtime/_uring_optag.mojo#unpack_conn_id sha=8776d72db7a6 at=59bda50f -/
 def unpackConn (u : UInt64) : UInt64 := u &&& CONN_MASK
 
 /-- The `debug_assert` on `conn_id`: `Int(conn_id) <= Int(_CONN_MASK)` with
-Mojo's 64-bit signed `Int`. mirrors flare/runtime/_uring_optag.mojo:68-72 @59bda50 -/
+Mojo's 64-bit signed `Int`. mirrors flare/runtime/_uring_optag.mojo#pack_user_data sha=3882d09b5815 at=59bda50f -/
 def connAssert (conn : UInt64) : Bool := decide (conn.toInt64 ≤ CONN_MASK.toInt64)
 
 theorem and_low (v m : UInt64) (k : Nat) (hm : m.toNat = 2 ^ k - 1) (h : v.toNat < 2 ^ k) :
@@ -78,7 +78,7 @@ theorem connAssert_fails_open :
 /-! ## CQE decoding -/
 
 /-- Sign extension of the raw `res` word.
-mirrors flare/runtime/io_uring_sqe.mojo:976-982 @59bda50 -/
+mirrors flare/runtime/io_uring_sqe.mojo#decode_cqe_at sha=76a8379741b9 at=59bda50f -/
 def cqeRes (raw : UInt32) : Int32 :=
   if (raw.toNat : Int) ≥ 0x80000000 then Int32.ofInt ((raw.toNat : Int) - 0x100000000)
   else Int32.ofInt raw.toNat
@@ -103,7 +103,7 @@ theorem cqeRes_eq_toInt32 (raw : UInt32) : cqeRes raw = raw.toInt32 := by
   · rw [if_pos h, if_pos (by omega)]
   · rw [if_neg h, if_neg (by omega)]; simp
 
-/-- mirrors flare/runtime/io_uring_sqe.mojo:932-939 @59bda50 -/
+/-- mirrors flare/runtime/io_uring_sqe.mojo#IoUringCqe.errno sha=bd8fe47534a2 at=59bda50f -/
 def errno (res : Int32) : Int := if res.toInt ≥ 0 then 0 else -res.toInt
 
 theorem errno_range (raw : UInt32) (h : (cqeRes raw).toInt < 0) :
@@ -119,7 +119,7 @@ theorem errno_range (raw : UInt32) (h : (cqeRes raw).toInt < 0) :
 /-- `IORING_CQE_F_BUFFER`. -/
 def F_BUFFER : UInt32 := 1
 
-/-- mirrors flare/runtime/io_uring_sqe.mojo:948-958 @59bda50 -/
+/-- mirrors flare/runtime/io_uring_sqe.mojo#IoUringCqe.buffer_id sha=0d6aafa7de61 at=59bda50f -/
 def bufferId (flags : UInt32) : Int :=
   if flags &&& F_BUFFER = 0 then -1 else ((flags >>> 16).toNat &&& 0xFFFF : Nat)
 

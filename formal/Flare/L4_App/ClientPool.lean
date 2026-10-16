@@ -36,7 +36,7 @@ abbrev Key := String
 abbrev Entries := List (Key × List Nat)
 
 /-- `max_idle_per_host`, `max_idle_total`, `idle_timeout_ms`.
-mirrors flare/http/client_pool.mojo:86-102 @59bda50 -/
+mirrors flare/http/client_pool.mojo#_ClientPoolState sha=64b27b37b7e0 at=59bda50f -/
 structure Cfg where
   perHost : Int
   total : Int
@@ -65,13 +65,13 @@ def put (e : Entries) (k : Key) (v : List Nat) : Entries := e.filter (fun p => p
 def erase (e : Entries) (k : Key) : Entries := e.filter (fun p => p.1 != k)
 
 /-- `_total_idle`.
-mirrors flare/http/client_pool.mojo:279-293 @59bda50 -/
+mirrors flare/http/client_pool.mojo#ClientPool._total_idle sha=e93f1b4b3b30 at=59bda50f -/
 def total (e : Entries) : Nat := (e.map fun p => p.2.length).sum
 
 /-- `release(key, fd)`: close (state unchanged) when pooling is off for
 the host, when the total cap is reached, or when the host's deque is full;
 otherwise append.
-mirrors flare/http/client_pool.mojo:244-277 @59bda50 -/
+mirrors flare/http/client_pool.mojo#ClientPool.release sha=91863b60e8e4 at=59bda50f -/
 def release (c : Cfg) (s : St) (k : Key) (fd : Nat) (now : Int) : St :=
   if c.perHost ≤ 0 then s
   else if 0 < c.total ∧ c.total ≤ (total s.entries : Int) then s
@@ -86,7 +86,7 @@ def tsOf (ts : List (Nat × Int)) (fd : Nat) : Int := ((ts.find? (·.1 == fd)).m
 /-- The eviction loop of `acquire`, over the deque from the back: close an
 entry older than `idle_timeout_ms` and continue, else hand it out. Returns
 the fd and the rest of the (reversed) deque.
-mirrors flare/http/client_pool.mojo:226-238 @59bda50 -/
+mirrors flare/http/client_pool.mojo#ClientPool.acquire sha=d0df79fd6768 at=59bda50f -/
 def popLoop (c : Cfg) (ts : List (Nat × Int)) (now : Int) : List Nat → Option Nat × List Nat
   | [] => (none, [])
   | fd :: rest =>
@@ -94,7 +94,7 @@ def popLoop (c : Cfg) (ts : List (Nat × Int)) (now : Int) : List Nat → Option
     else (some fd, rest)
 
 /-- `acquire(key)`.
-mirrors flare/http/client_pool.mojo:203-242 @59bda50 -/
+mirrors flare/http/client_pool.mojo#ClientPool.acquire sha=d0df79fd6768 at=59bda50f -/
 def acquire (c : Cfg) (s : St) (k : Key) (now : Int) : St × Option Nat :=
   if !hasKey s.entries k then (s, none)
   else

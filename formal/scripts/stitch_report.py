@@ -101,39 +101,6 @@ def findings_in(body):
         yield m.group(1), m.group(2).strip(), sev.group(1).capitalize()
 
 
-def bug_file(fid):
-    p = ROOT / "Flare" / "Bugs" / (fid.replace("-", "_") + ".lean")
-    return p.relative_to(ROOT).as_posix() if p.exists() else None
-
-
-def repro_file(fid):
-    hits = sorted((ROOT / "repro").glob(f"{fid}_*.mojo"))
-    return hits[0].relative_to(ROOT).as_posix() if len(hits) == 1 else None
-
-
-def resolved_state(fid):
-    """The three places a resolution is recorded must agree: the repro's
-    `# RESOLVED:` header, the Bugs file's `Status: resolved` line, and the
-    report section's `Status: resolved` line. Returns True/False or dies."""
-    rp = (ROOT / repro_file(fid)).read_text().splitlines()[:8]
-    in_repro = any(l.startswith("# RESOLVED:") for l in rp)
-    in_lean = re.search(r"^Status: resolved\b", (ROOT / bug_file(fid)).read_text(), re.M) is not None
-    in_report = _REPORT_RESOLVED.get(fid, False)
-    if not (in_repro == in_lean == in_report):
-        die(
-            f"{fid}: resolution marker disagrees (repro header: {in_repro}, "
-            f"Bugs file: {in_lean}, report section: {in_report})"
-        )
-    return in_repro
-
-
-def repro_platform(path):
-    head = (ROOT / path).read_text().splitlines()[:5]
-    plat = next((l.split(":", 1)[1].strip() for l in head if l.startswith("# PLATFORM:")), "?")
-    skip = any(l.startswith("# SKIP:") for l in head)
-    return plat + (", skip" if skip else "")
-
-
 def lean_counts():
     files = [p for p in (ROOT / "Flare").rglob("*.lean")] + [ROOT / "Flare.lean"]
     thm = re.compile(r"^\s*(?:private\s+|protected\s+)?(?:theorem|lemma)\s", re.M)
@@ -177,17 +144,7 @@ def main():
     dup = [f for f, n in seen.items() if n > 1]
     if dup:
         die(f"duplicate finding ids: {dup}")
-    missing = [f for f, *_ in index if not bug_file(f) or not repro_file(f)]
-    if missing:
-        die(f"findings without a Bugs file or exactly one repro: {missing}")
-    bugs = {p.stem.replace("_", "-") for p in (ROOT / "Flare" / "Bugs").glob("*.lean")}
-    repros = {p.name.split("_", 1)[0] for p in (ROOT / "repro").glob("*.mojo")}
-    is_id = re.compile(r"^[A-Z][A-Z0-9]*-\d+$").match
-    orphans = sorted(x for x in (bugs | repros) - set(seen) if is_id(x))
-    if orphans:
-        die(f"Bugs files or repros with no report finding: {orphans}")
-
-    resolved = {f: resolved_state(f) for f, *_ in index}
+    resolved = {f: _REPORT_RESOLVED.get(f, False) for f, *_ in index}
     n_resolved = sum(resolved.values())
     by_sev = Counter(s for _, _, s, _ in index)
     n_files, n_lines, n_thm, n_audit = lean_counts()
@@ -198,8 +155,7 @@ def main():
         f"| Theorems | {n_thm} |\n"
         f"| Headline theorems in the axiom audit | {n_audit} |\n"
         f"| Confirmed findings | {len(index)} ({sev_line}) |\n"
-        f"| Mojo repros | {len(index)}, one per finding |\n"
-        f"| Resolved (fix landed, repro kept as a regression check) | {n_resolved} of {len(index)} |"
+        f"| Resolved (fix landed, regression test in `tests/`) | {n_resolved} of {len(index)} |"
     )
 
     front = (REPORT_DIR / "_front.md").read_text().strip()
@@ -223,23 +179,22 @@ def main():
 
     out.append("## 5. Findings")
     out.append(
-        "Every finding below has a Lean counterexample and a proof that the "
-        "minimal fix meets the specification, in `formal/Flare/Bugs/`, and a "
-        "Mojo repro in `formal/repro/` that failed while the bug was present "
-        "and passes now that the fix has landed. Each finding's `Status: "
-        "resolved` note says what changed."
+        "Every finding below had a Lean counterexample against the code at "
+        "59bda50 (`formal/Flare/Bugs/`) and a Mojo repro that failed while the "
+        "bug was present (`formal/repro/`). Once every fix had landed and had "
+        "a regression test in `tests/`, both were removed and the models were "
+        "reduced to the shipped code; they are kept at the git tag "
+        "`formal-audit-0.12`. Each finding's `Status: resolved` note says what "
+        "changed."
     )
     rows = [
-        "| ID | Severity | Status | Finding | Lean | Repro (platform) |",
-        "|---|---|---|---|---|---|",
+        "| ID | Severity | Status | Finding |",
+        "|---|---|---|---|",
     ]
     for fid, t, s, _ in index:
-        rp = repro_file(fid)
         cell = t.replace("|", r"\|")
         status = "resolved" if resolved[fid] else "open"
-        rows.append(
-            f"| {fid} | {s} | {status} | {cell} | `{bug_file(fid)}` | `{rp}` ({repro_platform(rp)}) |"
-        )
+        rows.append(f"| {fid} | {s} | {status} | {cell} |")
     out.append("\n".join(rows))
     for i, (t, body) in enumerate(buckets["findings"], 1):
         out.append(f"### 5.{i} {t}")

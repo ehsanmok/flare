@@ -57,7 +57,7 @@ theorem add_mod_inj (a i j k : Nat) (hk : k ≤ 32) (hi : i < 2 ^ k) (hj : j < 2
 
 /-! ## Distance -/
 
-/-- mirrors flare/runtime/io_uring_driver.mojo:297-307 @59bda50 -/
+/-- mirrors flare/runtime/io_uring_driver.mojo#_ring_distance sha=76c46d8a9b4c at=59bda50f -/
 def ringDistance (tail head : UInt32) : UInt32 := tail - head
 
 /-- The fixed `_ring_distance` is the true occupancy whenever the true
@@ -99,16 +99,16 @@ structure SQ where
 def SQ.Inv (s : SQ) : Prop :=
   PowMask s.mask ∧ s.ktail - s.head ≤ s.ltail - s.head ∧ s.ltail - s.head ≤ s.mask + 1
 
-/-- mirrors flare/runtime/io_uring_driver.mojo:566-589 @59bda50
+/-- mirrors flare/runtime/io_uring_driver.mojo#IoUringDriver.commit_sqe+IoUringDriver.submit_and_wait sha=0ec373b16457 at=59bda50f
 Returns the slot index, `none` = NULL (SQ full). -/
 def nextSqe (s : SQ) : Option UInt32 :=
   if ringDistance s.ltail s.head ≥ s.mask + 1 then none else some (s.ltail &&& s.mask)
 
-/-- mirrors flare/runtime/io_uring_driver.mojo:591-608 @59bda50
+/-- mirrors flare/runtime/io_uring_driver.mojo#IoUringDriver.submit_and_wait sha=778f8b5c81a2 at=59bda50f
 No fullness check of its own: callers must have got a slot from `nextSqe`. -/
 def commitSqe (s : SQ) : SQ := { s with ltail := s.ltail + 1 }
 
-/-- mirrors flare/runtime/io_uring_driver.mojo:610-641 @59bda50
+/-- mirrors flare/runtime/io_uring_driver.mojo#IoUringDriver.submit_and_wait+IoUringDriver.cqe_count+IoUringDriver.reap_cqe sha=f291e4a1266a at=59bda50f
 Returns the new ring and `to_submit`. -/
 def submit (s : SQ) : SQ × UInt32 :=
   ({ s with ktail := s.ltail }, ringDistance s.ltail s.ktail)
@@ -206,10 +206,10 @@ structure CQ where
 CQEs (it overflows into its own backlog instead). -/
 def KernelCQBound (c : CQ) : Prop := c.ktail - c.khead_user ≤ c.mask + 1
 
-/-- mirrors flare/runtime/io_uring_driver.mojo:645-651 @59bda50 -/
+/-- mirrors flare/runtime/io_uring_driver.mojo#IoUringDriver.submit_nop sha=f1291e9d0ea5 at=59bda50f -/
 def cqeCount (c : CQ) : UInt32 := ringDistance c.ktail c.khead_user
 
-/-- mirrors flare/runtime/io_uring_driver.mojo:653-671 @59bda50
+/-- mirrors flare/runtime/io_uring_driver.mojo#IoUringDriver.submit_nop sha=f1291e9d0ea5 at=59bda50f
 Returns the slot read and the new ring. -/
 def reapCqe (c : CQ) : Option (UInt32 × CQ) :=
   if c.khead_user = c.ktail then none
@@ -293,7 +293,7 @@ theorem sq_reachable_inv (s : SQ) (h : sqLTS.Reachable s) : s.Inv :=
 
 /-! ## Provided-buffer ring (runtime/_pbuf_ring.mojo) -/
 
-/-- mirrors flare/runtime/_pbuf_ring.mojo:61-97 @59bda50 (slot index;
+/-- mirrors flare/runtime/_pbuf_ring.mojo#_pbuf_ring_add sha=756b31ef7b0a at=59bda50f (slot index;
 Mojo `&` with `entries - 1` on a non-negative `Int` is `% entries`). -/
 def pbufIdx (curTail : UInt16) (off entries : Nat) : Nat := (curTail.toNat + off) % entries
 

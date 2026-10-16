@@ -22,8 +22,9 @@ Results:
   a timer of at most `T` ms, the read phase of one request ends (408 or timer
   close) no later than `t0 + R + T`, where `t0` is the first byte's time.
   General (all traces), not bounded.
-* `overCapOld` / `overCapSpec`: the read-buffer size cap, with Mojo `Int`
-  wrapping, used by `Flare.Bugs.APP_06`.
+* `overCapImpl_eq_spec`: the read-buffer size cap, computed in Mojo `Int`,
+  agrees with `len > maxH + maxB` on mathematical integers within the
+  ranges `check` admits.
 -/
 namespace Flare.L4.ServerConfig
 
@@ -31,7 +32,7 @@ namespace Flare.L4.ServerConfig
 machine read. Mojo `Int` fields are modelled as `Int` (their values in a
 checked config fit `Int64`; the one place where wrapping matters, the size
 cap, is modelled separately with `Int64`).
-mirrors flare/http/_server/config.mojo:132-144 @59bda50 -/
+mirrors flare/http/_server/config.mojo#ServerConfig sha=11a628565000 at=59bda50f -/
 structure Cfg where
   readBufferSize : Int
   maxHeaderSize : Int
@@ -47,7 +48,7 @@ structure Cfg where
   deriving DecidableEq, Repr
 
 /-- Defaults of `ServerConfig.__init__`.
-mirrors flare/http/_server/config.mojo:206-221 @59bda50 -/
+mirrors flare/http/_server/config.mojo#ServerConfig.__init__ sha=7b376366d39e at=59bda50f -/
 def default : Cfg where
   readBufferSize := 8192
   maxHeaderSize := 8192
@@ -62,7 +63,7 @@ def default : Cfg where
   requestTimeoutMs := 60000
 
 /-- `ServerConfig.check`: the conjunction of its `comptime assert`s.
-mirrors flare/http/_server/config.mojo:276-329 @59bda50 -/
+mirrors flare/http/_server/config.mojo#ServerConfig.check sha=c7f0bc31b1bd at=59bda50f -/
 def check (c : Cfg) : Prop :=
   c.readBufferSize > 0 ∧ c.maxHeaderSize > 0 ∧ c.maxUriLength > 0 ∧
   c.maxBodySize ≥ c.maxHeaderSize ∧ c.maxKeepaliveRequests ≥ 1 ∧
@@ -84,22 +85,22 @@ theorem check_maxKA (c : Cfg) (h : check c) : 1 ≤ c.maxKeepaliveRequests := h.
 /-! ## Timer instructions issued by the machine -/
 
 /-- Head still arriving: `idle_timeout_ms`.
-mirrors flare/http/_reactor/conn_handle.mojo:614-620 @59bda50 -/
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._check_request_complete sha=957ed00fab21 at=59bda50f -/
 def headTimer (c : Cfg) : Int := c.idleTimeoutMs
 
 /-- Body still arriving: `body_timeout_ms if body_timeout_ms > 0 else
 idle_timeout_ms`, with `body_timeout_ms = read_body_timeout_ms` from every
 `on_readable*` reader except the static one.
-mirrors flare/http/_reactor/conn_handle.mojo:667-691 @59bda50 -/
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._check_request_complete sha=957ed00fab21 at=59bda50f -/
 def bodyTimer (c : Cfg) : Int :=
   if c.readBodyTimeoutMs > 0 then c.readBodyTimeoutMs else c.idleTimeoutMs
 
 /-- Partial write / stream yield: `write_timeout_ms`.
-mirrors flare/http/_reactor/conn_handle.mojo:1314-1320 @59bda50 -/
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle.on_writable sha=97ab3b583fa2 at=59bda50f -/
 def writeTimer (c : Cfg) : Int := c.writeTimeoutMs
 
 /-- Flushed, back to keep-alive reading: `idle_timeout_ms`.
-mirrors flare/http/_reactor/conn_handle.mojo:1370-1375 @59bda50 -/
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle.on_writable sha=97ab3b583fa2 at=59bda50f -/
 def keepaliveTimer (c : Cfg) : Int := c.idleTimeoutMs
 
 /-- Under `check` no phase issues the "leave unchanged" instruction (`-1`
@@ -138,7 +139,7 @@ with at most `T` ms on every read) closes the connection when it fires. -/
 `last` the previous readable event, and the list the later readable event
 times. Each event either comes after the armed timer fired (close at
 `last + T`), trips the absolute budget (408 at `t`), or re-arms.
-mirrors flare/http/_reactor/conn_handle.mojo:598-605,614-620,681-691 @59bda50 -/
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._check_request_complete sha=957ed00fab21 at=59bda50f -/
 def closeTime (R T t0 last : Nat) : List Nat → Nat
   | [] => last + T
   | t :: ts =>
@@ -168,13 +169,6 @@ theorem closeTime_le (R T t0 : Nat) :
 
 /-! ## The read-buffer size cap -/
 
-/-- The cap test before the APP-06 fix: `len(self.read_buf) >
-config.max_header_size + config.max_body_size`, in Mojo `Int` (wrapping
-`Int64`).
-mirrors flare/http/_reactor/conn_handle.mojo:448-453 @59bda50
-(identical at 492-497 and 536-541) -/
-def overCapOld (len maxH maxB : Int64) : Bool := len > maxH + maxB
-
 /-- Intended meaning, on mathematical integers: the buffer is larger than
 the largest legal head plus the largest legal body. -/
 def overCapSpec (len maxH maxB : Int) : Bool := decide (len > maxH + maxB)
@@ -182,7 +176,7 @@ def overCapSpec (len maxH maxB : Int) : Bool := decide (len > maxH + maxB)
 /-- The cap test as shipped (fixed, APP-06): `len(self.read_buf) -
 config.max_header_size > config.max_body_size` at all three sites of
 conn_handle.mojo (and `_parse_http_request`).
-mirrors flare/http/_reactor/conn_handle.mojo:460-463, 505-508, 550-553 (fixed,
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._drain_recv+ConnHandle._drain_recv_tls+ConnHandle._append_pre_recv_bytes sha=4e37fd784ade at=a6e41b3e (fixed,
 APP-06) -/
 def overCapImpl (len maxH maxB : Int64) : Bool := len - maxH > maxB
 

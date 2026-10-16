@@ -20,10 +20,9 @@ A worker of every flare server loop that `Scheduler` runs is
 * `clean`: after the loop, the worker's own teardown (force-close of its
   connections, `WORKER_STAT_DONE`), then `done`.
 
-The kernel ends a `poll` (label `k i`). With a capped wait it can always do
-so (`Cfg.capped`: the timeout argument is at most the cap,
-`pollTimeout_le_cap`); with an uncapped wait only a completion can, which
-needs traffic (`TS.traffic`).
+The kernel ends a `poll` (label `k i`); every loop's wait has a timeout of
+at most the cap (`pollTimeout_le_cap`; the io_uring loops pass
+`URING_STOP_POLL_MS` to `io_uring_enter`, CONC-07), so it always can.
 
 The teardown thread is `Scheduler.shutdown` (`flare/runtime/scheduler.mojo:746-760`)
 or `drain(D)` (:778-901) with the CONC-05 fix applied; that fix moves the
@@ -49,16 +48,13 @@ Under them every worker is `done` within `bound P = cap + ε + σ + η + σ + τ
 of the stop (`worker_done_by`), `shutdown` and `drain` finish within
 `bound P + (n + w + 2)·σ` (`teardown_done_by`, `w` = 1 for drain), and a
 drain whose deadline exceeds `bound P` detaches no worker (`drain_joins_all`).
-`Flare.Bugs.CONC_07` shows the pre-fix io_uring buffer-ring loop did not
-satisfy `PollReturns` and that without it no bound exists; the shipped loop
-bounds its wait with `io_uring_enter`'s timeout (`capped`).
 -/
 namespace Flare.L5.Timed
 
 /-- `_poll_timeout_ms` on naturals: `nf` is `wheel.next_fire_ms()` (at most
 the wheel's tick plus 2^32, so `nf - now` fits an `Int`), `now` is
 `_monotonic_ms()`.
-mirrors flare/http/_reactor/lifecycle.mojo:31-47 @59bda50 -/
+mirrors flare/http/_reactor/lifecycle.mojo#_poll_timeout_ms sha=daa578780fe3 at=59bda50f -/
 def pollTimeout (nf now cap : Nat) : Nat :=
   if nf ≤ now then 1 else if nf - now < cap then nf - now else cap
 
@@ -73,8 +69,8 @@ theorem pollTimeout_pos (nf now cap : Nat) (h : 1 ≤ cap) : 1 ≤ pollTimeout n
   · split <;> omega
 
 /-- Worker phase.
-mirrors flare/http/_server_reactor_epoll.mojo:150-266 and
-flare/http/_server_reactor_uring.mojo:842-981 @59bda50 -/
+mirrors flare/http/_server_reactor_epoll.mojo#_run_handler_loop_impl sha=1465c17e48c9 at=193ddcec and
+flare/http/_server_reactor_uring.mojo#run_uring_bufring_reactor_loop_shared sha=eec8fc1931de at=59bda50f -/
 inductive TPc where
   | reg | check | poll | ready | batch | clean | done
   deriving DecidableEq, Repr
@@ -86,7 +82,7 @@ structure TW where
   deriving DecidableEq, Repr
 
 /-- Teardown thread; the argument is the time the phase was entered.
-mirrors flare/runtime/scheduler.mojo:746-760,815-901 @59bda50 -/
+mirrors flare/runtime/scheduler.mojo#Scheduler.shutdown+Scheduler.drain sha=5d2b1769fbd6 at=59bda50f -/
 inductive MPc where
   | sig
   | wait (t : Nat)
@@ -101,14 +97,11 @@ structure TS where
   ws : List TW
   m : MPc
   snap : List Bool
-  traffic : Bool
   deriving DecidableEq, Repr
 
-/-- `capped`: the loop's wait has a timeout of at most the cap (every
-epoll/kqueue loop); `drain = some D`: `drain(D)` with `D > 0`, `none`:
-`shutdown()` / `drain(timeout_ms <= 0)`. -/
+/-- `drain = some D`: `drain(D)` with `D > 0`, `none`: `shutdown()` /
+`drain(timeout_ms <= 0)`. -/
 structure Cfg where
-  capped : Bool
   drain : Option Nat
   deriving DecidableEq, Repr
 
@@ -132,10 +125,10 @@ def isDone (w : TW) : Bool := decide (w.pc = .done)
 
 def allDone (s : TS) : Bool := s.ws.all isDone
 
-def init (n : Nat) (tr : Bool) : TS := ⟨0, none, List.replicate n ⟨.reg, 0⟩, .sig, [], tr⟩
+def init (n : Nat) : TS := ⟨0, none, List.replicate n ⟨.reg, 0⟩, .sig, []⟩
 
 /-- Next phase on a worker's own step (`poll` is ended by the kernel).
-mirrors flare/http/_server_reactor_epoll.mojo:155-266 @59bda50 -/
+mirrors flare/http/_server_reactor_epoll.mojo#_run_handler_loop_impl sha=1465c17e48c9 at=59bda50f -/
 def wNext (stop : Option Nat) : TPc → Option TPc
   | .reg => some .check
   | .check => some (if stop.isSome then .clean else .poll)
@@ -145,7 +138,7 @@ def wNext (stop : Option Nat) : TPc → Option TPc
   | .clean => some .done
   | .done => none
 
-/-- mirrors flare/runtime/scheduler.mojo:829-862,890-900 @59bda50 -/
+/-- mirrors flare/runtime/scheduler.mojo#Scheduler.drain sha=df979eac331a at=59bda50f -/
 def mStep (c : Cfg) (s : TS) : Option TS :=
   match s.m with
   | .sig => none
@@ -166,10 +159,10 @@ def mStep (c : Cfg) (s : TS) : Option TS :=
   | .free _ => some { s with m := .fin s.now }
   | .fin _ => none
 
-/-- mirrors flare/http/_server_reactor_epoll.mojo:155-266,
-flare/http/_server_reactor_uring.mojo:856-998 (fixed, CONC-07: `poll` takes
+/-- mirrors flare/http/_server_reactor_epoll.mojo#_run_handler_loop_impl sha=1465c17e48c9 at=193ddcec,
+flare/http/_server_reactor_uring.mojo#run_uring_bufring_reactor_loop_shared sha=375dfd9f0074 at=0741fc9e (fixed, CONC-07: `poll` takes
 `URING_STOP_POLL_MS`) and
-flare/runtime/scheduler.mojo:655-668,746-760,815-901 @59bda50 -/
+flare/runtime/scheduler.mojo#Scheduler._signal_stop+Scheduler.shutdown+Scheduler.drain sha=4687296db41d at=ea1b9282 -/
 def step (c : Cfg) (s : TS) : Lbl → Option TS
   | .tick => some { s with now := s.now + 1 }
   | .w i =>
@@ -180,7 +173,7 @@ def step (c : Cfg) (s : TS) : Lbl → Option TS
     match s.ws[i]? with
     | none => none
     | some w =>
-      if w.pc = .poll ∧ (c.capped = true ∨ s.traffic = true) then
+      if w.pc = .poll then
         some { s with ws := s.ws.set i ⟨.ready, s.now⟩ }
       else none
   | .sig =>
@@ -235,7 +228,7 @@ def Hyp (P : Params) (c : Cfg) (s : TS) : Prop :=
 
 /-- The runs in which every state satisfies `H`. -/
 def ltsH (c : Cfg) (H : TS → Prop) (n : Nat) : LTS TS Lbl where
-  init s := ∃ tr, s = init n tr
+  init s := s = init n
   step s l s' := step c s l = some s' ∧ H s ∧ H s'
 
 /-- The per-worker bound after the stop. -/
@@ -330,12 +323,12 @@ def J (P : Params) (c : Cfg) (n : Nat) (s : TS) : Prop :=
 theorem mem_set {l : List TW} {i : Nat} {a w : TW} (h : w ∈ l.set i a) : w ∈ l ∨ w = a :=
   List.mem_or_eq_of_mem_set h
 
-theorem hyp_init (P : Params) (c : Cfg) (n : Nat) (tr : Bool) : Hyp P c (init n tr) := by
+theorem hyp_init (P : Params) (c : Cfg) (n : Nat) : Hyp P c (init n) := by
   refine ⟨?_, ?_, trivial, ?_, ?_⟩ <;> intro w hw <;>
     simp only [init, List.mem_replicate] at hw <;> obtain ⟨-, rfl⟩ := hw <;> simp [init]
 
-theorem J_init (P : Params) (c : Cfg) (n : Nat) (tr : Bool) : J P c n (init n tr) := by
-  refine ⟨⟨?_, ?_⟩, ⟨by simp [init], by simp [init], ?_, ?_, ?_, ?_, ?_⟩, hyp_init P c n tr⟩
+theorem J_init (P : Params) (c : Cfg) (n : Nat) : J P c n (init n) := by
+  refine ⟨⟨?_, ?_⟩, ⟨by simp [init], by simp [init], ?_, ?_, ?_, ?_, ?_⟩, hyp_init P c n⟩
   · intro w hw; simp only [init, List.mem_replicate] at hw; obtain ⟨-, rfl⟩ := hw; simp [init]
   · intro t0 h; simp [init] at h
   · intro t h; simp [init] at h
@@ -418,9 +411,9 @@ theorem invW_step (P : Params) (c : Cfg) (s s' : TS) (l : Lbl) (I : InvW P s) (h
           rcases mem_set hx with hx | rfl
           · exact I.2 t0 hs x hx
           · have hwm := List.mem_of_getElem? hw
-            have h1 := h.1 w hwm hc.1
+            have h1 := h.1 w hwm hc
             have h2 := I.2 t0 hs w hwm
-            rw [hc.1] at h2
+            rw [hc] at h2
             simp only [rem, bound] at h1 h2 ⊢; omega
       · cases hst
   | sig =>
@@ -613,7 +606,7 @@ theorem J_step (P : Params) (c : Cfg) (n : Nat) (s s' : TS) (l : Lbl) (hJ : J P 
   · exact invM_other P c n s s' l hJ.2.1 hl hst
 
 theorem J_inductive (P : Params) (c : Cfg) (n : Nat) : (ltsH c (Hyp P c) n).Inductive (J P c n) where
-  init := by rintro s ⟨tr, rfl⟩; exact J_init P c n tr
+  init := by rintro s rfl; exact J_init P c n
   step := fun s l s' hJ ⟨hst, _, h'⟩ => J_step P c n s s' l hJ hst h'
 
 /-! ## Headline properties -/
@@ -744,12 +737,12 @@ def traceTight : List Lbl :=
    .tick, .w 0]
 
 theorem traceTight_result :
-    execH pEx ⟨true, none⟩ (init 1 false) traceTight =
-      some ⟨7, some 0, [⟨.done, 7⟩], .pass 0 0, [], false⟩ := by decide
+    execH pEx ⟨none⟩ (init 1) traceTight =
+      some ⟨7, some 0, [⟨.done, 7⟩], .pass 0 0, []⟩ := by decide
 
-theorem bound_tight : ∃ s, (ltsH ⟨true, none⟩ (Hyp pEx ⟨true, none⟩) 1).Reachable s ∧
+theorem bound_tight : ∃ s, (ltsH ⟨none⟩ (Hyp pEx ⟨none⟩) 1).Reachable s ∧
     s.stop = some 0 ∧ s.now = bound pEx ∧ s.ws = [⟨.done, bound pEx⟩] :=
-  ⟨_, ⟨_, traceTight, ⟨false, rfl⟩, (run_of_execH pEx _ 1 _ _ _ traceTight_result).2.2⟩,
+  ⟨_, ⟨_, traceTight, rfl, (run_of_execH pEx _ 1 _ _ _ traceTight_result).2.2⟩,
     rfl, rfl, rfl⟩
 
 end Flare.L5.Timed

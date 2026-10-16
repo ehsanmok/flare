@@ -23,11 +23,11 @@ def INVALID_FD : Int := -1
 /-! ## Object level -/
 
 /-- A live object's `fd` field after `close()`, and the closes issued.
-mirrors flare/net/socket.mojo:210-218 @59bda50 -/
+mirrors flare/net/socket.mojo#RawSocket.close sha=d5e4cd6ed7a0 at=59bda50f -/
 def close (fd : Int) : Int × Nat := if 0 ≤ fd then (INVALID_FD, 1) else (fd, 0)
 
 /-- Closes issued by `__deinit__` (the object is gone afterwards).
-mirrors flare/net/socket.mojo:200-208 @59bda50 -/
+mirrors flare/net/socket.mojo#RawSocket.__deinit__ sha=882cc1524410 at=59bda50f -/
 def deinit (fd : Int) : Nat := if 0 ≤ fd then 1 else 0
 
 /-- `close()` is idempotent: a second call issues no `close(2)`. -/
@@ -69,7 +69,7 @@ inductive FdOp where
   | wrap | closeHolder | deinitHolder | moveHolder | other
   deriving DecidableEq, Repr
 
-/-- mirrors flare/net/socket.mojo:143-220 @59bda50 -/
+/-- mirrors flare/net/socket.mojo#RawSocket.__init__+RawSocket.__init__@2+RawSocket.__deinit__+RawSocket.close sha=9a576d74735a at=59bda50f -/
 def fdStep (s : FdSt) : FdOp → Option FdSt
   | .wrap => if s.got then none else some { s with holders := s.holders + 1, got := true }
   | .closeHolder => if s.holders = 0 then none
@@ -120,66 +120,12 @@ theorem copy_would_double_close :
     (fdStep s .deinitHolder >>= fun s => fdStep s .deinitHolder) = some ⟨0, 2, true⟩ := by
   decide
 
-/-! ## Scheduler shared-listener patch -/
-
-/-- Scheduler state for the shared listener: the raw copy of the fd kept
-by the scheduler (`_shared_listener_fd`), the fd field of the typed
-`TcpListener`, and the kernel close count of the listener incarnation. -/
-structure Sched where
-  rawFd : Int
-  typedFd : Int
-  closes : Nat
-  deriving DecidableEq, Repr
-
-/-- `_signal_and_close_listener`: close the raw fd and set it to -1.
-mirrors flare/runtime/scheduler.mojo:655-668 @59bda50 -/
-def signalAndClose (s : Sched) : Sched :=
-  if 0 ≤ s.rawFd then { s with rawFd := -1, closes := s.closes + 1 } else s
-
-/-- `_free_resources` for the shared listener: with `patch` (the code at
-@59bda50) it sets the typed fd to -1 when the raw fd was already closed,
-then runs the listener's destructor.
-mirrors flare/runtime/scheduler.mojo:713-725 @59bda50 -/
-def freeResources (patch : Bool) (s : Sched) : Sched :=
-  let s1 := if patch ∧ s.rawFd < 0 then { s with typedFd := -1 } else s
-  { s1 with closes := s1.closes + deinit s1.typedFd }
-
-def signalN : Nat → Sched → Sched
-  | 0, s => s
-  | n + 1, s => signalN n (signalAndClose s)
-
-theorem signalN_fd (n : Nat) (f : Nat) :
-    signalN (n + 1) ⟨f, f, 0⟩ = ⟨-1, f, 1⟩ := by
-  induction n with
-  | zero => simp [signalN, signalAndClose]
-  | succ n ih =>
-    simp only [signalN] at *
-    have : signalAndClose (⟨-1, f, 1⟩ : Sched) = ⟨-1, f, 1⟩ := by simp [signalAndClose]
-    rw [show signalAndClose (signalAndClose ⟨f, f, 0⟩) = signalAndClose ⟨f, f, 0⟩ by
-      simp [signalAndClose]] ; exact ih
-
-/-- With the patch, any number of stop signals followed by the teardown
-closes the listener exactly once. -/
-theorem sched_patch_closes_once (n : Nat) (f : Nat) :
-    (freeResources true (signalN n ⟨f, f, 0⟩)).closes = 1 := by
-  cases n with
-  | zero =>
-    have : ¬ ((f : Int) < 0) := by omega
-    simp [signalN, freeResources, deinit, this]
-  | succ n => rw [signalN_fd]; simp [freeResources, deinit]
-
-/-- Regression guard: without the patch, stop-then-teardown closes the
-listener's fd number twice (the second close hits whatever reused it). -/
-theorem sched_unpatched_double_close (f : Nat) :
-    (freeResources false (signalN 1 ⟨f, f, 0⟩)).closes = 2 := by
-  rw [signalN_fd]; simp [freeResources, deinit]
-
 /-! ## `_set_timeval_opt` -/
 
 /-- `sec = ms // 1000`, `usec = (ms % 1000) * 1000` with Mojo's floor
 division. For the positive divisor 1000, floor division coincides with
 Lean's Euclidean `Int` `/` and `%`.
-mirrors flare/net/socket.mojo:481-509 @59bda50 -/
+mirrors flare/net/socket.mojo#RawSocket._set_timeval_opt sha=95c29df74aff at=59bda50f -/
 def timeval (ms : Int) : Int × Int := (ms / 1000, (ms % 1000) * 1000)
 
 theorem fdiv_eq_ediv (ms : Int) : Int.fdiv ms 1000 = ms / 1000 ∧ Int.fmod ms 1000 = ms % 1000 :=
@@ -214,20 +160,10 @@ inductive AcceptOut where
   | leaked   -- an error was raised before wrapping
   deriving DecidableEq, Repr
 
-/-- Pre-fix `TcpListener.accept` / `accept_fd`: `accept(2)`, then
-`_sockaddr_to_socket_addr` (may raise), then wrap in `RawSocket`, then
-`set_tcp_nodelay` (may raise).
-(flare/tcp/listener.mojo:165-201,248-282 @59bda50) -/
-def acceptImplOld (fd : Int) (decodeOk nodelayOk : Bool) : AcceptOut :=
-  if fd < 0 then .noFd
-  else if ¬ decodeOk then .leaked
-  else if ¬ nodelayOk then .closed
-  else .owned
-
 /-- Shipped `TcpListener.accept` / `accept_fd` through `_adopt_accepted`:
 `accept(2)`, then wrap in `RawSocket`, then the peer decode (may raise; the
 socket's destructor closes the fd), then `set_tcp_nodelay` (may raise).
-mirrors flare/tcp/listener.mojo:62-77, 238, 313 (fixed, NET-05) -/
+mirrors flare/tcp/listener.mojo#_adopt_accepted+TcpListener.accept+accept_fd sha=17e43f931bbf at=2d227425 (fixed, NET-05) -/
 def acceptImpl (fd : Int) (decodeOk nodelayOk : Bool) : AcceptOut :=
   if fd < 0 then .noFd
   else if ¬ decodeOk then .closed
@@ -246,9 +182,5 @@ theorem accept_never_leaks (fd : Int) (d n : Bool) : AcceptSpec (acceptImpl fd d
 /-- The fd is never leaked once it is wrapped (`nodelay` failures are safe). -/
 theorem accept_nodelay_safe (fd : Int) (b : Bool) : acceptImpl fd true b ≠ .leaked :=
   accept_never_leaks fd true b
-
-/-- The reorder changes nothing on the success path. -/
-theorem acceptImpl_agrees (fd : Int) (n : Bool) : acceptImpl fd true n = acceptImplOld fd true n := by
-  simp [acceptImpl, acceptImplOld]
 
 end Flare.L2.Socket

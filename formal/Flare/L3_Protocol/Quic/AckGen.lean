@@ -36,6 +36,8 @@ Results:
   retires exactly the stored numbers when they number at most 256.
 * `drain_after_recv`: after an ack-eliciting packet the next drain emits an
   ACK, and that ACK claims the packet whenever its range is still stored.
+* `never_reaccepts`: over any packet trace, every number already received
+  reads as seen, so no packet is processed twice (QUIC-14).
 -/
 namespace Flare.L3.Quic.AckGen
 open Flare.L3.Quic.AckExpand
@@ -52,17 +54,17 @@ def Canon : Ranges → Prop
   | [p] => p.1 ≤ p.2
   | p :: q :: r => p.1 ≤ p.2 ∧ q.2 + 2 ≤ p.1 ∧ Canon (q :: r)
 
-/-- mirrors flare/quic/_server_support.mojo:96-106 @59bda50 (one insertion
+/-- mirrors flare/quic/_server_support.mojo#_ack_record sha=01a9f005b604 at=59bda50f (one insertion
 step: the element goes after every `low` not greater than its own) -/
 def sortIns (x : Nat × Nat) : Ranges → Ranges
   | [] => [x]
   | y :: ys => if y.1 > x.1 then x :: y :: ys else y :: sortIns x ys
 
-/-- mirrors flare/quic/_server_support.mojo:96-106 @59bda50 -/
+/-- mirrors flare/quic/_server_support.mojo#_ack_record sha=01a9f005b604 at=59bda50f -/
 def isort (l : Ranges) : Ranges := l.foldl (fun acc x => sortIns x acc) []
 
 /-- The merge loop; the accumulator is `(ml, mh)` reversed (head = last).
-mirrors flare/quic/_server_support.mojo:107-115 @59bda50 -/
+mirrors flare/quic/_server_support.mojo#_ack_record sha=01a9f005b604 at=59bda50f -/
 def mergeAcc : Ranges → Ranges → Ranges
   | acc, [] => acc
   | [], x :: r => mergeAcc [x] r
@@ -75,7 +77,7 @@ def cap : Nat := 32
 /-- All merged ranges, descending, before the cap. -/
 def merged (flat : Ranges) (pn : Nat) : Ranges := mergeAcc [] (isort (flat ++ [(pn, pn)]))
 
-/-- mirrors flare/quic/_server_support.mojo:76-124 @59bda50 -/
+/-- mirrors flare/quic/_server_support.mojo#_ack_record sha=01a9f005b604 at=59bda50f -/
 def record (flat : Ranges) (pn : Nat) : Ranges := (merged flat pn).take cap
 
 /-- The tracked state (fixed, QUIC-14): the stored ranges plus the floor, one
@@ -92,24 +94,24 @@ def floorAfter (s : St) (pn : Nat) : Nat :=
   | [] => s.floor
   | q :: _ => max s.floor (q.2 + 1)
 
-/-- mirrors flare/quic/_server_support.mojo `_ack_record` incl. the floor
+/-- mirrors flare/quic/_server_support.mojo#_ack_record sha=427e63a4a77d at=faa8bba1 incl. the floor
 slot (fixed, QUIC-14) -/
 def recordSt (s : St) (pn : Nat) : St :=
   { flat := record s.flat pn, floor := floorAfter s pn }
 
-/-- mirrors flare/quic/_server_support.mojo `_ack_contains` (fixed, QUIC-14):
+/-- mirrors flare/quic/_server_support.mojo#_ack_contains sha=4116dc21abac at=faa8bba1 (fixed, QUIC-14):
 in a stored range, or below the floor -/
 def contains (s : St) (pn : Nat) : Bool :=
   s.flat.any (fun p => decide (p.1 ≤ pn ∧ pn ≤ p.2)) || decide (pn < s.floor)
 
-/-- mirrors flare/quic/_server_support.mojo:127-157 @59bda50 (the ranges
+/-- mirrors flare/quic/_server_support.mojo#_ack_from_ranges sha=e95413c36735 at=59bda50f (the ranges
 below the first, as `(gap, length)`) -/
 def gaps (prevLow : Nat) : Ranges → List (Nat × Nat)
   | [] => []
   | (l, h) :: r => (prevLow - h - 2, h - l) :: gaps l r
 
 /-- `(largest, first_ack_range, ranges)`; `none` is the "empty range set"
-raise. mirrors flare/quic/_server_support.mojo:127-157 @59bda50 -/
+raise. mirrors flare/quic/_server_support.mojo#_ack_from_ranges sha=e95413c36735 at=59bda50f -/
 def fromRanges : Ranges → Option (Nat × Nat × List (Nat × Nat))
   | [] => none
   | (l, h) :: r => some (h, h - l, gaps l r)
@@ -453,21 +455,21 @@ theorem ack_roundtrip (flat : Ranges) (hc : Canon flat) {largest first : Nat}
 
 /-! ## Driver: owe an ACK, emit it on the next drain -/
 
-/-- mirrors flare/quic/server.mojo:364, 844-863 @59bda50 (`rx_1rtt_ranges`,
+/-- mirrors flare/quic/server.mojo#QuicListener+QuicListener._process_one_packet sha=279dffedcf6a at=59bda50f (`rx_1rtt_ranges`,
 `rx_1rtt_ack_pending`) -/
 structure Rx where
   flat : Ranges := []
   floor : Nat := 0
   pending : Bool := false
 
-/-- mirrors flare/quic/server.mojo:844-863 @59bda50 (duplicates dropped,
+/-- mirrors flare/quic/server.mojo#QuicListener._process_one_packet sha=5c17ba2a3a61 at=59bda50f (duplicates dropped,
 then record, then owe an ACK if the packet was ack-eliciting) -/
 def recv (s : Rx) (pn : Nat) (eliciting : Bool) : Rx :=
   if contains ⟨s.flat, s.floor⟩ pn then s
   else { flat := record s.flat pn, floor := floorAfter ⟨s.flat, s.floor⟩ pn,
          pending := s.pending || eliciting }
 
-/-- mirrors flare/quic/server.mojo:2240-2268 @59bda50 -/
+/-- mirrors flare/quic/server.mojo#QuicListener._drain_1rtt_coalesced sha=c4e949b8a1a5 at=59bda50f -/
 def drain (s : Rx) : Option (Nat × Nat × List (Nat × Nat)) × Rx :=
   if s.pending ∧ 2 ≤ 2 * s.flat.length then (fromRanges s.flat, { s with pending := false })
   else (none, s)
@@ -513,5 +515,99 @@ theorem drain_after_recv (s : Rx) (pn : Nat) (hc : Canon s.flat)
       apply (fromRanges_claimed ((l, h) :: r) hrc rfl pn).mpr
       rw [← hr]
       exact (record_exact _ _ hv hcap pn).mpr (.inr rfl)
+
+/-! ## No packet is accepted twice (QUIC-14)
+
+`stepF` is the 1-RTT receive step on the tracked state (server.mojo:844-855):
+a duplicate is dropped, anything else recorded. -/
+
+def stepF (s : St) (pn : Nat) : St := if contains s pn then s else recordSt s pn
+
+def runF (pns : List Nat) : St := pns.foldl stepF {}
+
+def Inv (s : St) (R : List Nat) : Prop := Canon s.flat ∧ ∀ n ∈ R, MemR n s.flat ∨ n < s.floor
+
+theorem contains_of {s : St} {n : Nat} (h : MemR n s.flat ∨ n < s.floor) : contains s n = true := by
+  unfold contains
+  rcases h with ⟨p, hp, hb⟩ | h
+  · simp only [Bool.or_eq_true, List.any_eq_true, decide_eq_true_eq]
+    exact .inl ⟨p, hp, hb⟩
+  · simp [h]
+
+theorem memR_or_floor_of_contains {s : St} {n : Nat} (h : contains s n = true) :
+    MemR n s.flat ∨ n < s.floor := by
+  unfold contains at h
+  simp only [Bool.or_eq_true, List.any_eq_true, decide_eq_true_eq] at h
+  rcases h with ⟨p, hp, hb⟩ | h
+  · exact .inl ⟨p, hp, hb⟩
+  · exact .inr h
+
+theorem drop_head_max : ∀ (l : Ranges) (q : Nat × Nat) (r : Ranges), Canon l → l = q :: r →
+    ∀ x ∈ l, x.2 ≤ q.2 := by
+  intro l q r hc he x hx
+  subst he
+  rcases List.mem_cons.mp hx with rfl | hx
+  · exact Nat.le_refl _
+  · have := canon_below q r hc x hx
+    have := (canon_valid _ hc) q List.mem_cons_self
+    omega
+
+theorem recordSt_inv (s : St) (R : List Nat) (pn : Nat) (h : Inv s R) : Inv (recordSt s pn) (pn :: R) := by
+  have hv := canon_valid _ h.1
+  have hm := merged_inv s.flat pn hv
+  refine ⟨record_canon _ _ hv, fun n hn => ?_⟩
+  have hin : MemR n (merged s.flat pn) ∨ n < s.floor := by
+    rcases List.mem_cons.mp hn with rfl | hn
+    · exact .inl ((hm.2 n).mpr (.inr rfl))
+    · rcases h.2 n hn with h1 | h1
+      · exact .inl ((hm.2 n).mpr (.inl h1))
+      · exact .inr h1
+  have e := List.take_append_drop cap (merged s.flat pn)
+  rcases hin with ⟨p, hp, hb⟩ | hlt
+  · rw [← e] at hp
+    rcases List.mem_append.mp hp with hp | hp
+    · exact .inl ⟨p, hp, hb⟩
+    · right
+      simp only [recordSt, floorAfter]
+      have hcd := canon_drop _ cap hm.1
+      generalize hd : (merged s.flat pn).drop cap = d at hp hcd
+      cases d with
+      | nil => cases hp
+      | cons q r =>
+        have := drop_head_max (q :: r) q r hcd rfl p hp
+        simp only; omega
+  · right
+    simp only [recordSt, floorAfter]
+    split <;> omega
+
+theorem stepF_inv (s : St) (R : List Nat) (pn : Nat) (h : Inv s R) : Inv (stepF s pn) (pn :: R) := by
+  unfold stepF
+  split
+  · rename_i hc
+    refine ⟨h.1, fun n hn => ?_⟩
+    rcases List.mem_cons.mp hn with rfl | hn
+    · exact memR_or_floor_of_contains hc
+    · exact h.2 n hn
+  · exact recordSt_inv s R pn h
+
+theorem runF_go (pns : List Nat) : ∀ (s : St) (R : List Nat), Inv s R →
+    Inv (pns.foldl stepF s) (pns.reverse ++ R) := by
+  induction pns with
+  | nil => intro s R h; simpa using h
+  | cons p ps ih =>
+    intro s R h
+    have := ih (stepF s p) (p :: R) (stepF_inv s R p h)
+    simpa using this
+
+/-- **No packet is processed twice** (QUIC-14): over any packet trace, every
+packet number already received reads as seen. -/
+theorem never_reaccepts (pns : List Nat) : ∀ n ∈ pns, contains (runF pns) n = true := by
+  intro n hn
+  have := (runF_go pns {} [] ⟨trivial, fun _ h => by cases h⟩).2 n (by simpa using hn)
+  exact contains_of this
+
+/-- The floor does not change the stored ranges, and so every ACK frame
+sent. -/
+theorem recordSt_flat (s : St) (pn : Nat) : (recordSt s pn).flat = record s.flat pn := rfl
 
 end Flare.L3.Quic.AckGen

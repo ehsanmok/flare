@@ -9,9 +9,8 @@ Addresses are an abstract type `α` with a family test `isV6` (`IpAddr.is_v6`).
 RFC 8305 §4 (with a First Address Family Count of 1) asks for an
 interleaving that starts with the family of the *first address of the sorted
 input* ("Whichever address family is first in the list should be followed by
-an address of the other address family"). Before the fix (NET-10) flare
-always started with IPv6 (`orderOld`); the shipped `order` starts with the
-family of `addrs[0]`.
+an address of the other address family"). `order` starts with the family of
+`addrs[0]`.
 
 Proved here:
 * `order_eq`: the Mojo loops compute `inter` of the two family sublists, the
@@ -40,23 +39,17 @@ def inter : List α → List α → List α
     inter (a :: as) (b :: bs) = a :: b :: inter as bs := rfl
 
 /-- one iteration of the family split loop.
-mirrors flare/dns/async_resolve.mojo:168-174 (fixed, NET-10) -/
+mirrors flare/dns/async_resolve.mojo#order_happy_eyeballs sha=b2647607cc1a at=5019eb41 (fixed, NET-10) -/
 def splitStep (p : List α × List α) (a : α) : List α × List α :=
   if isV6 a then (p.1 ++ [a], p.2) else (p.1, p.2 ++ [a])
 
 /-- the interleaving loop (`while i < len(first) or i < len(second)`).
-mirrors flare/dns/async_resolve.mojo:179-185 (fixed, NET-10) -/
+mirrors flare/dns/async_resolve.mojo#order_happy_eyeballs sha=b2647607cc1a at=5019eb41 (fixed, NET-10) -/
 def loop (v6 v4 : List α) (out : List α) (i : Nat) : List α :=
   if i < v6.length ∨ i < v4.length then
     loop v6 v4 (out ++ v6[i]?.toList ++ v4[i]?.toList) (i + 1)
   else out
 termination_by v6.length + v4.length - i
-
-/-- Pre-fix `order_happy_eyeballs`: always IPv6 first
-(flare/dns/async_resolve.mojo:154-177 @59bda50). -/
-def orderOld (addrs : List α) : List α :=
-  let p := addrs.foldl (splitStep isV6) ([], [])
-  loop p.1 p.2 [] 0
 
 /-- `first_v6 = len(addrs) == 0 or addrs[0].is_v6()` -/
 def v6First (addrs : List α) : Bool :=
@@ -65,7 +58,7 @@ def v6First (addrs : List α) : Bool :=
   | a :: _ => isV6 a
 
 /-- the shipped `order_happy_eyeballs`: the family of `addrs[0]` goes first.
-mirrors flare/dns/async_resolve.mojo:155-186 (fixed, NET-10) -/
+mirrors flare/dns/async_resolve.mojo#order_happy_eyeballs sha=b2647607cc1a at=5019eb41 (fixed, NET-10) -/
 def order (addrs : List α) : List α :=
   let p := addrs.foldl (splitStep isV6) ([], [])
   if v6First isV6 addrs then loop p.1 p.2 [] 0 else loop p.2 p.1 [] 0

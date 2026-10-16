@@ -41,7 +41,7 @@ inductive Kind | os | asyncrt
 inductive OsT | joinable | detached | reaped
   deriving DecidableEq, Repr
 
-/-- mirrors flare/runtime/_thread.mojo:118-128 @59bda50 -/
+/-- mirrors flare/runtime/_thread.mojo#ThreadHandle+ThreadHandle.__init__ sha=67a6aeb0b9e6 at=59bda50f -/
 structure Handle where
   tid : Nat
   kind : Kind
@@ -97,7 +97,7 @@ def init (k : Kind) : St :=
 def ubIf (o : OsT) : Nat := if o = .joinable then 0 else 1
 
 /-- `ThreadHandle.join` on slot `x`.
-mirrors flare/runtime/_thread.mojo:211-244 @59bda50 -/
+mirrors flare/runtime/_thread.mojo#ThreadHandle.join sha=5cb766cbb025 at=59bda50f -/
 def join (s : St) (x : Slot) (ok : Bool) : Option St :=
   match s.get x with
   | none => none
@@ -112,7 +112,7 @@ def join (s : St) (x : Slot) (ok : Bool) : Option St :=
         else some { s with ub := s.ub + ubIf s.os }
 
 /-- `ThreadHandle.detach` on slot `x`.
-mirrors flare/runtime/_thread.mojo:246-274 @59bda50 -/
+mirrors flare/runtime/_thread.mojo#ThreadHandle.detach sha=435ba7b6fec3 at=59bda50f -/
 def detach (s : St) (x : Slot) (ok : Bool) : Option St :=
   match s.get x with
   | none => none
@@ -128,7 +128,7 @@ def detach (s : St) (x : Slot) (ok : Bool) : Option St :=
 
 /-- `ThreadHandle.pin_to_cpu`: no-op for AsyncRT and on macOS; on Linux it
 passes `_thread_id` to `pthread_setaffinity_np` with no zero check.
-mirrors flare/runtime/_thread.mojo:289-346 @59bda50 -/
+mirrors flare/runtime/_thread.mojo#ThreadHandle.pin_to_cpu sha=9946598960b4 at=59bda50f -/
 def pin (c : Cfg) (s : St) (x : Slot) : Option St :=
   match s.get x with
   | none => none
@@ -140,7 +140,7 @@ def pin (c : Cfg) (s : St) (x : Slot) : Option St :=
 /-- Executable step. `waitStarted` has no effect at this level (its cell
 access is modelled in `Flare.L5.AsyncRT`, guarded by `tid ≠ 0`,
 `_thread.mojo:286`).
-mirrors flare/runtime/_thread.mojo:211-346 @59bda50 -/
+mirrors flare/runtime/_thread.mojo#ThreadHandle.join+ThreadHandle.detach+ThreadHandle.wait_started+ThreadHandle.pin_to_cpu sha=99adff35e2c1 at=59bda50f -/
 def stepFn (c : Cfg) (s : St) : Ev → Option St
   | .join x ok => join s x ok
   | .detach x ok => detach s x ok

@@ -24,7 +24,7 @@ flare/http/_reactor/keepalive_scan.mojo, as an LTS over socket events.
   `serialize_response_into` are modelled separately in `Framing` below.
 * **Handler.** `handlerOk r` says whether the handler returns or raises;
   `closeAfter r` is the request's own close verdict (`_compute_close_after`
-  or `_wants_close`, modelled in `Flare.Bugs.APP_02/03`); `wsMismatch r`
+  or `_wants_close`, modelled in `Flare.L4.KeepAlive`); `wsMismatch r`
   is `config.ws.handler and _is_ws_version_mismatch(req)`.
 * **Kernel.** `kq` is the socket receive queue and `kfin` a pending FIN.
   `on_readable` drains `kq` completely (the recv loop runs to EAGAIN). No
@@ -120,7 +120,7 @@ inductive Ev where
 variable {Req : Type}
 
 /-- `ConnHandle.__init__`: STATE_READING, empty buffers.
-mirrors flare/http/_reactor/conn_handle.mojo:354-398 @59bda50 -/
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle.__init__ sha=18d3cdecb1ea at=59bda50f -/
 def init : St Req :=
   { phase := .reading, kq := [], kfin := false, rbuf := [], wbuf := [], wpos := 0,
     ka := 0, shouldClose := false, peerEof := false, done := false,
@@ -132,7 +132,7 @@ def segBytes (s : St Req) : Bytes := (s.segs.map Prod.fst).flatten
 
 /-- `_queue_error` then `_transition_to_writing`: mark close, queue a
 `Connection: close` error response, enter STATE_WRITING.
-mirrors flare/http/_reactor/conn_handle.mojo:1576-1580,1423-1435 @59bda50 -/
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._queue_error+ConnHandle._transition_to_writing sha=61246098d8c2 at=59bda50f -/
 def queueError (P : Params Req) (s : St Req) (o : Out Req) : St Req :=
   { s with shouldClose := true, wbuf := P.ser o, wpos := 0, phase := .writing,
            log := s.log ++ [o] }
@@ -140,27 +140,25 @@ def queueError (P : Params Req) (s : St Req) (o : Out Req) : St Req :=
 /-- `_finalise_response` (buffered path): drop the request's bytes from
 `read_buf`, serialise, enter STATE_WRITING. `close_after` only selects the
 `Connection:` header; `should_close` is not touched here.
-mirrors flare/http/_reactor/conn_handle.mojo:718-756 @59bda50 -/
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._finalise_response sha=fcbd41c49646 at=59bda50f -/
 def finalise (P : Params Req) (s : St Req) (r : Req) (n : Nat) (o : Out Req) : St Req :=
   { s with rbuf := s.rbuf.drop n, segs := s.segs ++ [(s.rbuf.take n, r)],
            wbuf := P.ser o, wpos := 0, phase := .writing, log := s.log ++ [o] }
 
 /-- `_apply_keepalive_policy`.
-mirrors flare/http/_reactor/conn_handle.mojo:697-715 @59bda50 -/
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._apply_keepalive_policy sha=6e7198fb1192 at=59bda50f -/
 def applyKA (P : Params Req) (s : St Req) (closeAfter : Bool) : St Req × Bool :=
   let final := closeAfter || decide (P.maxKA ≤ s.ka + 1) || !P.keepAlive || s.peerEof
   ({ s with ka := s.ka + 1, shouldClose := final }, final)
 
 /-- Dispatch of a complete request in `on_readable`: the WebSocket
 version-mismatch branch (426), else keep-alive policy then handler, with a
-raising handler mapped through `_queue_error`. `fix = true` is the shipped
-code (`should_close = True` on the 426 branch, APP-01 fixed); `fix = false` is
-the pre-fix code, kept so the counterexample in `Flare.Bugs.APP_01` stays
-checkable.
-mirrors flare/http/_reactor/conn_handle.mojo:846-860,911-920 (fixed, APP-01) -/
-def dispatch (fix : Bool) (P : Params Req) (s : St Req) (r : Req) (n : Nat) : St Req :=
+raising handler mapped through `_queue_error`. The 426 branch sets
+`should_close = True` (APP-01).
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle.on_readable sha=6b5ecbe7bfb5 at=82abed98 (fixed, APP-01) -/
+def dispatch (P : Params Req) (s : St Req) (r : Req) (n : Nat) : St Req :=
   if P.wsMismatch r then
-    finalise P (if fix then { s with shouldClose := true } else s) r n ⟨some r, .ws426, false⟩
+    finalise P { s with shouldClose := true } r n ⟨some r, .ws426, false⟩
   else
     let s1 := (applyKA P s (P.closeAfter r)).1
     let final := (applyKA P s (P.closeAfter r)).2
@@ -171,37 +169,37 @@ def dispatch (fix : Bool) (P : Params Req) (s : St Req) (r : Req) (n : Nat) : St
 
 /-- `_check_request_complete` (request budget, then framing) followed by
 dispatch.
-mirrors flare/http/_reactor/conn_handle.mojo:579-695 @59bda50 -/
-def parse (fix : Bool) (P : Params Req) (late : Bool) (s : St Req) : St Req :=
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._check_request_complete sha=957ed00fab21 at=59bda50f -/
+def parse (P : Params Req) (late : Bool) (s : St Req) : St Req :=
   if late && !s.rbuf.isEmpty then queueError P s ⟨none, .err 408, false⟩
   else match P.frame s.rbuf with
     | .needMore => s
     | .error st => queueError P s ⟨none, .err st, false⟩
-    | .complete r n => dispatch fix P s r n
+    | .complete r n => dispatch P s r n
 
 /-- The recv loop of `_drain_recv`: move the kernel queue into `read_buf`.
-mirrors flare/http/_reactor/conn_handle.mojo:439-477 @59bda50 -/
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._drain_recv sha=567b9225ed3d at=59bda50f -/
 @[simp] def drained (s : St Req) : St Req := { s with rbuf := s.rbuf ++ s.kq, kq := [] }
 
 /-- `on_readable`: ignored outside STATE_READING; drain the socket
 (`_drain_recv`: size cap, FIN handling with the half-close rule), then parse.
-mirrors flare/http/_reactor/conn_handle.mojo:760-916,422-477 @59bda50 -/
-def onReadable (fix : Bool) (P : Params Req) (late : Bool) (s : St Req) : St Req :=
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle.on_readable+ConnHandle._drain_recv sha=6f002e5773fb at=59bda50f -/
+def onReadable (P : Params Req) (late : Bool) (s : St Req) : St Req :=
   if s.phase ≠ .reading then s
   else if !s.kq.isEmpty && decide (P.cap < (s.rbuf ++ s.kq).length) then
     queueError P (drained s) ⟨none, .err 413, false⟩
   else if s.kfin then
     if P.hasBuf (s.rbuf ++ s.kq) then
-      parse fix P late { drained s with shouldClose := true, peerEof := true }
+      parse P late { drained s with shouldClose := true, peerEof := true }
     else { drained s with shouldClose := true, done := true }
-  else parse fix P late (drained s)
+  else parse P late (drained s)
 
 /-- Bytes one `send` accepts: at most the kernel's `n`, at most what remains. -/
 def sendN (n : Nat) (s : St Req) : Nat := min n (s.wbuf.length - s.wpos)
 
 /-- `on_writable` (buffered path): send up to `n` bytes (`n = 0` is EAGAIN);
 partial → stay; flushed → close if `should_close`, else back to reading.
-mirrors flare/http/_reactor/conn_handle.mojo:1262-1375 @59bda50 -/
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle.on_writable sha=97ab3b583fa2 at=59bda50f -/
 def onWritable (_P : Params Req) (n : Nat) (s : St Req) : St Req :=
   if s.phase ≠ .writing then s
   else if s.wpos + sendN n s < s.wbuf.length then
@@ -214,45 +212,45 @@ def onWritable (_P : Params Req) (n : Nat) (s : St Req) : St Req :=
              phase := .reading }
 
 /-- `on_timeout`: unconditionally STATE_CLOSING, `should_close`, `done`.
-mirrors flare/http/_reactor/conn_handle.mojo:1403-1411 @59bda50 -/
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle.on_timeout sha=e0ff0b90f83c at=59bda50f -/
 def onTimeout (s : St Req) : St Req :=
   { s with phase := .closing, shouldClose := true, done := true }
 
 /-- One event delivered to the handle (methods of `ConnHandle`, plus the
 kernel's receive queue).
-mirrors flare/http/_reactor/conn_handle.mojo:760,1262,1403 @59bda50 -/
-def stepCH (fix : Bool) (P : Params Req) (s : St Req) : Ev → St Req
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle.on_readable+ConnHandle.on_writable+ConnHandle.on_timeout sha=f0b2300fa218 at=59bda50f -/
+def stepCH (P : Params Req) (s : St Req) : Ev → St Req
   | .arrive b => if s.kfin then s else { s with kq := s.kq ++ b, inp := s.inp ++ b }
   | .fin => { s with kfin := true }
-  | .readable late => onReadable fix P late s
+  | .readable late => onReadable P late s
   | .writable n => onWritable P n s
   | .timeout => onTimeout s
   | .ioError => { s with shouldClose := true, done := true }
 
 /-- The reactor frees the handle once a step returns `done`
 (`_cleanup_conn`), so a done handle sees no further events. -/
-def step (fix : Bool) (P : Params Req) (s : St Req) (e : Ev) : St Req :=
-  if s.done then s else stepCH fix P s e
+def step (P : Params Req) (s : St Req) (e : Ev) : St Req :=
+  if s.done then s else stepCH P s e
 
-def lts (fix : Bool) (P : Params Req) : LTS (St Req) Ev :=
-  LTS.ofFn (· = init) (fun s e => some (step fix P s e))
+def lts (P : Params Req) : LTS (St Req) Ev :=
+  LTS.ofFn (· = init) (fun s e => some (step P s e))
 
-theorem lts_step_iff (fix : Bool) (P : Params Req) (s s' : St Req) (e : Ev) :
-    (lts fix P).step s e s' ↔ step fix P s e = s' := by
+theorem lts_step_iff (P : Params Req) (s s' : St Req) (e : Ev) :
+    (lts P).step s e s' ↔ step P s e = s' := by
   simp [lts, LTS.ofFn]
 
-def run (fix : Bool) (P : Params Req) (s : St Req) (es : List Ev) : St Req :=
-  es.foldl (step fix P) s
+def run (P : Params Req) (s : St Req) (es : List Ev) : St Req :=
+  es.foldl (step P) s
 
-theorem run_run (fix : Bool) (P : Params Req) :
-    ∀ (es : List Ev) (s : St Req), (lts fix P).Run s es (run fix P s es)
+theorem run_run (P : Params Req) :
+    ∀ (es : List Ev) (s : St Req), (lts P).Run s es (run P s es)
   | [], s => .nil s
-  | e :: es, s => .cons ((lts_step_iff fix P _ _ e).2 rfl) (run_run fix P es (step fix P s e))
+  | e :: es, s => .cons ((lts_step_iff P _ _ e).2 rfl) (run_run P es (step P s e))
 
 /-- Every state the executable machine reaches from `init` is reachable. -/
-theorem reachable_run (fix : Bool) (P : Params Req) (es : List Ev) :
-    (lts fix P).Reachable (run fix P init es) :=
-  ⟨init, es, rfl, run_run fix P es init⟩
+theorem reachable_run (P : Params Req) (es : List Ev) :
+    (lts P).Reachable (run P init es) :=
+  ⟨init, es, rfl, run_run P es init⟩
 
 /-! ## Invariant -/
 
@@ -356,15 +354,14 @@ theorem inv_queueError (P : Params Req) (hP : Oracle.WF P) (s : St Req) (o : Out
   inv_enter_writing P hP s _ o hb (.none rfl rfl ho) rfl rfl rfl rfl rfl rfl rfl hka
     (by simp [queueError])
 
-theorem inv_dispatch (fix : Bool) (P : Params Req) (hP : Oracle.WF P) (s : St Req) (r : Req)
+theorem inv_dispatch (P : Params Req) (hP : Oracle.WF P) (s : St Req) (r : Req)
     (n : Nat) (hb : Base P s) (hok0 : s.ka = 0 ∨ s.ka < P.maxKA)
-    (hf : P.frame s.rbuf = .complete r n) : Inv P (dispatch fix P s r n) := by
+    (hf : P.frame s.rbuf = .complete r n) : Inv P (dispatch P s r n) := by
   have hk1 : s.ka + 1 ≤ max P.maxKA 1 := by omega
   have hk0 : s.ka ≤ max P.maxKA 1 := by omega
   unfold dispatch
   split
-  · cases fix <;>
-    exact inv_enter_writing P hP _ _ _ ⟨hb.input, hb.segs_ok, hb.answers, hb.wire⟩
+  · exact inv_enter_writing P hP _ _ _ ⟨hb.input, hb.segs_ok, hb.answers, hb.wire⟩
       (.req r n hf rfl rfl rfl) rfl rfl rfl rfl rfl rfl rfl hk0
       (by intro _; simpa [finalise] using hok0)
   · have hbA : Base P (applyKA P s (P.closeAfter r)).1 :=
@@ -387,17 +384,17 @@ theorem inv_dispatch (fix : Bool) (P : Params Req) (hP : Oracle.WF P) (s : St Re
         rfl rfl rfl rfl rfl rfl rfl (by simpa [queueError, applyKA] using hk1)
         (by simp [queueError])
 
-theorem inv_parse (fix : Bool) (P : Params Req) (hP : Oracle.WF P) (late : Bool) (s : St Req)
+theorem inv_parse (P : Params Req) (hP : Oracle.WF P) (late : Bool) (s : St Req)
     (hb : Base P s) (hka : s.ka ≤ max P.maxKA 1)
     (hk : ∀ r n, P.frame s.rbuf = .complete r n → s.ka = 0 ∨ s.ka < P.maxKA)
-    (hstay : P.frame s.rbuf = .needMore → Inv P s) : Inv P (parse fix P late s) := by
+    (hstay : P.frame s.rbuf = .needMore → Inv P s) : Inv P (parse P late s) := by
   unfold parse
   split
   · exact inv_queueError P hP s ⟨none, .err 408, false⟩ hb hka rfl
   · split
     · rename_i h; exact hstay h
     · rename_i st _; exact inv_queueError P hP s ⟨none, .err st, false⟩ hb hka rfl
-    · rename_i r n h; exact inv_dispatch fix P hP s r n hb (hk r n h) h
+    · rename_i r n h; exact inv_dispatch P hP s r n hb (hk r n h) h
 
 theorem Inv.wire_prefix (P : Params Req) (s : St Req) (h : Inv P s) : s.wire <+: flat P s.log := by
   cases hph : s.phase
@@ -407,8 +404,8 @@ theorem Inv.wire_prefix (P : Params Req) (s : St Req) (h : Inv P s) : s.wire <+:
     exact List.prefix_append_right_inj _ |>.mpr (List.take_prefix _ _)
   · exact h.wire_close hph
 
-theorem inv_onReadable (fix : Bool) (P : Params Req) (hP : Oracle.WF P) (late : Bool)
-    (s : St Req) (h : Inv P s) (hd : s.done = false) : Inv P (onReadable fix P late s) := by
+theorem inv_onReadable (P : Params Req) (hP : Oracle.WF P) (late : Bool)
+    (s : St Req) (h : Inv P s) (hd : s.done = false) : Inv P (onReadable P late s) := by
   unfold onReadable
   split
   · exact h
@@ -445,7 +442,7 @@ theorem inv_onReadable (fix : Bool) (P : Params Req) (hP : Oracle.WF P) (late : 
         split
         · have hb := hbase { drained s with shouldClose := true, peerEof := true }
             rfl rfl rfl rfl rfl rfl
-          apply inv_parse fix P hP late _ hb (by simpa using h.ka_le)
+          apply inv_parse P hP late _ hb (by simpa using h.ka_le)
           · intro r n hf
             cases hsc : s.shouldClose
             · simpa using h.ka_ok (by simp [hph]) hsc
@@ -463,7 +460,7 @@ theorem inv_onReadable (fix : Bool) (P : Params Req) (hP : Oracle.WF P) (late : 
           · rfl
           · exact absurd (hq hsc).1 (by simpa using hfin)
         have hb := hbase (drained s) rfl rfl rfl rfl rfl rfl
-        apply inv_parse fix P hP late _ hb (by simpa using h.ka_le)
+        apply inv_parse P hP late _ hb (by simpa using h.ka_le)
         · intro _ _ _; simpa using h.ka_ok (by simp [hph]) hsc
         · intro hnm
           exact hstay _ hb (by simpa using hph) (by simpa using hw.2.1) (by simpa using hw.2.2)
@@ -519,8 +516,8 @@ theorem inv_onWritable (P : Params Req) (n : Nat) (s : St Req) (h : Inv P s) :
         · exact h.ka_le
         · intro _ hh; exact h.ka_ok (by simp [hph]) hh
 
-theorem inv_stepCH (fix : Bool) (P : Params Req) (hP : Oracle.WF P) (s : St Req) (e : Ev)
-    (h : Inv P s) (hd : s.done = false) : Inv P (stepCH fix P s e) := by
+theorem inv_stepCH (P : Params Req) (hP : Oracle.WF P) (s : St Req) (e : Ev)
+    (h : Inv P s) (hd : s.done = false) : Inv P (stepCH P s e) := by
   cases e with
   | arrive b =>
     simp only [stepCH]
@@ -552,7 +549,7 @@ theorem inv_stepCH (fix : Bool) (P : Params Req) (hP : Oracle.WF P) (s : St Req)
       exact ⟨rfl, h2, h3⟩
     · exact h.ka_le
     · exact h.ka_ok
-  | readable late => exact inv_onReadable fix P hP late s h hd
+  | readable late => exact inv_onReadable P hP late s h hd
   | writable n => exact inv_onWritable P n s h
   | timeout =>
     simp only [stepCH, onTimeout]
@@ -579,24 +576,24 @@ theorem inv_stepCH (fix : Bool) (P : Params Req) (hP : Oracle.WF P) (s : St Req)
     · exact h.ka_le
     · intro _ hh; simp at hh
 
-theorem inv_step (fix : Bool) (P : Params Req) (hP : Oracle.WF P) (s : St Req) (e : Ev)
-    (h : Inv P s) : Inv P (step fix P s e) := by
+theorem inv_step (P : Params Req) (hP : Oracle.WF P) (s : St Req) (e : Ev)
+    (h : Inv P s) : Inv P (step P s e) := by
   unfold step
   split
   · exact h
-  · rename_i hd; exact inv_stepCH fix P hP s e h (by simpa using hd)
+  · rename_i hd; exact inv_stepCH P hP s e h (by simpa using hd)
 
 /-- `Inv` is an inductive invariant of the connection LTS (impl and fixed). -/
-theorem inv_inductive (fix : Bool) (P : Params Req) (hP : Oracle.WF P) :
-    (lts fix P).Inductive (Inv P) where
+theorem inv_inductive (P : Params Req) (hP : Oracle.WF P) :
+    (lts P).Inductive (Inv P) where
   init := by intro s hs; rw [hs]; exact inv_init P
   step := by
     intro s e s' h hs
-    rw [lts_step_iff] at hs; rw [← hs]; exact inv_step fix P hP s e h
+    rw [lts_step_iff] at hs; rw [← hs]; exact inv_step P hP s e h
 
-theorem inv_reachable (fix : Bool) (P : Params Req) (hP : Oracle.WF P) (s : St Req)
-    (h : (lts fix P).Reachable s) : Inv P s :=
-  (inv_inductive fix P hP).reachable s h
+theorem inv_reachable (P : Params Req) (hP : Oracle.WF P) (s : St Req)
+    (h : (lts P).Reachable s) : Inv P s :=
+  (inv_inductive P hP).reachable s h
 
 /-! ## Headline properties -/
 
@@ -604,32 +601,32 @@ theorem inv_reachable (fix : Bool) (P : Params Req) (hP : Oracle.WF P) (s : St R
 requests answered by queued responses are exactly the dispatched requests in
 order, every dispatched request is the oracle's reading of exactly its own
 bytes, and those bytes tile a prefix of the input stream in order. -/
-theorem responses_fifo (fix : Bool) (P : Params Req) (hP : Oracle.WF P) (s : St Req)
-    (h : (lts fix P).Reachable s) :
+theorem responses_fifo (P : Params Req) (hP : Oracle.WF P) (s : St Req)
+    (h : (lts P).Reachable s) :
     s.log.filterMap Out.req = s.segs.map Prod.snd ∧
     (∀ p ∈ s.segs, P.frame p.1 = .complete p.2 p.1.length) ∧
     s.inp = (s.segs.map Prod.fst).flatten ++ s.rbuf ++ s.kq := by
-  have hi := inv_reachable fix P hP s h
+  have hi := inv_reachable P hP s h
   exact ⟨hi.answers, hi.segs_ok, hi.input⟩
 
 /-- **Wire order.** The bytes sent are always a prefix of the queued
 responses' bytes in order; while reading (between requests) they are exactly
 all of them. -/
-theorem wire_is_responses (fix : Bool) (P : Params Req) (hP : Oracle.WF P) (s : St Req)
-    (h : (lts fix P).Reachable s) :
+theorem wire_is_responses (P : Params Req) (hP : Oracle.WF P) (s : St Req)
+    (h : (lts P).Reachable s) :
     s.wire <+: flat P s.log ∧ (s.phase = .reading → s.wire = flat P s.log) := by
-  have hi := inv_reachable fix P hP s h
+  have hi := inv_reachable P hP s h
   exact ⟨hi.wire_prefix, fun hp => (hi.wire_read hp).1⟩
 
 /-- **Partial writes.** On a writable event the bytes appended to the wire
 are exactly the next `k = min n remaining` bytes of the current response
 from offset `wpos`; the machine leaves STATE_WRITING iff the whole response
 has then been sent. -/
-theorem writable_resumes (fix : Bool) (P : Params Req) (s : St Req) (n : Nat)
+theorem writable_resumes (P : Params Req) (s : St Req) (n : Nat)
     (hph : s.phase = .writing) (hd : s.done = false) :
     let k := min n (s.wbuf.length - s.wpos)
-    (step fix P s (.writable n)).wire = s.wire ++ (s.wbuf.drop s.wpos).take k ∧
-    ((step fix P s (.writable n)).phase = .writing ↔ s.wpos + k < s.wbuf.length) := by
+    (step P s (.writable n)).wire = s.wire ++ (s.wbuf.drop s.wpos).take k ∧
+    ((step P s (.writable n)).phase = .writing ↔ s.wpos + k < s.wbuf.length) := by
   simp only [step, hd, stepCH, onWritable, hph]
   by_cases h1 : s.wpos + min n (s.wbuf.length - s.wpos) < s.wbuf.length
   · simp [h1, sendN]
@@ -637,17 +634,17 @@ theorem writable_resumes (fix : Bool) (P : Params Req) (s : St Req) (n : Nat)
 
 /-- **Timeouts close.** `on_timeout` always yields STATE_CLOSING with
 `should_close` and `done`, whatever the state. -/
-theorem timeout_closes (fix : Bool) (P : Params Req) (s : St Req) :
-    (stepCH fix P s .timeout).phase = .closing ∧ (stepCH fix P s .timeout).done = true ∧
-    (stepCH fix P s .timeout).shouldClose = true := by
+theorem timeout_closes (P : Params Req) (s : St Req) :
+    (stepCH P s .timeout).phase = .closing ∧ (stepCH P s .timeout).done = true ∧
+    (stepCH P s .timeout).shouldClose = true := by
   simp [stepCH, onTimeout]
 
 /-- **No request is read after `should_close`.** From any state satisfying
 the invariant with `should_close` set, one step dispatches nothing and keeps
 `should_close`. -/
-theorem segs_frozen (fix : Bool) (P : Params Req) (s : St Req) (e : Ev) (h : Inv P s)
+theorem segs_frozen (P : Params Req) (s : St Req) (e : Ev) (h : Inv P s)
     (hsc : s.shouldClose = true) :
-    (step fix P s e).segs = s.segs ∧ (step fix P s e).shouldClose = true := by
+    (step P s e).segs = s.segs ∧ (step P s e).shouldClose = true := by
   unfold step
   split
   · exact ⟨rfl, hsc⟩
@@ -679,26 +676,26 @@ theorem segs_frozen (fix : Bool) (P : Params Req) (s : St Req) (e : Ev) (h : Inv
 
 /-- Over whole runs: once `should_close` is set in a reachable state, no
 later request is ever dispatched. -/
-theorem run_segs_frozen (fix : Bool) (P : Params Req) (hP : Oracle.WF P) :
+theorem run_segs_frozen (P : Params Req) (hP : Oracle.WF P) :
     ∀ (es : List Ev) (s : St Req), Inv P s → s.shouldClose = true →
-      (run fix P s es).segs = s.segs := by
+      (run P s es).segs = s.segs := by
   intro es
   induction es with
   | nil => intro s _ _; rfl
   | cons e es ih =>
     intro s h hsc
     simp only [run, List.foldl_cons]
-    have ⟨h1, h2⟩ := segs_frozen fix P s e h hsc
-    have := ih (step fix P s e) (inv_step fix P hP s e h) h2
+    have ⟨h1, h2⟩ := segs_frozen P s e h hsc
+    have := ih (step P s e) (inv_step P hP s e h) h2
     simp only [run] at this
     rw [this, h1]
 
 /-- **Keep-alive bound.** `keepalive_count ≤ max max_keepalive_requests 1`
 in every reachable state, hence `≤ max_keepalive_requests` for any config
 that passes `ServerConfig.check` (`max_keepalive_requests ≥ 1`). -/
-theorem ka_bound (fix : Bool) (P : Params Req) (hP : Oracle.WF P) (s : St Req)
-    (h : (lts fix P).Reachable s) (h1 : 1 ≤ P.maxKA) : s.ka ≤ P.maxKA := by
-  have := (inv_reachable fix P hP s h).ka_le; omega
+theorem ka_bound (P : Params Req) (hP : Oracle.WF P) (s : St Req)
+    (h : (lts P).Reachable s) (h1 : 1 ≤ P.maxKA) : s.ka ≤ P.maxKA := by
+  have := (inv_reachable P hP s h).ka_le; omega
 
 /-! ## Close header honoured (RFC 9112 §9.6) -/
 
@@ -710,38 +707,36 @@ def CloseHonoured (s : St Req) : Prop :=
 theorem closeHonoured_init : CloseHonoured (init : St Req) := by
   intro o ho; simp [init] at ho
 
-theorem parse_peerEof (fix : Bool) (P : Params Req) (late : Bool) (s : St Req) :
-    (parse fix P late s).peerEof = s.peerEof := by
+theorem parse_peerEof (P : Params Req) (late : Bool) (s : St Req) :
+    (parse P late s).peerEof = s.peerEof := by
   unfold parse; split
   · rfl
   · split
     · rfl
     · rfl
     · unfold dispatch; split
-      · cases fix <;> rfl
+      · rfl
       · split <;> rfl
 
 /-- `parse` keeps `should_close` once it is set together with `peer_eof`
 (the half-close path). -/
-theorem parse_sc (fix : Bool) (P : Params Req) (late : Bool) (s : St Req)
+theorem parse_sc (P : Params Req) (late : Bool) (s : St Req)
     (h1 : s.shouldClose = true) (h2 : s.peerEof = true) :
-    (parse fix P late s).shouldClose = true := by
+    (parse P late s).shouldClose = true := by
   unfold parse; split
   · rfl
   · split
     · exact h1
     · rfl
     · unfold dispatch; split
-      · cases fix
-        · exact h1
-        · rfl
+      · rfl
       · split
         · simp [finalise, applyKA, h2]
         · rfl
 
 theorem closeHonoured_parse (P : Params Req) (late : Bool) (s : St Req)
     (hc : CloseHonoured s) (hsp : s.shouldClose = true → s.peerEof = true) :
-    CloseHonoured (parse true P late s) := by
+    CloseHonoured (parse P late s) := by
   have hkeep : ∀ (s' : St Req), s'.shouldClose = true → CloseHonoured s' :=
     fun _ hs _ _ _ => hs
   unfold parse
@@ -762,11 +757,11 @@ theorem closeHonoured_parse (P : Params Req) (late : Bool) (s : St Req)
             exact hb _ hk
         · exact hkeep _ rfl
 
-/-- With the APP-01 fix, `CloseHonoured` holds in every reachable state. -/
+/-- `CloseHonoured` is preserved by every step (APP-01). -/
 theorem closeHonoured_step (P : Params Req) (s : St Req) (e : Ev) (h : Inv P s)
     (hc : CloseHonoured s) (hpe : s.peerEof = true → s.shouldClose = true) :
-    CloseHonoured (step true P s e) ∧
-      ((step true P s e).peerEof = true → (step true P s e).shouldClose = true) := by
+    CloseHonoured (step P s e) ∧
+      ((step P s e).peerEof = true → (step P s e).shouldClose = true) := by
   unfold step
   split
   · exact ⟨hc, hpe⟩
@@ -784,7 +779,7 @@ theorem closeHonoured_step (P : Params Req) (s : St Req) (e : Ev) (h : Inv P s)
         · split
           · split
             · exact ⟨closeHonoured_parse P late _ (fun _ _ _ => rfl) (fun _ => rfl),
-                fun _ => parse_sc true P late _ rfl rfl⟩
+                fun _ => parse_sc P late _ rfl rfl⟩
             · exact ⟨fun _ _ _ => rfl, fun _ => rfl⟩
           · rename_i hfin
             have hsc : s.shouldClose = false := by
@@ -812,17 +807,17 @@ theorem closeHonoured_step (P : Params Req) (s : St Req) (e : Ev) (h : Inv P s)
     | timeout => exact ⟨fun _ _ _ => rfl, fun _ => rfl⟩
     | ioError => exact ⟨fun _ _ _ => rfl, fun _ => rfl⟩
 
-/-- **Fixed machine (APP-01 fix): no request after a `Connection: close`
-response.** In every reachable state of the fixed machine, if some queued
+/-- **No request after a `Connection: close` response** (APP-01). In every
+reachable state, if some queued
 response says `Connection: close`, then no future run dispatches another
 request. -/
-theorem fixed_no_request_after_close_header (P : Params Req) (hP : Oracle.WF P) (s : St Req)
-    (h : (lts true P).Reachable s) :
+theorem no_request_after_close_header (P : Params Req) (hP : Oracle.WF P) (s : St Req)
+    (h : (lts P).Reachable s) :
     CloseHonoured s ∧
-      ∀ o ∈ s.log, o.keepAlive = false → ∀ es, (run true P s es).segs = s.segs := by
-  have key : ∀ s, (lts true P).Reachable s →
+      ∀ o ∈ s.log, o.keepAlive = false → ∀ es, (run P s es).segs = s.segs := by
+  have key : ∀ s, (lts P).Reachable s →
       Inv P s ∧ CloseHonoured s ∧ (s.peerEof = true → s.shouldClose = true) := by
-    have hind : (lts true P).Inductive
+    have hind : (lts P).Inductive
         (fun s => Inv P s ∧ CloseHonoured s ∧ (s.peerEof = true → s.shouldClose = true)) := {
       init := by
         intro s hs; rw [hs]
@@ -830,29 +825,29 @@ theorem fixed_no_request_after_close_header (P : Params Req) (hP : Oracle.WF P) 
       step := by
         intro s e s' ⟨hi, hc, hpe⟩ hs
         rw [lts_step_iff] at hs; rw [← hs]
-        exact ⟨inv_step true P hP s e hi, closeHonoured_step P s e hi hc hpe⟩ }
+        exact ⟨inv_step P hP s e hi, closeHonoured_step P s e hi hc hpe⟩ }
     exact hind.reachable
   obtain ⟨hi, hc, -⟩ := key s h
-  exact ⟨hc, fun o ho hk es => run_segs_frozen true P hP es s hi (hc o ho hk)⟩
+  exact ⟨hc, fun o ho hk es => run_segs_frozen P hP es s hi (hc o ho hk)⟩
 
 /-! ## Body framing of a serialised response (RFC 9110 §6.4.1, §8.6; RFC 9112 §6.3) -/
 
 namespace Framing
 
 /-- `_wire_status`: 100-599, else 500.
-mirrors flare/http/_reactor/write_path.mojo:151-155 @59bda50 -/
+mirrors flare/http/_reactor/write_path.mojo#_wire_status sha=8009dcf27848 at=59bda50f -/
 def wireStatus (st : Int) : Int := if st < 100 ∨ st > 599 then 500 else st
 
 /-- What `serialize_response_into` emits: a `Content-Length` field (and
 its value) and whether the body bytes follow the head.
-mirrors flare/http/_reactor/write_path.mojo:222-235 @59bda50 -/
+mirrors flare/http/_reactor/write_path.mojo#serialize_response_into sha=b6b79229ea1b at=59bda50f -/
 structure Emitted where
   emitLen : Bool
   lengthValue : Nat
   emitBody : Bool
   deriving DecidableEq, Repr
 
-/-- mirrors flare/http/_reactor/write_path.mojo:222-235 @59bda50 -/
+/-- mirrors flare/http/_reactor/write_path.mojo#serialize_response_into sha=b6b79229ea1b at=59bda50f -/
 def serialize (status : Int) (bodyLen : Nat) (declared : Option Nat) (head lengthKnown : Bool) :
     Emitted :=
   let st := wireStatus status
@@ -899,8 +894,8 @@ theorem serialize_spec (status : Int) (bodyLen : Nat) (declared : Option Nat)
 /-- Which `head_request` flag each reactor path hands the serialiser:
 the normal handler path passes `self.head_request`
 (conn_handle.mojo:747-754); `_queue_error` → `_serialize_response` passes
-the flag too (fixed, APP-05; pre-fix it passed nothing, default `False`).
-mirrors flare/http/_reactor/conn_handle.mojo:747-754 and 1590-1620
+the flag too (fixed, APP-05).
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._check_request_complete+ConnHandle._handle_ws_upgrade sha=2b5849b5008a at=2b8d4acb
 (fixed, APP-05) -/
 inductive Path | handler | errorReply
   deriving DecidableEq, Repr
@@ -910,13 +905,6 @@ inductive Path | handler | errorReply
 raised before the request is parsed, from the buffered `HEAD ` prefix
 (`_note_head_from_buf`). -/
 def headFlag (_p : Path) (isHead : Bool) : Bool := isHead
-
-/-- The pre-fix flags (APP-05): the error path ignored the method.
-mirrors flare/http/_reactor/conn_handle.mojo:747-754,1576-1594 @59bda50 -/
-def headFlagOld (p : Path) (isHead : Bool) : Bool :=
-  match p with
-  | .handler => isHead
-  | .errorReply => false
 
 /-- Spec for a whole path: a response to a HEAD request has no body. -/
 def HeadSpec (f : Path → Bool → Bool) : Prop :=
@@ -930,15 +918,10 @@ theorem headFlag_spec : HeadSpec headFlag := by
 /-- The static fast path (fixed, APP-04): `on_readable_static` copies the
 pre-encoded response, but for HEAD only the head (bytes up to the first
 CRLFCRLF).
-mirrors flare/http/_reactor/conn_handle.mojo:1174-1220 (fixed, APP-04) and
-flare/http/_reactor/write_path.mojo:107-175 (fixed, APP-04) -/
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle.on_readable_view+ConnHandle.on_readable_static sha=dd679c00f0b8 at=72c46f5e (fixed, APP-04) and
+flare/http/_reactor/write_path.mojo#_head_length+serialize_static_into sha=6f0318aff397 at=72c46f5e (fixed, APP-04) -/
 def staticBytes (head body : Bytes) (isHead : Bool) : Bytes :=
   if isHead then head else head ++ body
-
-/-- The pre-fix static path (APP-04): it copied head and body whatever the
-method. Kept so the counterexample in `Flare.Bugs.APP_04` stays checkable.
-mirrors flare/http/_reactor/conn_handle.mojo:1174-1211 @59bda50 -/
-def staticBytesOld (head body : Bytes) (_isHead : Bool) : Bytes := head ++ body
 
 /-- Spec: the bytes queued for HEAD are exactly the head. -/
 def StaticHeadSpec (f : Bytes → Bytes → Bool → Bytes) : Prop :=

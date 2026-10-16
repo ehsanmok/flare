@@ -39,7 +39,7 @@ structure Key where
   deriving DecidableEq, Repr
 
 /-- `key[i & 3]`.
-mirrors flare/ws/frame.mojo:495,633,646 @59bda50 -/
+mirrors flare/ws/frame.mojo#WsFrame.decode_one+_append_masked sha=048513c37cbe at=59bda50f -/
 def Key.at (k : Key) (i : Nat) : UInt8 :=
   match i % 4 with
   | 0 => k.k0
@@ -53,7 +53,7 @@ def Key.isZero (k : Key) : Bool := k.k0 == 0 && k.k1 == 0 && k.k2 == 0 && k.k3 =
 
 /-- RFC 6455 §5.3: octet `i` is XOR'd with key octet `i mod 4`. `maskFrom k i p`
 masks `p` as if it started at payload offset `i`.
-mirrors flare/ws/frame.mojo:483-488 (unmask) and :644-647 (scalar tail) @59bda50 -/
+mirrors flare/ws/frame.mojo#WsFrame.decode_one+_append_masked sha=048513c37cbe at=59bda50f (unmask) (scalar tail) -/
 def maskFrom (k : Key) : Nat → Bytes → Bytes
   | _, [] => []
   | i, b :: bs => (b ^^^ k.at i) :: maskFrom k (i + 1) bs
@@ -96,7 +96,7 @@ theorem Key.eq_zero_of_isZero {k : Key} (h : k.isZero = true) : k = ⟨0, 0, 0, 
 
 /-- `_append_masked`: 32-byte blocks XOR'd with the tiled key
 `tiled[j] = key[j & 3]`, then a scalar tail using the absolute index.
-mirrors flare/ws/frame.mojo:612-647 @59bda50 -/
+mirrors flare/ws/frame.mojo#_append_masked sha=a18ec27042ac at=59bda50f -/
 def appendMasked (k : Key) (i : Nat) (rest : Bytes) : Bytes :=
   if 32 ≤ rest.length then maskFrom k 0 (rest.take 32) ++ appendMasked k (i + 32) (rest.drop 32)
   else maskFrom k i rest
@@ -119,7 +119,7 @@ decreasing_by simp only [List.length_drop]; omega
 /-! ## Frames -/
 
 /-- A decoded frame: header fields and the unmasked payload.
-mirrors flare/ws/frame.mojo:140-170 @59bda50 -/
+mirrors flare/ws/frame.mojo#WsFrame+WsFrame.__init__+WsFrame.text sha=0d72ec433019 at=59bda50f -/
 structure Frame where
   fin : Bool
   rsv1 : Bool
@@ -128,35 +128,35 @@ structure Frame where
   payload : Bytes
   deriving DecidableEq, Repr
 
-/-- mirrors flare/ws/frame.mojo:512-520 @59bda50 -/
+/-- mirrors flare/ws/frame.mojo#WsFrame.is_control sha=02949dc3768c at=59bda50f -/
 def isControl (op : UInt8) : Bool := op &&& 8 != 0
 
 /-- RFC 6455 §5.2: opcodes with a defined meaning. -/
 def knownOpcode (op : UInt8) : Bool := op == 0 || op == 1 || op == 2 || op == 8 || op == 9 || op == 10
 
-/-- mirrors flare/ws/frame.mojo:334-337 @59bda50 -/
+/-- mirrors flare/ws/frame.mojo#WsFrame.encode_with_key sha=e2bdae5ef6de at=59bda50f -/
 def be16 (n : Nat) : Bytes := [(n / 256 % 256).toUInt8, (n % 256).toUInt8]
 
-/-- mirrors flare/ws/frame.mojo:323-333 @59bda50 -/
+/-- mirrors flare/ws/frame.mojo#WsFrame.encode_with_key sha=e2bdae5ef6de at=59bda50f -/
 def be64 (n : Nat) : Bytes :=
   [(n / 2 ^ 56 % 256).toUInt8, (n / 2 ^ 48 % 256).toUInt8, (n / 2 ^ 40 % 256).toUInt8,
    (n / 2 ^ 32 % 256).toUInt8, (n / 2 ^ 24 % 256).toUInt8, (n / 2 ^ 16 % 256).toUInt8,
    (n / 2 ^ 8 % 256).toUInt8, (n % 256).toUInt8]
 
-/-- mirrors flare/ws/frame.mojo:292-296 @59bda50 -/
+/-- mirrors flare/ws/frame.mojo#WsFrame.encode_with_key sha=e2bdae5ef6de at=59bda50f -/
 def byte0 (f : Frame) : UInt8 :=
   (f.opcode ||| (if f.fin then 0x80 else 0)) ||| (if f.rsv1 then 0x40 else 0)
 
-/-- mirrors flare/ws/frame.mojo:303-313 @59bda50 -/
+/-- mirrors flare/ws/frame.mojo#WsFrame.encode_with_key sha=e2bdae5ef6de at=59bda50f -/
 def lenCode (plen : Nat) : UInt8 :=
   if plen < 126 then plen.toUInt8 else if plen < 65536 then 126 else 127
 
-/-- mirrors flare/ws/frame.mojo:322-337 @59bda50 -/
+/-- mirrors flare/ws/frame.mojo#WsFrame.encode_with_key sha=e2bdae5ef6de at=59bda50f -/
 def extLen (plen : Nat) : Bytes :=
   if 65536 ≤ plen then be64 plen else if 126 ≤ plen then be16 plen else []
 
 /-- `encode_with_key`. With `mask` and an all-zero key the payload is copied.
-mirrors flare/ws/frame.mojo:274-356 @59bda50 -/
+mirrors flare/ws/frame.mojo#WsFrame.encode_with_key sha=e2bdae5ef6de at=59bda50f -/
 def encode (f : Frame) (mask : Bool) (k : Key) : Bytes :=
   let plen := f.payload.length
   [byte0 f, (if mask then 0x80 else 0) ||| lenCode plen] ++ extLen plen ++
@@ -165,7 +165,7 @@ def encode (f : Frame) (mask : Bool) (k : Key) : Bytes :=
 
 /-- `encode`: refuses RSV1 and an oversized control payload, then
 `encode_with_key`.
-mirrors flare/ws/frame.mojo:234-272 @59bda50 -/
+mirrors flare/ws/frame.mojo#WsFrame.encode sha=b313983ff157 at=59bda50f -/
 def encodeChecked (f : Frame) (mask : Bool) (k : Key) : Option Bytes :=
   if f.rsv1 then none
   else if isControl f.opcode ∧ f.payload.length > 125 then none
@@ -179,7 +179,7 @@ inductive LRes where
   | ok (plen : Nat) (rest : Bytes) (hdr : Nat)
 
 /-- Extended payload length.
-mirrors flare/ws/frame.mojo:410-447 @59bda50 -/
+mirrors flare/ws/frame.mojo#WsFrame.decode_one sha=542a6e12b557 at=59bda50f -/
 def parseLen (plen7 : Nat) (r : Bytes) : LRes :=
   if plen7 < 126 then .ok plen7 r 2
   else if plen7 = 126 then
@@ -204,7 +204,7 @@ inductive DRes where
 
 /-- The tail of `decode_one` once the header and key are read: control-frame
 checks, then the payload.
-mirrors flare/ws/frame.mojo:465-508 @59bda50 -/
+mirrors flare/ws/frame.mojo#WsFrame.decode_one sha=542a6e12b557 at=59bda50f -/
 def finish (fin rsv1 : Bool) (op : UInt8) (masked : Bool) (plen hdr : Nat) (key : Key) (r : Bytes) : DRes :=
   if isControl op && (!fin || plen > 125) then .error
   else if r.length < plen then .needMore
@@ -228,9 +228,9 @@ theorem finish_ok {fin rsv1 : Bool} {op : UInt8} {masked : Bool} {plen hdr : Nat
     simp only [hic, Bool.true_and, Bool.or_eq_true, Bool.not_eq_true', decide_eq_true_eq, not_or] at hctl
     exact ⟨by simpa using hctl.1, by omega⟩
 
-/-- `WsFrame.decode_one` before the WS-01 fix: the opcode is not range-checked.
-`decodeKnown` (in `Ws/Recv.lean`) is the shipped decoder.
-mirrors flare/ws/frame.mojo:361-508 @59bda50 -/
+/-- The frame grammar of `WsFrame.decode_one` without its reserved-opcode
+check. `decodeKnown` (in `Ws/Recv.lean`) adds the check and is the shipped
+decoder; every receive model is built on it. -/
 def decode (allowRsv1 : Bool) (maxP : Nat) : Bytes → DRes
   | b0 :: b1 :: r =>
     if b0 &&& 0x20 != 0 || b0 &&& 0x10 != 0 then .error

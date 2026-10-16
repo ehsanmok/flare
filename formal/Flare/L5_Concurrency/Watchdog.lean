@@ -34,20 +34,19 @@ interleaving point. The one cross-location dependency, the poller reading
 `addr` sequenced before its CAS, which the poller's CAS reads from. That
 argument is written down here, not proved in Lean.
 
-## Configurations
+## The arm
 
-`Cfg` covers the Mojo code at 59bda50 (`disarmFirst := false`,
-`clamp := false`, the pre-fix `cfgImpl`) and the shipped code (`cfgShipped` =
-`cfgFixed`: `clamp`, CONC-01, and `disarmFirst`, CONC-02: arm first CASes the
-old deadline to 0), plus whether callers may re-arm without disarm.
+The deadline is clamped to `[1, Int64.MAX]` (CONC-01) and `arm` first CASes
+an armed slot's old deadline to 0 (CONC-02), so callers may re-arm without a
+disarm (`Lbl.rearm`) and any budget is allowed.
 -/
 namespace Flare.L5.Watchdog
 
-/-- mirrors flare/runtime/watchdog.mojo:46 @59bda50 -/
+/-- mirrors flare/runtime/watchdog.mojo#_FIRING sha=c29671513856 at=59bda50f -/
 def FIRING : Int := -1
 
 /-- Poller program counter, one slot of the scan loop.
-mirrors flare/runtime/watchdog.mojo:154-177 @59bda50 -/
+mirrors flare/runtime/watchdog.mojo#_watchdog_main sha=8e88562c31b8 at=59bda50f -/
 inductive PPc where
   | scan            -- :155 read the clock for this scan
   | load            -- :157 acquire-load the deadline
@@ -58,12 +57,12 @@ inductive PPc where
   deriving DecidableEq, Repr
 
 /-- Worker program counter.
-mirrors flare/runtime/watchdog.mojo:123-149 (arm, fixed, CONC-01 and CONC-02),
+mirrors flare/runtime/watchdog.mojo#watchdog_arm sha=4b5a96cd4ffd at=acaf0eec (arm, fixed, CONC-01 and CONC-02),
 :152-170 (disarm) -/
 inductive WPc where
   | idle                     -- between requests
-  | armSettle                -- :139 `_settle` of the disarm loop (pre-fix: a bare `_settle`)
-  | armCas0 (v : Int)        -- :140-142 CAS(v -> 0); pre-fix code has no such step
+  | armSettle                -- :139 `_settle` of the disarm loop
+  | armCas0 (v : Int)        -- :140-142 CAS(v -> 0)
   | armStore                 -- :106 store the cell address
   | armClock                 -- :107 deadline = now + budget
   | armSettle2 (dl : Int)    -- :109 `_settle`
@@ -90,21 +89,10 @@ structure St where
   ret : Bool
   cancelled : Nat → Bool
 
-structure Cfg where
-  disarmFirst : Bool
-  clamp : Bool
-  allowRearm : Bool
-  adm : Int → Int → Bool
-
-/-- Mojo `Int64(monotonic_now_ms() + budget_ms)`: 64-bit wrap. -/
-def wrap (x : Int) : Int := (mojoInt x).toInt
-
-/-- `clamp = false` mirrors flare/runtime/watchdog.mojo:107 @59bda50 (pre-fix:
-the wrapped sum, unchecked). `clamp = true` mirrors `_deadline_after`
-(flare/runtime/watchdog.mojo:55-74, fixed, CONC-01): saturate the sum at
-`Int64.MAX`, then raise it to at least 1. -/
-def deadlineOf (c : Cfg) (now b : Int) : Int :=
-  if c.clamp then max (min (now + b) I64_MAX) 1 else wrap (now + b)
+/-- `_deadline_after`: saturate `now + budget` at `Int64.MAX`, then raise it
+to at least 1.
+mirrors flare/runtime/watchdog.mojo#_deadline_after sha=75247df20f70 at=0b291ce6 (fixed, CONC-01) -/
+def deadlineOf (now b : Int) : Int := max (min (now + b) I64_MAX) 1
 
 inductive Lbl where
   | p
@@ -116,7 +104,7 @@ inductive Lbl where
 def upd (f : Nat → Bool) (i : Nat) (v : Bool) : Nat → Bool :=
   fun j => if j = i then v else f j
 
-/-- One poller step. mirrors flare/runtime/watchdog.mojo:154-177 @59bda50 -/
+/-- One poller step. mirrors flare/runtime/watchdog.mojo#_watchdog_main sha=8e88562c31b8 at=59bda50f -/
 def pStep (s : St) : St :=
   match s.p with
   | .scan => { s with pnow := s.now, p := .load }
@@ -134,14 +122,14 @@ def pStep (s : St) : St :=
   | .release => { s with slot := 0, p := .scan }
 
 /-- One worker step (`b` is the budget, used at `armClock`).
-mirrors flare/runtime/watchdog.mojo:123-149 (arm, fixed, CONC-01 and CONC-02),
-:152-170 (disarm); `disarmFirst = false` is the pre-fix arm at 59bda50 -/
-def wStep (c : Cfg) (b : Int) (s : St) : Option St :=
+mirrors flare/runtime/watchdog.mojo#watchdog_arm sha=4b5a96cd4ffd at=acaf0eec (arm, fixed, CONC-01 and CONC-02),
+:152-170 (disarm) -/
+def wStep (b : Int) (s : St) : Option St :=
   match s.w with
   | .idle => some { s with w := .armSettle }
   | .armSettle =>
     if s.slot = FIRING then some s
-    else if c.disarmFirst ∧ s.slot ≠ 0 then some { s with w := .armCas0 s.slot }
+    else if s.slot ≠ 0 then some { s with w := .armCas0 s.slot }
     else some { s with w := .armStore }
   | .armCas0 v =>
     if s.slot = v then some { s with slot := 0, w := .armStore }
@@ -149,9 +137,7 @@ def wStep (c : Cfg) (b : Int) (s : St) : Option St :=
   | .armStore =>
     some { s with addr := s.cur + 1, doneReq := s.cur, cur := s.cur + 1,
                   fired := false, w := .armClock }
-  | .armClock =>
-    if c.adm s.now b then some { s with w := .armSettle2 (deadlineOf c s.now b) }
-    else none
+  | .armClock => some { s with w := .armSettle2 (deadlineOf s.now b) }
   | .armSettle2 dl =>
     if s.slot = FIRING then some s else some { s with w := .armCas dl s.slot }
   | .armCas dl v =>
@@ -167,11 +153,11 @@ def wStep (c : Cfg) (b : Int) (s : St) : Option St :=
     if s.slot = v then some { s with slot := 0, ret := false, doneReq := s.cur, w := .idle }
     else some { s with w := .dSettle }
 
-def step (c : Cfg) (s : St) : Lbl → Option St
+def step (s : St) : Lbl → Option St
   | .p => some (pStep s)
-  | .w b => wStep c b s
+  | .w b => wStep b s
   | .rearm =>
-    if c.allowRearm ∧ s.w = .handling then some { s with w := .armSettle } else none
+    if s.w = .handling then some { s with w := .armSettle } else none
   | .tick => some { s with now := s.now + 1 }
 
 /-- Initial states: everything zero, clock at least 1 ms (CLOCK_MONOTONIC
@@ -180,7 +166,7 @@ def Init (s : St) : Prop :=
   s.slot = 0 ∧ s.addr = 0 ∧ 1 ≤ s.now ∧ s.p = .scan ∧ s.w = .idle ∧
   s.cur = 0 ∧ s.doneReq = 0 ∧ s.fired = false
 
-def lts (c : Cfg) : LTS St Lbl := LTS.ofFn Init (step c)
+def lts : LTS St Lbl := LTS.ofFn Init step
 
 def claimedP : PPc → Bool
   | .claimed | .write _ | .release => true
@@ -227,10 +213,10 @@ def PInv : PPc → St → Prop
   | .write a, s => s.slot = -1 ∧ K s ∧ a = s.cur ∧ s.fired = false
   | .release, s => s.slot = -1 ∧ K s ∧ s.fired = true
 
-def WInv (c : Cfg) : WPc → St → Prop
+def WInv : WPc → St → Prop
   | .idle, s => s.doneReq = s.cur ∧ s.slot = 0 ∧ (0 < s.cur → s.ret = s.fired)
-  | .armSettle, s => (s.doneReq = s.cur → s.slot = 0) ∧ (s.doneReq < s.cur → c.disarmFirst = true)
-  | .armCas0 v, s => v ≠ 0 ∧ v ≠ -1 ∧ s.doneReq < s.cur ∧ c.disarmFirst = true
+  | .armSettle, s => s.doneReq = s.cur → s.slot = 0
+  | .armCas0 v, s => v ≠ 0 ∧ v ≠ -1 ∧ s.doneReq < s.cur
   | .armStore, s => s.slot = 0
   | .armClock, s => s.slot = 0 ∧ s.doneReq < s.cur ∧ s.fired = false
   | .armSettle2 dl, s => s.slot = 0 ∧ s.doneReq < s.cur ∧ s.fired = false ∧ 0 < dl
@@ -238,57 +224,50 @@ def WInv (c : Cfg) : WPc → St → Prop
   | .handling, s | .dSettle, s => s.doneReq < s.cur ∧ (s.slot = 0 → s.fired = true)
   | .dCas v, s => v ≠ 0 ∧ v ≠ -1 ∧ s.doneReq < s.cur ∧ (s.slot = 0 → s.fired = true)
 
-def Inv (c : Cfg) (s : St) : Prop := Core s ∧ PInv s.p s ∧ WInv c s.w s
+def Inv (s : St) : Prop := Core s ∧ PInv s.p s ∧ WInv s.w s
 
-/-- Deadline positivity: what a configuration must guarantee about the
-deadlines it stores. -/
-def DeadlinePos (c : Cfg) : Prop := ∀ n b, 1 ≤ n → c.adm n b = true → 0 < deadlineOf c n b
+theorem deadlineOf_pos (n b : Int) : 0 < deadlineOf n b := by
+  unfold deadlineOf; omega
 
 theorem FIRING_neg : FIRING = -1 := rfl
 
 macro "wd_close" : tactic =>
   `(tactic| (simp_all [Core, PInv, WInv, K, FIRING] <;> try omega))
 
-theorem inv_step_p (c : Cfg) : ∀ s, Inv c s → Inv c (pStep s) := by
+theorem inv_step_p : ∀ s, Inv s → Inv (pStep s) := by
   rintro s ⟨⟨h1, h2, h3, h4 | h4 | ⟨h4, h5, h6, h7, h8⟩⟩, hpI, hwI⟩
   all_goals
     cases hp : s.p <;> cases hw : s.w <;> simp only [hp, hw, PInv, WInv] at hpI hwI <;>
       simp only [pStep, hp] <;> (try split) <;> simp only [Inv, PInv, WInv, hw] <;> wd_close
 
-theorem inv_step_w (c : Cfg) (hdl : DeadlinePos c) :
-    ∀ s b s', Inv c s → wStep c b s = some s' → Inv c s' := by
+theorem inv_step_w : ∀ s b s', Inv s → wStep b s = some s' → Inv s' := by
   rintro s b s' ⟨⟨h1, h2, h3, h4 | h4 | ⟨h4, h5, h6, h7, h8⟩⟩, hpI, hwI⟩ h
   all_goals
     unfold wStep at h
     cases hw : s.w <;> simp only [hw, WInv] at h hwI
     case armClock =>
-      by_cases ha : c.adm s.now b = true
-      · simp only [ha, if_true, Option.some.injEq] at h; subst h
-        have := hdl s.now b h3 ha
-        cases hp : s.p <;> simp only [hp, PInv] at hpI <;> simp only [Inv, PInv, WInv] <;>
-          wd_close
-      · simp [ha] at h
+      simp only [Option.some.injEq] at h; subst h
+      have := deadlineOf_pos s.now b
+      cases hp : s.p <;> simp only [hp, PInv] at hpI <;> simp only [Inv, PInv, WInv] <;>
+        wd_close
     all_goals
       (repeat' split at h) <;> simp only [Option.some.injEq] at h <;> subst h <;>
       cases hp : s.p <;> simp only [hp, PInv] at hpI <;> simp only [Inv, PInv, WInv] <;>
       wd_close
 
-theorem inv_step (c : Cfg) (hra : c.allowRearm = true → c.disarmFirst = true)
-    (hdl : DeadlinePos c) :
-    ∀ s l s', Inv c s → step c s l = some s' → Inv c s' := by
+theorem inv_step : ∀ s l s', Inv s → step s l = some s' → Inv s' := by
   intro s l s' I h
   cases l with
-  | p => simp only [step, Option.some.injEq] at h; subst h; exact inv_step_p c s I
-  | w b => exact inv_step_w c hdl s b s' I h
+  | p => simp only [step, Option.some.injEq] at h; subst h; exact inv_step_p s I
+  | w b => exact inv_step_w s b s' I h
   | rearm =>
     simp only [step] at h
     split at h
     · rename_i hr
       simp only [Option.some.injEq] at h; subst h
       obtain ⟨hc, hpI, hwI⟩ := I
-      have hdf := hra hr.1
-      simp only [hr.2, WInv] at hwI
-      refine ⟨hc, ?_, by simp only [WInv]; constructor <;> intro <;> first | omega | exact hdf⟩
+      simp only [hr, WInv] at hwI
+      refine ⟨hc, ?_, by simp only [WInv]; intro; omega⟩
       cases hp : s.p <;> simp only [hp, PInv, K] at hpI ⊢ <;> exact hpI
     · simp at h
   | tick =>
@@ -298,18 +277,17 @@ theorem inv_step (c : Cfg) (hra : c.allowRearm = true → c.disarmFirst = true)
     · cases hp : s.p <;> simp only [hp, PInv, K] at hpI ⊢ <;> exact hpI
     · cases hw : s.w <;> simp only [hw, WInv] at hwI ⊢ <;> exact hwI
 
-theorem inv_init (c : Cfg) : ∀ s, Init s → Inv c s := by
+theorem inv_init : ∀ s, Init s → Inv s := by
   intro s ⟨h1, h2, h3, h4, h5, h6, h7, h8⟩
   refine ⟨?_, ?_, ?_⟩
   · simp [Core, h1, h2, h3, h6, h7]
   · simp [h4, PInv, h1]
   · simp [h5, WInv, h1, h6, h7]
 
-theorem inv_inductive (c : Cfg) (hra : c.allowRearm = true → c.disarmFirst = true)
-    (hdl : DeadlinePos c) : (lts c).Inductive (Inv c) :=
-  ⟨inv_init c, fun s l s' hi hs => inv_step c hra hdl s l s' hi hs⟩
+theorem inv_inductive : lts.Inductive Inv :=
+  ⟨inv_init, fun s l s' hi hs => inv_step s l s' hi hs⟩
 
-theorem inv_safe (c : Cfg) (s : St) (I : Inv c s) :
+theorem inv_safe (s : St) (I : Inv s) :
     Safe s ∧ DisarmCorrect s ∧ FiringOwned s := by
   obtain ⟨hc, hpI, hwI⟩ := I
   refine ⟨?_, ?_, ?_⟩
@@ -323,85 +301,13 @@ theorem inv_safe (c : Cfg) (s : St) (I : Inv c s) :
   · intro hs
     cases hp : s.p <;> simp only [hp, PInv, FIRING] at hpI hs ⊢ <;> simp_all [claimedP]
 
-/-- The general theorem: any configuration whose callers re-arm only with
-the disarm-first arm, and whose stored deadlines are positive, is safe in
-every reachable state. -/
-theorem safe_of_cfg (c : Cfg) (hra : c.allowRearm = true → c.disarmFirst = true)
-    (hdl : DeadlinePos c) :
-    ∀ s, (lts c).Reachable s → Safe s ∧ DisarmCorrect s ∧ FiringOwned s :=
-  fun s hr => inv_safe c s ((inv_inductive c hra hdl).reachable s hr)
-
-/-! ## The Mojo code and the fix -/
-
-/-- Budgets for which `now + budget` is a positive `Int64`. -/
-def goodAdm (n b : Int) : Bool := decide (1 ≤ n + b ∧ n + b ≤ I64_MAX)
-
-/-- The code at 59bda50 under the discipline "arm only after disarm" with
-budgets that give a positive, non-wrapping deadline. -/
-def cfgImpl : Cfg := { disarmFirst := false, clamp := false, allowRearm := false, adm := goodAdm }
-
-/-- The fix: clamp the deadline to ≥ 1 and disarm first inside arm. Any
-budget; callers may re-arm without disarm. -/
-def cfgFixed : Cfg :=
-  { disarmFirst := true, clamp := true, allowRearm := true, adm := fun _ _ => true }
-
-/-- The shipped code: the deadline is clamped (CONC-01) and `arm` disarms
-first (CONC-02): the full fix. -/
-def cfgShipped : Cfg := cfgFixed
-
-theorem deadlinePos_impl : DeadlinePos cfgImpl := by
-  intro n b _ ha
-  simp only [cfgImpl, goodAdm, decide_eq_true_eq] at ha
-  simp only [deadlineOf, cfgImpl, Bool.false_eq_true, if_false, wrap]
-  rw [mojoInt_toInt_of_fits]
-  · omega
-  · unfold fitsI64 I64_MIN; unfold I64_MAX at ha ⊢; omega
-
-theorem deadlinePos_fixed : DeadlinePos cfgFixed := by
-  intro n b _ _
-  simp only [deadlineOf, cfgFixed, if_true]
-  omega
-
-theorem deadlinePos_shipped : DeadlinePos cfgShipped := deadlinePos_fixed
-
-/-- Headline (impl): under "arm only after disarm" and positive budgets the
-watchdog fires only into the current request's cell, only for that
+/-- Headline: for every budget, and even when callers re-arm a still-armed
+slot, the watchdog fires only into the current request's cell, only for that
 request's own expired deadline, never after its disarm returned; disarm's
-result is exact; FIRING is always transient. Proved (general invariant,
-unbounded). -/
-theorem impl_safe :
-    ∀ s, (lts cfgImpl).Reachable s → Safe s ∧ DisarmCorrect s ∧ FiringOwned s :=
-  safe_of_cfg cfgImpl (by simp [cfgImpl]) deadlinePos_impl
-
-/-- Headline (fix): the clamped, disarm-first arm is safe for every budget
-and even when callers re-arm a still-armed slot. Proved (general). -/
-theorem fixed_safe :
-    ∀ s, (lts cfgFixed).Reachable s → Safe s ∧ DisarmCorrect s ∧ FiringOwned s :=
-  safe_of_cfg cfgFixed (by simp [cfgFixed]) deadlinePos_fixed
-
-/-- Headline (shipped): the shipped `arm` (`cfgShipped`, both fixes) is safe
-for every budget, and even when callers re-arm a still-armed slot. -/
+result is exact; FIRING is always transient. -/
 theorem shipped_safe :
-    ∀ s, (lts cfgShipped).Reachable s → Safe s ∧ DisarmCorrect s ∧ FiringOwned s :=
-  fixed_safe
-
-/-! ## Executable traces (used by the counterexamples in `Flare.Bugs`) -/
-
-def exec (c : Cfg) : St → List Lbl → Option St
-  | s, [] => some s
-  | s, l :: ls => (step c s l).bind fun s' => exec c s' ls
-
-theorem run_of_exec (c : Cfg) :
-    ∀ s ls s', exec c s ls = some s' → (lts c).Run s ls s' := by
-  intro s ls
-  induction ls generalizing s with
-  | nil => intro s' h; simp [exec] at h; subst h; exact .nil _
-  | cons l ls ih =>
-    intro s' h
-    simp only [exec] at h
-    cases hs : step c s l with
-    | none => simp [hs] at h
-    | some t => simp only [hs, Option.bind_some] at h; exact .cons hs (ih t s' h)
+    ∀ s, lts.Reachable s → Safe s ∧ DisarmCorrect s ∧ FiringOwned s :=
+  fun s hr => inv_safe s (inv_inductive.reachable s hr)
 
 /-- The canonical initial state, clock at 1 ms. -/
 def s0 : St :=

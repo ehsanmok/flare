@@ -53,10 +53,16 @@ ends the connection (`conn code`: GOAWAY, §5.4.1).
   state loss §4.3, resource protection §10.5). On a frame §5.1 permits,
   any connection error is allowed (message-level and flow-control errors
   are other sections' business), except on a closed stream as above.
+* DATA may draw FLOW_CONTROL_ERROR in every state: every DATA frame counts
+  against the connection window whatever its stream's state (§5.1
+  closed, §6.9), and an endpoint that detects several errors "MAY choose
+  to report any one of those errors" (§5.4).
 
 Over-approximation: on a closed stream, accepting (ignoring) DATA is
 allowed (it is required after we sent RST_STREAM, and the model does not
-track which closes were ours); WINDOW_UPDATE / RST_STREAM arriving long
+track which closes were ours); FLOW_CONTROL_ERROR on DATA is allowed
+whether or not the frame overran the window (the spec has no windows;
+the connection-window monitor is `Conn.ConnWindowOK`); WINDOW_UPDATE / RST_STREAM arriving long
 after a close may be treated as a connection error by the RFC, which this
 spec, having no clock, does not allow.
 
@@ -108,8 +114,8 @@ def connCodes (peerId : Bool) (s : SS) (k : RK) (code : Nat) : Bool :=
     | _ => true
   | .data _ =>
     match s with
-    | .idle | .resL | .resR => code == 1
-    | .hcr | .closed => code == 5
+    | .idle | .resL | .resR => code == 1 || code == 3
+    | .hcr | .closed => code == 5 || code == 3
     | _ => true
   | .rst =>
     match s with

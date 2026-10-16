@@ -1,5 +1,4 @@
 import Flare.Machine
-import Flare.Bugs.MACH_01
 import Flare.MachineHttp
 import Flare.MachineWorkers
 import Flare.MachineWheel
@@ -14,17 +13,10 @@ use `Classical.choice`, through `ConnSM`. -/
 #print axioms Flare.Machine.dispatch_isolated
 #print axioms Flare.Machine.conn_invariant_lifts
 #print axioms Flare.Machine.routing_ok
-#print axioms Flare.Machine.fd0_never_served_old
-#print axioms Flare.Machine.fd0_reachable_old
 #print axioms Flare.Machine.fd0_served
 #print axioms Flare.Machine.reuse_with_cancel
 #print axioms Flare.Machine.stale_timer_without_cancel
 #print axioms Flare.Machine.stale_event_redelivered
-#print axioms Flare.Bugs.MACH_01.client_on_fd0
-#print axioms Flare.Bugs.MACH_01.fd0_event_lost
-#print axioms Flare.Bugs.MACH_01.fd0_frozen
-#print axioms Flare.Bugs.MACH_01.client_on_fd0_served
-#print axioms Flare.Bugs.MACH_01.no_conn_on_listener_token
 #print axioms Flare.MachineHttp.server_conns_inv
 #print axioms Flare.MachineHttp.server_responses_fifo
 #print axioms Flare.MachineHttp.server_ka_bound

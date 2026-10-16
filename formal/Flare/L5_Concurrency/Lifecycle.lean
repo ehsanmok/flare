@@ -66,14 +66,14 @@ def joinR : Nat → H → H
   | k + 1, h => join (joinR k h)
 
 /-- Spawns `0..k-1` succeeded: context `i` allocated, thread `i` running.
-mirrors flare/runtime/scheduler.mojo:545-590 @59bda50 -/
+mirrors flare/runtime/scheduler.mojo#Scheduler.start sha=1ab2edc505a7 at=59bda50f -/
 def spawnR : Nat → H → H
   | 0, h => h
   | k + 1, h => { (alloc (.ctx k) (spawnR k h)) with thr := (spawnR k h).thr + 1 }
 
 /-- Allocation before the first spawn; `pre` is `prebind_per_worker`, `L`
 the number of per-worker listeners (`n * (1 + len(extra_addrs))`).
-mirrors flare/runtime/scheduler.mojo:361-543 @59bda50 -/
+mirrors flare/runtime/scheduler.mojo#Scheduler.start sha=1ab2edc505a7 at=59bda50f -/
 def startAlloc (pre : Bool) (n L : Nat) : H :=
   let h := alloc .stop H.empty
   let h := if pre then h else alloc .shared h
@@ -81,18 +81,10 @@ def startAlloc (pre : Bool) (n L : Nat) : H :=
   let h := allocR .stats n h
   if pre then allocR .pwl L h else h
 
-/-- The rollback before the CONC-06 fix (`fix = false`). -/
-abbrev rollbackPreFix : Bool := false
-
-/-- The rollback flare ships (`fix = true`): it also frees
-`_per_worker_listener_addrs`. -/
-abbrev rollbackShipped : Bool := true
-
-/-- `start` with spawn `k` failing, then the rollback; `fix` adds the
-CONC-06 fix (free `_per_worker_listener_addrs`: `rollbackShipped`).
-mirrors flare/runtime/scheduler.mojo:591-640 (fixed, CONC-06);
-pre-fix: flare/runtime/scheduler.mojo:572-633 @59bda50 -/
-def startFail (fix pre : Bool) (n L k : Nat) : H :=
+/-- `start` with spawn `k` failing, then the rollback, which also frees
+`_per_worker_listener_addrs` (CONC-06).
+mirrors flare/runtime/scheduler.mojo#Scheduler.start sha=50fb20a5a897 at=3d5fa34a (fixed, CONC-06) -/
+def startFail (pre : Bool) (n L k : Nat) : H :=
   let h := spawnR k (startAlloc pre n L)
   let h := alloc (.ctx k) h
   let h := joinR k h
@@ -101,12 +93,12 @@ def startFail (fix pre : Bool) (n L k : Nat) : H :=
   let h := free (.ctx k) h
   let h := freeR .stats n h
   let h := if pre then h else free .shared h
-  let h := if fix && pre then freeR .pwl L h else h
+  let h := if pre then freeR .pwl L h else h
   free .stop h
 
 /-- `_abandon_start` after a failed per-worker bind, before any spawn:
 `b` listeners stored so far. `_free_resources` then the worker array.
-mirrors flare/runtime/scheduler.mojo:511-543,643-653,703-744 @59bda50 -/
+mirrors flare/runtime/scheduler.mojo#Scheduler.start+Scheduler._abandon_start+Scheduler._free_resources sha=4cc31f9f8857 at=59bda50f -/
 def abandon (n b : Nat) : H :=
   let h := alloc .stop H.empty
   let h := alloc .warr h
@@ -257,15 +249,6 @@ theorem freeR_pwl (k : Nat) (h : H) (ht : h.thr = 0) (hc : ∀ i, i < k → 1 �
 theorem joinR_all (k : Nat) (h : H) (hk : h.thr = k) : joinR k h = { h with thr := 0 } := by
   rw [joinR_eq k h (by omega)]; congr 1; omega
 
-/-- What a rollback leaves allocated. -/
-def leftover (fix pre : Bool) (L : Nat) : Res → Nat
-  | .pwl i => if !fix && pre && decide (i < L) then 1 else 0
-  | _ => 0
-
-/-- The rollback, in closed form, for every `n`, every listener count `L`
-and every failing spawn index `k`: no double free, nothing freed under a
-live worker, every spawned worker joined, and allocated afterwards exactly
-`leftover`. -/
 theorem free_pos (r : Res) (h : H) (hc : h.cnt r ≠ 0) (ht : h.thr = 0) :
     free r h = { h with cnt := fun x => if x = r then h.cnt x - 1 else h.cnt x } := by
   obtain ⟨cnt, thr, dbl, uaf⟩ := h
@@ -331,47 +314,26 @@ theorem phaseD (pre : Bool) (n L : Nat) :
   · simp only [if_true, H.mk.injEq, and_true]
     funext r; cases r <;> simp [cD, cC, cA, hits_stats]
 
-theorem phaseE (fix pre : Bool) (L : Nat) :
-    free .stop (if (fix && pre) = true then freeR .pwl L ⟨cD pre L, 0, false, false⟩
-      else ⟨cD pre L, 0, false, false⟩) = ⟨leftover fix pre L, 0, false, false⟩ := by
-  cases fix <;> cases pre
-  all_goals simp only [Bool.and_true, Bool.and_false,
-    Bool.false_eq_true, if_true, if_false]
+theorem phaseE (pre : Bool) (L : Nat) :
+    free .stop (if pre = true then freeR .pwl L ⟨cD pre L, 0, false, false⟩
+      else ⟨cD pre L, 0, false, false⟩) = H.empty := by
+  cases pre
+  all_goals simp only [Bool.false_eq_true, if_true, if_false]
   all_goals try rw [freeR_pwl L _ rfl (by intro i hi; simp [cD, hi])]
   all_goals rw [free_pos .stop _ (by simp [cD, hits_pwl]) rfl]
-  all_goals simp only [H.mk.injEq, and_true]
-  all_goals funext r; cases r <;> simp [cD, leftover, hits_pwl]
+  all_goals simp only [H.empty, H.mk.injEq, and_true]
+  all_goals funext r; cases r <;> simp [cD, hits_pwl]
 
-/-- The rollback, in closed form, for every `n`, every listener count `L`
-and every failing spawn index `k`: no double free, nothing freed under a
-live worker, every spawned worker joined, and allocated afterwards exactly
-`leftover`. -/
-theorem startFail_eq (fix pre : Bool) (n L k : Nat) :
-    startFail fix pre n L k = ⟨leftover fix pre L, 0, false, false⟩ := by
+/-- Headline: for every `n`, every listener count `L` and every failing
+spawn index `k`, in both listener modes, a failed `start` leaves nothing
+allocated, frees nothing twice, frees nothing under a running worker and
+joins every spawned worker. -/
+theorem rollback_clean (pre : Bool) (n L k : Nat) : startFail pre n L k = H.empty := by
   simp only [startFail]
   rw [phaseA, phaseB, phaseC]
   have hD := phaseD pre n L
   cases pre <;> simp only [Bool.false_eq_true, if_true, if_false] at hD ⊢ <;> rw [hD] <;>
-    exact phaseE fix _ L
-
-/-- Headline (bug side): flare's rollback in the per-worker listener mode
-leaves every per-worker listener allocated (and nothing else). -/
-theorem impl_rollback_leaks (n L k : Nat) (i : Nat) (hi : i < L) :
-    (startFail false true n L k).cnt (.pwl i) = 1 := by
-  rw [startFail_eq]; simp [leftover, hi]
-
-/-- Headline (fix side): with the per-worker listeners freed too, a failed
-`start` leaves nothing allocated, frees nothing twice, frees nothing under
-a running worker and joins every spawned worker; in shared-listener mode
-flare's own rollback already does. -/
-theorem fixed_rollback_clean (pre : Bool) (n L k : Nat) :
-    startFail true pre n L k = H.empty := by
-  rw [startFail_eq]; simp only [H.empty, H.mk.injEq, and_true]
-  funext r; cases r <;> simp [leftover]
-
-theorem impl_rollback_clean_shared (n L k : Nat) : startFail false false n L k = H.empty := by
-  rw [startFail_eq]; simp only [H.empty, H.mk.injEq, and_true]
-  funext r; cases r <;> simp [leftover]
+    first | exact phaseE false L | exact phaseE true L
 
 /-- `_abandon_start` (a failed per-worker bind before any spawn) is clean. -/
 theorem abandon_clean (n b : Nat) : abandon n b = H.empty := by
@@ -386,7 +348,7 @@ theorem abandon_clean (n b : Nat) : abandon n b = H.empty := by
 /-! ## 2. Drain's stuck-worker index bookkeeping -/
 
 /-- Mojo `List.pop(idx)`.
-mirrors flare/runtime/scheduler.mojo:893-896 @59bda50 -/
+mirrors flare/runtime/scheduler.mojo#Scheduler.drain sha=df979eac331a at=59bda50f -/
 def eraseAt {α : Type} : List α → Nat → List α
   | [], _ => []
   | _ :: l, 0 => l
@@ -398,14 +360,14 @@ def keepIdx {α : Type} (p : Nat → Bool) : List α → List α
   | a :: l => if p 0 then a :: keepIdx (fun j => p (j + 1)) l else keepIdx (fun j => p (j + 1)) l
 
 /-- The sweep appends `i` to `stuck` when worker `i` was detached.
-mirrors flare/runtime/scheduler.mojo:845-855 @59bda50 -/
+mirrors flare/runtime/scheduler.mojo#Scheduler.drain sha=df979eac331a at=59bda50f -/
 def sweepStuck (det : Nat → Bool) : Nat → List Nat
   | 0 => []
   | k + 1 => sweepStuck det k ++ (if det k then [k] else [])
 
 /-- `for k in range(len(stuck) - 1, -1, -1): idx = stuck[k];
 if idx < len(l): l.pop(idx)`.
-mirrors flare/runtime/scheduler.mojo:890-896 @59bda50 -/
+mirrors flare/runtime/scheduler.mojo#Scheduler.drain sha=df979eac331a at=59bda50f -/
 def popStuck {α : Type} (l : List α) (stuck : List Nat) : List α :=
   stuck.reverse.foldl (fun acc i => if i < acc.length then eraseAt acc i else acc) l
 
@@ -597,7 +559,7 @@ def liveAfter (w : WOut) : Bool := !w.done || w.rc != .ok
 /-- flare appends to `stuck` only when `detach` returned; a raising
 `join`/`detach` falls into `except: pass` and the worker's resources are
 freed with the rest (`_join_workers` has no stuck list at all).
-mirrors flare/runtime/scheduler.mojo:670-689,846-855 @59bda50 -/
+mirrors flare/runtime/scheduler.mojo#Scheduler._join_workers+Scheduler.drain sha=1096697d9634 at=59bda50f -/
 def keptImpl (w : WOut) : Bool := !w.done && w.rc == .ok
 
 /-- Hardened variant: treat a failed call like a detached worker. -/

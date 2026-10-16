@@ -8,10 +8,7 @@ import Flare.Core
 `_insert`, `_lookup`, and the size-update branch of `decode` (413-423).
 
 Entries hold the octets flare *stores*, which are the wire octets after
-`_octets_to_string` (48-76), which keeps them unchanged (`octetsToString`;
-the pre-fix lossy conversion is `octetsToStringOld`, with a local
-transliteration of `utf8_lossy_string`
-(`flare/http/proto/utf8.mojo:31-139`)).
+`_octets_to_string` (48-76), which keeps them unchanged (`octetsToString`).
 
 `dynamic_size` is a Mojo `Int`; it is modelled as `Nat`, and
 `Inv.size_eq` proves it always equals the sum of entry sizes, so the
@@ -31,7 +28,7 @@ structure Entry where
   deriving Repr, DecidableEq
 
 /-- RFC 7541 §4.1 entry size.
-mirrors flare/http2/hpack.mojo:287-288 @59bda50 -/
+mirrors flare/http2/hpack.mojo#HpackDecoder._entry_size sha=433f9f840f8b at=59bda50f -/
 def entrySize (e : Entry) : Nat := e.name.length + e.value.length + 32
 
 /-- Sum of entry sizes (RFC 7541 §4.1 table size). -/
@@ -67,7 +64,7 @@ structure Inv (t : Table) : Prop where
 
 /-- One iteration bound: the `while` loop of `_evict_to_fit` removes one
 entry per iteration, so `dyn.length` iterations always suffice.
-mirrors flare/http2/hpack.mojo:290-297 @59bda50 -/
+mirrors flare/http2/hpack.mojo#HpackDecoder._evict_to_fit sha=17585b9d96bf at=59bda50f -/
 def evictLoop (room : Nat) : Nat → Table → Table
   | 0, t => t
   | n + 1, t =>
@@ -78,7 +75,7 @@ def evictLoop (room : Nat) : Nat → Table → Table
 
 def evictToFit (t : Table) (room : Nat) : Table := evictLoop room t.dyn.length t
 
-/-- mirrors flare/http2/hpack.mojo:299-316 @59bda50 -/
+/-- mirrors flare/http2/hpack.mojo#HpackDecoder._insert sha=699181d052b0 at=59bda50f -/
 def insert (t : Table) (e : Entry) : Table :=
   let sz := entrySize e
   if sz > t.maxSize then { t with dyn := [], size := 0 }
@@ -94,7 +91,7 @@ inductive SizeUpd where
   deriving Repr, DecidableEq
 
 /-- Dynamic table size update (§6.3), `fieldsSoFar` = `len(headers)`.
-mirrors flare/http2/hpack.mojo:412-423 @59bda50 -/
+mirrors flare/http2/hpack.mojo#HpackDecoder.decode sha=cfb18a8cf4b0 at=59bda50f -/
 def sizeUpdate (t : Table) (n : Nat) (fieldsSoFar : Nat) : SizeUpd :=
   if n > t.settingsMax then .exceedsCap
   else if fieldsSoFar > 0 then .afterField
@@ -281,7 +278,7 @@ inductive Look where
   | errRange
   deriving Repr, DecidableEq
 
-/-- mirrors flare/http2/hpack.mojo:318-328 @59bda50 -/
+/-- mirrors flare/http2/hpack.mojo#HpackDecoder._lookup sha=61c025d3e60b at=59bda50f -/
 def lookup (t : Table) (idx : Nat) : Look :=
   if idx = 0 then .errZero
   else if idx ≤ STATIC_TABLE_LEN then .static idx

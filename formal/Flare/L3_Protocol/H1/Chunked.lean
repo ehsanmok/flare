@@ -16,9 +16,8 @@ chunk size bounded by `max_body`, so `Nat` is faithful as long as
 `16 * max_body + 15 < 2^63` (`parseSize_fits`); `Int64` wraparound past
 that bound is exhibited in `parseSize_wraps_unbounded`.
 
-The scanner is parameterised by a `Policy` so that the shipped behaviour
-(`implP`, which includes the H1-01 and H1-02 fixes; `oldP` and `preSegP` are
-the pre-fix scanners kept for the counterexamples) share every lemma.
+The scanner includes the H1-01 (one byte of slack, capped trailer lines) and
+H1-02 (bare LF is MALFORMED) fixes.
 -/
 namespace Flare.L3.H1.Chunked
 open Flare
@@ -26,13 +25,13 @@ open Flare
 /-! ## Byte-level helpers -/
 
 /-- First `CR LF` in `l`, as an index.
-mirrors flare/http/proto/chunked.mojo:257-263 (fixed, H1-02) -/
+mirrors flare/http/proto/chunked.mojo#scan_chunked_resume sha=52a150d16682 at=ea1b9282 (fixed, H1-02) -/
 def findCRLF : Bytes → Option Nat
   | [] => none
   | [_] => none
   | a :: b :: t => if a = 13 ∧ b = 10 then some 0 else (findCRLF (b :: t)).map (· + 1)
 
-/-- mirrors flare/http/proto/chunked.mojo:171-180 @59bda50 -/
+/-- mirrors flare/http/proto/chunked.mojo#_hex_val sha=9ba2c5e09459 at=59bda50f -/
 def hexVal (b : UInt8) : Option Nat :=
   if 48 ≤ b ∧ b ≤ 57 then some (b.toNat - 48)
   else if 97 ≤ b ∧ b ≤ 102 then some (b.toNat - 87)
@@ -41,7 +40,7 @@ def hexVal (b : UInt8) : Option Nat :=
 
 /-- The chunk-size loop with the per-digit `max_body` guard. Returns
 `none` for MALFORMED, else `(size, digits)`.
-mirrors flare/http/proto/chunked.mojo:252-266 @59bda50 -/
+mirrors flare/http/proto/chunked.mojo#scan_chunked_resume sha=52a150d16682 at=ea1b9282 -/
 def parseSize (maxBody : Nat) : Bytes → Nat → Nat → Option (Nat × Nat)
   | [], s, d => some (s, d)
   | c :: cs, s, d =>
@@ -109,29 +108,13 @@ def SRes.toInt : SRes → Int
   | .malformed => -2
   | .done e => e
 
-/-- `CHUNK_LINE_MAX`. mirrors flare/http/proto/chunked.mojo:183 @59bda50 -/
+/-- `CHUNK_LINE_MAX`. mirrors flare/http/proto/chunked.mojo#CHUNK_LINE_MAX sha=ff012835aad3 at=59bda50f -/
 def CAP : Nat := 4096
 
-/-- `slack`: the incomplete-line test is `n - pos > CAP + slack`
-(shipped: 1, since H1-01). `capTrailer`: complete trailer lines are also
-capped (shipped: true, since H1-01). `rejectLF`: a chunk-size or trailer line
-whose content holds a bare LF is MALFORMED (shipped: true, since H1-02). -/
-structure Policy where
-  slack : Nat
-  capTrailer : Bool
-  rejectLF : Bool
-
-/-- The scanner as it was at 59bda50, before the H1-02 fix. Kept only so that
-`Bugs.H1_02.counterexample` stays checkable. -/
-def oldP : Policy := ⟨0, false, false⟩
-/-- The scanner after the H1-02 fix and before the H1-01 fix (no slack, no
-trailer cap). Kept only so that `Bugs.H1_01.counterexample` stays checkable. -/
-def preSegP : Policy := ⟨0, false, true⟩
-/-- The shipped behaviour: one byte of slack in the incomplete-line tests and a
-cap on complete trailer lines (H1-01), and a size or trailer line containing LF
-is MALFORMED (H1-02).
-mirrors flare/http/proto/chunked.mojo:238-345 (fixed, H1-01) -/
-def implP : Policy := ⟨1, true, true⟩
+/- The incomplete-line tests allow one byte of slack (`n - pos > CAP + 1`),
+complete trailer lines are capped too (H1-01), and a size or trailer line
+containing a bare LF is MALFORMED (H1-02).
+mirrors flare/http/proto/chunked.mojo#scan_chunked_end+scan_chunked_resume sha=856858ada940 at=a38e326b (fixed, H1-01) -/
 
 theorem findCRLF_lt : ∀ {l : Bytes} {k : Nat}, findCRLF l = some k → k + 2 ≤ l.length
   | [], _, h => by simp [findCRLF] at h
@@ -147,66 +130,62 @@ theorem findCRLF_lt : ∀ {l : Bytes} {k : Nat}, findCRLF l = some k → k + 2 �
         have := findCRLF_lt h'; simp at this ⊢; omega
 
 /-- Trailer section after the last chunk: lines until an empty one.
-mirrors flare/http/proto/chunked.mojo:290-314 (fixed, H1-02) -/
-def scanTr (P : Policy) (l : Bytes) : SRes :=
+mirrors flare/http/proto/chunked.mojo#scan_chunked_resume sha=52a150d16682 at=ea1b9282 (fixed, H1-02) -/
+def scanTr (l : Bytes) : SRes :=
   match l with
   | [] => .incomplete
   | [_] => .incomplete
   | a :: b :: t =>
     if a = 13 ∧ b = 10 then .done 2 else
     match h : findCRLF (a :: b :: t) with
-    | none => if (a :: b :: t).length > CAP + P.slack then .malformed else .incomplete
+    | none => if (a :: b :: t).length > CAP + 1 then .malformed else .incomplete
     | some k =>
-      if P.capTrailer = true ∧ k > CAP then .malformed else
-      if P.rejectLF = true ∧ 10 ∈ (a :: b :: t).take k then .malformed else
-      (scanTr P ((a :: b :: t).drop (k + 2))).shift (k + 2)
+      if k > CAP then .malformed else
+      if 10 ∈ (a :: b :: t).take k then .malformed else
+      (scanTr ((a :: b :: t).drop (k + 2))).shift (k + 2)
 termination_by l.length
 decreasing_by simp only [List.length_drop, List.length_cons]; omega
 
 /-- The main scan loop over the suffix `l = buf[pos:]`. Returns the
 verdict (offsets relative to `l`), how far the cursor advanced, and the
-decoded total. mirrors flare/http/proto/chunked.mojo:253-325 (fixed, H1-02) -/
-def scanL (P : Policy) (maxBody : Nat) (l : Bytes) (tot : Nat) : SRes × Nat × Nat :=
+decoded total. mirrors flare/http/proto/chunked.mojo#scan_chunked_resume sha=52a150d16682 at=ea1b9282 (fixed, H1-02) -/
+def scanL (maxBody : Nat) (l : Bytes) (tot : Nat) : SRes × Nat × Nat :=
   match hf : findCRLF l with
-  | none => (if l.length > CAP + P.slack then .malformed else .incomplete, 0, tot)
+  | none => (if l.length > CAP + 1 then .malformed else .incomplete, 0, tot)
   | some k =>
     if k > CAP then (.malformed, 0, tot) else
-    if P.rejectLF = true ∧ 10 ∈ l.take k then (.malformed, 0, tot) else
+    if 10 ∈ l.take k then (.malformed, 0, tot) else
     match parseSize maxBody (l.take k) 0 0 with
     | none => (.malformed, 0, tot)
     | some (size, digits) =>
       if digits = 0 then (.malformed, 0, tot) else
-      if size = 0 then ((scanTr P (l.drop (k + 2))).shift (k + 2), 0, tot) else
+      if size = 0 then ((scanTr (l.drop (k + 2))).shift (k + 2), 0, tot) else
       if tot + size > maxBody then (.malformed, 0, tot) else
       if l.length < k + 2 + size + 2 then (.incomplete, 0, tot) else
       if l.getD (k + 2 + size) ≠ 13 ∨ l.getD (k + 2 + size + 1) ≠ 10 then
         (.malformed, 0, tot) else
-      let r := scanL P maxBody (l.drop (k + 2 + size + 2)) (tot + size)
+      let r := scanL maxBody (l.drop (k + 2 + size + 2)) (tot + size)
       (r.1.shift (k + 2 + size + 2), r.2.1 + (k + 2 + size + 2), r.2.2)
 termination_by l.length
 decreasing_by have := findCRLF_lt hf; simp only [List.length_drop]; omega
 
 /-- `scan_chunked_resume(buf, cursor, decoded_total, max_body)`: verdict,
 new cursor, new decoded total.
-mirrors flare/http/proto/chunked.mojo:229-325 (fixed, H1-02) -/
-def scanResume (P : Policy) (buf : Bytes) (cursor tot maxBody : Nat) : SRes × Nat × Nat :=
-  let r := scanL P maxBody (buf.drop cursor) tot
+mirrors flare/http/proto/chunked.mojo#scan_chunked_resume sha=52a150d16682 at=ea1b9282 (fixed, H1-02) -/
+def scanResume (buf : Bytes) (cursor tot maxBody : Nat) : SRes × Nat × Nat :=
+  let r := scanL maxBody (buf.drop cursor) tot
   (r.1.shift cursor, cursor + r.2.1, r.2.2)
 
-/-- mirrors flare/http/proto/chunked.mojo:207-226 (fixed, H1-02) -/
-def scanEnd (P : Policy) (buf : Bytes) (start maxBody : Nat) : SRes :=
-  (scanResume P buf start 0 maxBody).1
+/-- mirrors flare/http/proto/chunked.mojo#scan_chunked_end sha=1c31f7d4dd02 at=a3ae72f9 (fixed, H1-02) -/
+def scanEnd (buf : Bytes) (start maxBody : Nat) : SRes :=
+  (scanResume buf start 0 maxBody).1
 
 /-- The shipped scanner. -/
-abbrev scanImpl := scanEnd implP
-/-- The scanner before the H1-02 fix. -/
-abbrev scanOld := scanEnd oldP
-/-- The scanner before the H1-01 fix. -/
-abbrev scanPreSeg := scanEnd preSegP
+abbrev scanImpl := scanEnd
 
 /-! ## Decoder -/
 
-/-- mirrors flare/http/proto/chunked.mojo:328-338 @59bda50 (no `max_body`) -/
+/-- mirrors flare/http/proto/chunked.mojo#decode_chunked_body sha=637747c81f85 at=59bda50f (no `max_body`) -/
 def parseHexD : Bytes → Nat → Option Nat
   | [], s => some s
   | c :: cs, s =>
@@ -215,7 +194,7 @@ def parseHexD : Bytes → Nat → Option Nat
     | none => none
     | some v => parseHexD cs (s * 16 + v)
 
-/-- mirrors flare/http/proto/chunked.mojo:340-355 @59bda50 -/
+/-- mirrors flare/http/proto/chunked.mojo#decode_chunked_body sha=637747c81f85 at=59bda50f -/
 def decTr (l : Bytes) : Except String Nat :=
   match l with
   | [] => .error "chunked: truncated terminator"
@@ -229,7 +208,7 @@ termination_by l.length
 decreasing_by simp only [List.length_drop, List.length_cons]; omega
 
 /-- `decode_chunked_body`: decoded bytes and end offset (relative).
-mirrors flare/http/proto/chunked.mojo:306-360 @59bda50 -/
+mirrors flare/http/proto/chunked.mojo#decode_chunked_body sha=637747c81f85 at=59bda50f -/
 def decL (l : Bytes) : Except String (Bytes × Nat) :=
   match hf : findCRLF l with
   | none => .error "chunked: truncated size line"
@@ -244,7 +223,7 @@ def decL (l : Bytes) : Except String (Bytes × Nat) :=
 termination_by l.length
 decreasing_by have := findCRLF_lt hf; simp only [List.length_drop]; omega
 
-/-- `decode_chunked_body(buf, start)`. mirrors flare/http/proto/chunked.mojo:306-360 @59bda50 -/
+/-- `decode_chunked_body(buf, start)`. mirrors flare/http/proto/chunked.mojo#decode_chunked_body sha=637747c81f85 at=59bda50f -/
 def decodeBody (buf : Bytes) (start : Nat) : Except String (Bytes × Nat) :=
   (decL (buf.drop start)).map fun r => (r.1, r.2 + start)
 
@@ -283,9 +262,9 @@ theorem take_cons2_append (a b : UInt8) (t m : Bytes) {k : Nat} (h : k + 2 ≤ (
     (a :: b :: (t ++ m)).take k = (a :: b :: t).take k := by
   rw [← List.cons_append, ← List.cons_append]; exact List.take_append_of_le_length (by omega)
 
-theorem scanTr_done_append (P : Policy) (m : Bytes) : ∀ (l : Bytes) (e : Nat), scanTr P l = .done e → scanTr P (l ++ m) = .done e := by
+theorem scanTr_done_append (m : Bytes) : ∀ (l : Bytes) (e : Nat), scanTr l = .done e → scanTr (l ++ m) = .done e := by
   intro l
-  fun_induction scanTr P l <;> intro e h
+  fun_induction scanTr l <;> intro e h
   case case3 a b t hab =>
     rw [List.cons_append, List.cons_append, scanTr]; simp_all
   case case8 a b t hab k hk hcap hlf ih =>
@@ -307,35 +286,35 @@ theorem getD_append_lt (l m : Bytes) (i : Nat) (h : i < l.length) : Bytes.getD (
   simp [Bytes.getD, List.getElem?_append_left h]
 
 
-theorem scanL_none {P : Policy} {mb : Nat} {l : Bytes} {tot : Nat} (h : findCRLF l = none) :
-    scanL P mb l tot = (if l.length > CAP + P.slack then .malformed else .incomplete, 0, tot) := by
+theorem scanL_none {mb : Nat} {l : Bytes} {tot : Nat} (h : findCRLF l = none) :
+    scanL mb l tot = (if l.length > CAP + 1 then .malformed else .incomplete, 0, tot) := by
   rw [scanL]; split
   · rfl
   · simp_all
 
-theorem scanL_some {P : Policy} {mb : Nat} {l : Bytes} {tot k : Nat} (h : findCRLF l = some k) :
-    scanL P mb l tot =
+theorem scanL_some {mb : Nat} {l : Bytes} {tot k : Nat} (h : findCRLF l = some k) :
+    scanL mb l tot =
     (if k > CAP then (.malformed, 0, tot) else
-    if P.rejectLF = true ∧ 10 ∈ l.take k then (.malformed, 0, tot) else
+    if 10 ∈ l.take k then (.malformed, 0, tot) else
     match parseSize mb (l.take k) 0 0 with
     | none => (.malformed, 0, tot)
     | some (size, digits) =>
       if digits = 0 then (.malformed, 0, tot) else
-      if size = 0 then ((scanTr P (l.drop (k + 2))).shift (k + 2), 0, tot) else
+      if size = 0 then ((scanTr (l.drop (k + 2))).shift (k + 2), 0, tot) else
       if tot + size > mb then (.malformed, 0, tot) else
       if l.length < k + 2 + size + 2 then (.incomplete, 0, tot) else
       if l.getD (k + 2 + size) ≠ 13 ∨ l.getD (k + 2 + size + 1) ≠ 10 then
         (.malformed, 0, tot) else
-      let r := scanL P mb (l.drop (k + 2 + size + 2)) (tot + size)
+      let r := scanL mb (l.drop (k + 2 + size + 2)) (tot + size)
       (r.1.shift (k + 2 + size + 2), r.2.1 + (k + 2 + size + 2), r.2.2)) := by
   rw [scanL]; split
   · simp_all
   · rename_i k2 hk2; rw [h] at hk2; cases hk2; rfl
 
-theorem scanL_done_append (P : Policy) (mb : Nat) (m : Bytes) : ∀ (l : Bytes) (tot e adv t : Nat),
-    scanL P mb l tot = (.done e, adv, t) → scanL P mb (l ++ m) tot = (.done e, adv, t) := by
+theorem scanL_done_append (mb : Nat) (m : Bytes) : ∀ (l : Bytes) (tot e adv t : Nat),
+    scanL mb l tot = (.done e, adv, t) → scanL mb (l ++ m) tot = (.done e, adv, t) := by
   intro l tot
-  fun_induction scanL P mb l tot <;> intro e adv t h
+  fun_induction scanL mb l tot <;> intro e adv t h
   case case6 l tot k hk hcap hlf digits hd hps =>
     have hlen := findCRLF_lt hk
     rw [scanL_some (findCRLF_append m hk), List.take_append_of_le_length (by omega), hps]
@@ -345,7 +324,7 @@ theorem scanL_done_append (P : Policy) (mb : Nat) (m : Bytes) : ∀ (l : Bytes) 
     obtain ⟨h1, h2, h3⟩ := h
     obtain ⟨e', h1', rfl⟩ := SRes.shift_eq_done.mp h1
     refine ⟨?_, h2, h3⟩
-    rw [scanTr_done_append P m _ e' h1']; rfl
+    rw [scanTr_done_append m _ e' h1']; rfl
   case case10 l tot k hk hcap hlf size digits hps hd hs hmb hl hcrlf r ih =>
     have hlen := findCRLF_lt hk
     rw [scanL_some (findCRLF_append m hk), List.take_append_of_le_length (by omega), hps]
@@ -367,15 +346,15 @@ theorem SRes.shift_shift (r : SRes) (a b : Nat) : (r.shift a).shift b = r.shift 
 
 /-- Resumption: when the scan stops for more input, re-running it on any
 extension from the saved cursor equals re-running from the start. -/
-theorem scanL_resume (P : Policy) (mb : Nat) (m : Bytes) : ∀ (l : Bytes) (tot adv t : Nat),
-    scanL P mb l tot = (.incomplete, adv, t) →
+theorem scanL_resume (mb : Nat) (m : Bytes) : ∀ (l : Bytes) (tot adv t : Nat),
+    scanL mb l tot = (.incomplete, adv, t) →
     adv ≤ l.length ∧
-    scanL P mb (l ++ m) tot =
-      ((scanL P mb ((l ++ m).drop adv) t).1.shift adv,
-       (scanL P mb ((l ++ m).drop adv) t).2.1 + adv,
-       (scanL P mb ((l ++ m).drop adv) t).2.2) := by
+    scanL mb (l ++ m) tot =
+      ((scanL mb ((l ++ m).drop adv) t).1.shift adv,
+       (scanL mb ((l ++ m).drop adv) t).2.1 + adv,
+       (scanL mb ((l ++ m).drop adv) t).2.2) := by
   intro l tot
-  fun_induction scanL P mb l tot <;> intro adv t h <;> simp only [Prod.mk.injEq] at h
+  fun_induction scanL mb l tot <;> intro adv t h <;> simp only [Prod.mk.injEq] at h
   case case10 l tot k hk hcap hlf size digits hps hd hs hmb hl hcrlf r ih =>
     obtain ⟨h1, h2, h3⟩ := h
     have hlen := findCRLF_lt hk
@@ -416,12 +395,12 @@ theorem findCRLF_none_append : ∀ {l : Bytes} {k : Nat} (m : Bytes),
         have := findCRLF_none_append (l := b :: t) m h4 (by simpa using h3)
         simp at this ⊢; omega
 
-/-- With `slack ≥ 1` and capped complete trailer lines (the H1-01 fix),
-a MALFORMED trailer verdict survives any extension. -/
-theorem scanTr_malformed_append (P : Policy) (hs : 1 ≤ P.slack) (hc : P.capTrailer = true)
-    (m : Bytes) : ∀ (l : Bytes), scanTr P l = .malformed → scanTr P (l ++ m) = .malformed := by
+/-- With one byte of slack and capped complete trailer lines (H1-01), a
+MALFORMED trailer verdict survives any extension. -/
+theorem scanTr_malformed_append
+    (m : Bytes) : ∀ (l : Bytes), scanTr l = .malformed → scanTr (l ++ m) = .malformed := by
   intro l
-  fun_induction scanTr P l <;> intro h
+  fun_induction scanTr l <;> intro h
   case case4 a b t hab hn hlen =>
     rw [List.cons_append, List.cons_append, scanTr, if_neg hab]
     split
@@ -429,7 +408,7 @@ theorem scanTr_malformed_append (P : Policy) (hs : 1 ≤ P.slack) (hc : P.capTra
     · rename_i k hk
       have := findCRLF_none_append m hn (by simpa using hk)
       simp only [List.length_cons] at this hlen
-      rw [if_pos (by simp only [hc, true_and, CAP] at hlen ⊢; omega)]
+      rw [if_pos (by simp only [CAP] at hlen ⊢; omega)]
   case case6 a b t hab k hk hcap =>
     have hk' := findCRLF_append m hk
     rw [List.cons_append, List.cons_append, scanTr, if_neg hab]
@@ -461,11 +440,11 @@ theorem scanTr_malformed_append (P : Policy) (hs : 1 ≤ P.slack) (hc : P.capTra
   all_goals simp at h
 
 /-- With the H1-01 fix a MALFORMED verdict survives any extension. -/
-theorem scanL_malformed_append (P : Policy) (hs : 1 ≤ P.slack) (hc : P.capTrailer = true)
+theorem scanL_malformed_append
     (mb : Nat) (m : Bytes) : ∀ (l : Bytes) (tot adv t : Nat),
-    scanL P mb l tot = (.malformed, adv, t) → scanL P mb (l ++ m) tot = (.malformed, adv, t) := by
+    scanL mb l tot = (.malformed, adv, t) → scanL mb (l ++ m) tot = (.malformed, adv, t) := by
   intro l tot
-  fun_induction scanL P mb l tot <;> intro adv t h <;> simp only [Prod.mk.injEq] at h
+  fun_induction scanL mb l tot <;> intro adv t h <;> simp only [Prod.mk.injEq] at h
   case case1 l tot hn =>
     obtain ⟨h1, rfl, rfl⟩ := h
     split at h1
@@ -498,7 +477,7 @@ theorem scanL_malformed_append (P : Policy) (hs : 1 ≤ P.slack) (hc : P.capTrai
     rw [scanL_some (findCRLF_append m hk), if_neg hcap, List.take_append_of_le_length (by omega), if_neg hlf, hps]
     simp only [if_neg hd, if_true]
     rw [List.drop_append_of_le_length hlen,
-      scanTr_malformed_append P hs hc m _ (SRes.shift_eq_malformed.mp h1)]
+      scanTr_malformed_append m _ (SRes.shift_eq_malformed.mp h1)]
     rfl
   case case7 l tot k hk hcap hlf size digits hps hd hs hmb =>
     obtain ⟨-, rfl, rfl⟩ := h
@@ -526,9 +505,9 @@ theorem scanL_malformed_append (P : Policy) (hs : 1 ≤ P.slack) (hc : P.capTrai
     exact ⟨h2, h3⟩
   all_goals (try split at h) <;> (rcases h with ⟨h1, -, -⟩; simp at h1)
 
-theorem scanTr_done_le (P : Policy) : ∀ (l : Bytes) (e : Nat), scanTr P l = .done e → e ≤ l.length := by
+theorem scanTr_done_le : ∀ (l : Bytes) (e : Nat), scanTr l = .done e → e ≤ l.length := by
   intro l
-  fun_induction scanTr P l <;> intro e h
+  fun_induction scanTr l <;> intro e h
   case case3 => simp at h; subst h; simp
   case case8 a b t hab k hk hcap hlf ih =>
     obtain ⟨e', h1, rfl⟩ := SRes.shift_eq_done.mp h
@@ -536,14 +515,14 @@ theorem scanTr_done_le (P : Policy) : ∀ (l : Bytes) (e : Nat), scanTr P l = .d
     simp only [List.length_drop, List.length_cons] at *; omega
   all_goals simp at h
 
-theorem scanL_done_le (P : Policy) (mb : Nat) : ∀ (l : Bytes) (tot e adv t : Nat),
-    scanL P mb l tot = (.done e, adv, t) → e ≤ l.length := by
+theorem scanL_done_le (mb : Nat) : ∀ (l : Bytes) (tot e adv t : Nat),
+    scanL mb l tot = (.done e, adv, t) → e ≤ l.length := by
   intro l tot
-  fun_induction scanL P mb l tot <;> intro e adv t h <;> simp only [Prod.mk.injEq] at h
+  fun_induction scanL mb l tot <;> intro e adv t h <;> simp only [Prod.mk.injEq] at h
   case case6 l tot k hk hcap hlf digits hd hps =>
     obtain ⟨h1, -, -⟩ := h
     obtain ⟨e', h1', rfl⟩ := SRes.shift_eq_done.mp h1
-    have := scanTr_done_le P _ e' h1'; have := findCRLF_lt hk
+    have := scanTr_done_le _ e' h1'; have := findCRLF_lt hk
     simp only [List.length_drop] at *; omega
   case case10 l tot k hk hcap hlf size digits hps hd hs hmb hl hcrlf r ih =>
     obtain ⟨h1, -, -⟩ := h
@@ -554,17 +533,17 @@ theorem scanL_done_le (P : Policy) (mb : Nat) : ∀ (l : Bytes) (tot e adv t : N
 
 /-- **Result range** (Mojo `Int` view): every verdict of
 `scan_chunked_end` is `-1`, `-2`, or an offset in `[start, len(buf)]`. -/
-theorem scanEnd_range (P : Policy) (buf : Bytes) (start mb : Nat) :
-    (scanEnd P buf start mb).toInt = -1 ∨ (scanEnd P buf start mb).toInt = -2 ∨
-    ∃ e : Nat, scanEnd P buf start mb = .done e ∧ start ≤ e ∧ e ≤ buf.length := by
+theorem scanEnd_range (buf : Bytes) (start mb : Nat) :
+    (scanEnd buf start mb).toInt = -1 ∨ (scanEnd buf start mb).toInt = -2 ∨
+    ∃ e : Nat, scanEnd buf start mb = .done e ∧ start ≤ e ∧ e ≤ buf.length := by
   unfold scanEnd scanResume
-  rcases hr : scanL P mb (buf.drop start) 0 with ⟨r, adv, t⟩
+  rcases hr : scanL mb (buf.drop start) 0 with ⟨r, adv, t⟩
   cases r with
   | incomplete => left; rfl
   | malformed => right; left; rfl
   | done e =>
     right; right
-    have := scanL_done_le P mb _ 0 e adv t hr
+    have := scanL_done_le mb _ 0 e adv t hr
     simp only [List.length_drop] at this
     refine ⟨e + start, rfl, by omega, ?_⟩
     have : start ≤ buf.length := by
@@ -592,9 +571,9 @@ theorem parseSize_hexD (mb : Nat) : ∀ (xs : Bytes) (s d size dg : Nat),
         · simp at h
         · exact parseSize_hexD mb cs _ _ _ _ h
 
-theorem decTr_of_scanTr (P : Policy) : ∀ (l : Bytes) (e : Nat), scanTr P l = .done e → decTr l = .ok e := by
+theorem decTr_of_scanTr : ∀ (l : Bytes) (e : Nat), scanTr l = .done e → decTr l = .ok e := by
   intro l
-  fun_induction scanTr P l <;> intro e h
+  fun_induction scanTr l <;> intro e h
   case case3 a b t hab => simp at h; subst h; rw [decTr, if_pos hab]
   case case8 a b t hab k hk hcap hlf ih =>
     obtain ⟨e', h1, rfl⟩ := SRes.shift_eq_done.mp h
@@ -619,18 +598,18 @@ theorem decL_some {l : Bytes} {k : Nat} (h : findCRLF l = some k) :
 
 /-- **Scan/decode agreement**: when the scanner accepts at `e`, the decoder
 succeeds, ends at the same `e`, and yields exactly the counted bytes. -/
-theorem decL_of_scanL (P : Policy) (mb : Nat) : ∀ (l : Bytes) (tot e adv t : Nat),
-    scanL P mb l tot = (.done e, adv, t) →
+theorem decL_of_scanL (mb : Nat) : ∀ (l : Bytes) (tot e adv t : Nat),
+    scanL mb l tot = (.done e, adv, t) →
     ∃ out, decL l = .ok (out, e) ∧ tot + out.length = t := by
   intro l tot
-  fun_induction scanL P mb l tot <;> intro e adv t h <;> simp only [Prod.mk.injEq] at h
+  fun_induction scanL mb l tot <;> intro e adv t h <;> simp only [Prod.mk.injEq] at h
   case case6 l tot k hk hcap hlf digits hd hps =>
     obtain ⟨h1, -, rfl⟩ := h
     obtain ⟨e', h1', rfl⟩ := SRes.shift_eq_done.mp h1
     refine ⟨[], ?_, by simp⟩
     rw [decL_some hk, parseSize_hexD mb _ 0 0 0 digits hps]
     simp only [if_true]
-    rw [decTr_of_scanTr P _ e' h1']; rfl
+    rw [decTr_of_scanTr _ e' h1']; rfl
   case case10 l tot k hk hcap hlf size digits hps hd hs hmb hl hcrlf r ih =>
     obtain ⟨h1, -, h3⟩ := h
     obtain ⟨e', h1', rfl⟩ := SRes.shift_eq_done.mp h1
@@ -644,10 +623,10 @@ theorem decL_of_scanL (P : Policy) (mb : Nat) : ∀ (l : Bytes) (tot e adv t : N
   all_goals (try split at h) <;> (rcases h with ⟨h1, -, -⟩; simp at h1)
 
 /-- The decoded total never exceeds `max_body`. -/
-theorem scanL_total_le (P : Policy) (mb : Nat) : ∀ (l : Bytes) (tot e adv t : Nat),
-    tot ≤ mb → scanL P mb l tot = (.done e, adv, t) → t ≤ mb := by
+theorem scanL_total_le (mb : Nat) : ∀ (l : Bytes) (tot e adv t : Nat),
+    tot ≤ mb → scanL mb l tot = (.done e, adv, t) → t ≤ mb := by
   intro l tot
-  fun_induction scanL P mb l tot <;> intro e adv t ht h <;> simp only [Prod.mk.injEq] at h
+  fun_induction scanL mb l tot <;> intro e adv t ht h <;> simp only [Prod.mk.injEq] at h
   case case6 => omega
   case case10 l tot k hk hcap hlf size digits hps hd hs hmb hl hcrlf r ih =>
     obtain ⟨h1, -, h3⟩ := h

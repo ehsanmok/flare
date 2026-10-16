@@ -21,17 +21,9 @@
 
 ### Next steps
 
-- Run `formal-check` and `formal-repros` in CI. Neither is wired into
-  `.github` yet. A clean Lean build took about two and a half minutes on an
-  Apple Silicon Mac, and one pass over all repros about six and a half;
-  the io_uring repros need a Linux runner.
-- Keep the models in sync with the code. Each implementation model names the
-  Mojo lines it mirrors, so a CI step could fail when one of
-  those line ranges changes and the matching Lean file does not.
-- Test the models against the code. Running the Lean implementation models
-  with `#eval` on the inputs in the existing fuzz corpora and comparing their
-  output with flare's would catch drift between the transliteration and the
-  source that the fidelity comments cannot.
-- Keep the repros as regression checks. All 138 findings are fixed and every
-  repro carries a `# RESOLVED:` header; `formal-repros` reports a resolved
-  repro that starts failing again as an error.
+- Run `formal-check` and `difftest` in CI. Neither is wired into `.github`
+  yet; the pre-commit hook runs the fast gates and the affected difftests.
+- Work down the tracked-tier anchor backlog (`pixi run -e formal
+  formal-status`), so more models are checked against the current code.
+- Extend the difftest to the client role of HTTP/2 and to QUIC, the largest
+  models it does not reach yet.

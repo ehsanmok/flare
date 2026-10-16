@@ -13,11 +13,11 @@ is the RFC 9204 §4.5.1.1 pseudocode over `Nat` (no wraparound). We prove
 -/
 namespace Flare.L3.Qpack.Ric
 
-/-- mirrors flare/qpack/dynamic.mojo:181-185 @59bda50 -/
+/-- mirrors flare/qpack/dynamic.mojo#encode_required_insert_count sha=a83362cc09ba at=59bda50f -/
 def implEncode (ric maxEntries : UInt64) : UInt64 :=
   if ric = 0 then 0 else ric % (2 * maxEntries) + 1
 
-/-- mirrors flare/qpack/dynamic.mojo:188-209 @59bda50
+/-- mirrors flare/qpack/dynamic.mojo#decode_required_insert_count sha=7099cde3b033 at=59bda50f
 (`none` = raised `Error`). -/
 def implDecode (enc total maxEntries : UInt64) : Option UInt64 :=
   if enc = 0 then some 0
@@ -212,5 +212,49 @@ theorem implDecode_encode (ric total me : UInt64)
   | some v =>
     rw [hd] at h; simp at h
     rw [UInt64.toNat_inj.mp h]
+
+/-! ## Field-section decode failures (QPACK-05)
+
+`dec` is the decoded Required Insert Count (`implDecode`), `ic` the insert
+count, `refsOk` whether every field line resolves. -/
+
+inductive SectionRes | headers | blocked | connErr
+  deriving DecidableEq, Repr
+
+/-- RFC 9204 §2.1.2, §2.2.1, §2.2.3, §4.5.1.1; `blocked` streams are already
+blocked and `B` is the advertised SETTINGS_QPACK_BLOCKED_STREAMS. -/
+def sectionSpec (dec : Option Nat) (ic : Nat) (refsOk : Bool) (blocked B : Nat) : SectionRes :=
+  match dec with
+  | none => .connErr
+  | some r =>
+    if r > ic then (if blocked + 1 > B then .connErr else .blocked)
+    else if refsOk then .headers else .connErr
+
+/-- Every QPACK decode failure on a request stream is a connection error
+QPACK_DECOMPRESSION_FAILED: `feed_stream_chunk` sets `connection_error_code`
+and `_route_http3_stream_chunks` closes the slot with it.
+mirrors flare/http3/request_reader.mojo#feed_into sha=a4e3d230d52b at=ea1b9282, flare/http3/server.mojo#Http3Connection.feed_stream_chunk sha=1c0d566e11a3 at=ea1b9282, flare/quic/server.mojo#QuicListener._route_http3_stream_chunks sha=06a09c670a4f at=ea1b9282 (fixed, QPACK-05) -/
+def sectionImpl (dec : Option Nat) (ic : Nat) (refsOk : Bool) : SectionRes :=
+  match dec with
+  | none => .connErr
+  | some r => if r > ic then .connErr else if refsOk then .headers else .connErr
+
+/-- With table capacity 0 (what the server advertises) every non-zero
+encoded Required Insert Count fails to decode. -/
+theorem implDecode_cap0 (enc ic : UInt64) (h : enc ≠ 0) : implDecode enc ic 0 = none := by
+  simp [implDecode, h]
+
+/-- **QPACK-05**: for the advertised blocked-streams budget 0, flare's verdict
+is the spec's. -/
+theorem sectionImpl_spec (dec : Option Nat) (ic : Nat) (ok : Bool) (blocked : Nat) :
+    sectionImpl dec ic ok = sectionSpec dec ic ok blocked 0 := by
+  unfold sectionImpl sectionSpec
+  cases dec with
+  | none => rfl
+  | some r =>
+    simp only
+    by_cases h : r > ic
+    · simp [h]
+    · simp only [h, ↓reduceIte]
 
 end Flare.L3.Qpack.Ric

@@ -9,13 +9,13 @@ sequence; on a little-endian host the in-memory bytes of `htons x` must be
 -/
 namespace Flare.L1.ByteOrder
 
-/-- mirrors flare/net/_libc.mojo:176-183 @59bda50 -/
+/-- mirrors flare/net/_libc.mojo#_htons sha=43e7c2926431 at=59bda50f -/
 def htons (x : UInt16) : UInt16 := ((x &&& 0xFF) <<< 8) ||| (x >>> 8)
 
-/-- mirrors flare/net/_libc.mojo:186-189 @59bda50 -/
+/-- mirrors flare/net/_libc.mojo#_ntohs sha=6c0698a22281 at=59bda50f -/
 def ntohs (x : UInt16) : UInt16 := htons x
 
-/-- mirrors flare/net/_libc.mojo:192-200 @59bda50 -/
+/-- mirrors flare/net/_libc.mojo#_htonl sha=57c0a8df721e at=59bda50f -/
 def htonl (x : UInt32) : UInt32 :=
   ((x &&& 0xFF) <<< 24) ||| (((x >>> 8) &&& 0xFF) <<< 16) |||
   (((x >>> 16) &&& 0xFF) <<< 8) ||| (x >>> 24)

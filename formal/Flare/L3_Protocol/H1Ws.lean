@@ -12,24 +12,6 @@ import Flare.L3_Protocol.Ws.Frame
 import Flare.L3_Protocol.Ws.Recv
 import Flare.L3_Protocol.Ws.Handshake
 import Flare.L3_Protocol.Ws.Close
-import Flare.Bugs.H1_01
-import Flare.Bugs.H1_02
-import Flare.Bugs.H1_03
-import Flare.Bugs.H1_04
-import Flare.Bugs.H1_05
-import Flare.Bugs.H1_06
-import Flare.Bugs.H1_07
-import Flare.Bugs.H1_08
-import Flare.Bugs.H1_09
-import Flare.Bugs.H1_10
-import Flare.Bugs.H1_11
-import Flare.Bugs.WS_01
-import Flare.Bugs.WS_02
-import Flare.Bugs.WS_03
-import Flare.Bugs.WS_04
-import Flare.Bugs.WS_05
-import Flare.Bugs.WS_06
-import Flare.Bugs.WS_07
 
 /-!
 # L3: HTTP/1.1 framing and WebSocket

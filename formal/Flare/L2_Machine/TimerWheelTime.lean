@@ -234,7 +234,7 @@ theorem u_sub {a b : Nat} (ha : a < 2 ^ 64) (hb : b < 2 ^ 64) (hab : b ≤ a) :
   rw [UInt64.toNat_sub_of_le _ _ ((u_le hb ha).2 hab), u_toNat ha, u_toNat hb]
 
 /-- `fire_at = self._current_tick_ms + UInt64(delay)` in `UInt64`.
-mirrors flare/runtime/timer_wheel.mojo:119-144 @59bda50 -/
+mirrors flare/runtime/timer_wheel.mojo#TimerWheel.schedule sha=be80fbb233f3 at=59bda50f -/
 def schedule64 (s : TW) (after : Int) (token : Nat) : TW × Nat :=
   let id := s.nextId + 1
   let delay := delayOf after
@@ -247,7 +247,7 @@ def schedule64 (s : TW) (after : Int) (token : Nat) : TW × Nat :=
     ({ s with nextId := id, entries := entries, overflow := s.overflow ++ [id] }, id)
 
 /-- `triage` with the `UInt64` comparison `entry.fire_at_ms <= T`.
-mirrors flare/runtime/timer_wheel.mojo:238-255 and :274-285 @59bda50 -/
+mirrors flare/runtime/timer_wheel.mojo#TimerWheel.advance+TimerWheel._jump sha=00654bcfedc6 at=59bda50f -/
 def triage64 {σ : Type} (T : Nat) (put : σ → Nat → Entry → σ) (st : TState σ) (eid : Nat) :
     TState σ :=
   match st.entries eid with
@@ -259,7 +259,7 @@ def triage64 {σ : Type} (T : Nat) (put : σ → Nat → Entry → σ) (st : TSt
     else { st with rest := put st.rest eid e }
 
 /-- `putB` with `dt = fire_at - T` computed in `UInt64`.
-mirrors flare/runtime/timer_wheel.mojo:248-255 and :287-293 @59bda50 -/
+mirrors flare/runtime/timer_wheel.mojo#TimerWheel.advance+TimerWheel._jump sha=00654bcfedc6 at=59bda50f -/
 def putB64 (T slot : Nat) (r : (Nat → List Nat) × List Nat) (eid : Nat) (e : Entry) :
     (Nat → List Nat) × List Nat :=
   if (u e.fireAt - u T).toNat < 512 then
@@ -267,7 +267,7 @@ def putB64 (T slot : Nat) (r : (Nat → List Nat) × List Nat) (eid : Nat) (e : 
     (upd r.1 target (r.1 target ++ [eid]), r.2)
   else (r.1, r.2 ++ [eid])
 
-/-- mirrors flare/runtime/timer_wheel.mojo:208-256 @59bda50 -/
+/-- mirrors flare/runtime/timer_wheel.mojo#TimerWheel.advance sha=d5c643b2869a at=59bda50f -/
 def stepTick64 (s : TW) : TW × List Nat :=
   let tick := (u s.tick + u 1).toNat
   let slot := (s.slot + 1) % 512
@@ -294,7 +294,7 @@ def rebucketOne64 (now slot : Nat) (E : Nat → Option Entry)
   | none => st
   | some e => putB64 now slot st eid e
 
-/-- mirrors flare/runtime/timer_wheel.mojo:258-293 @59bda50 -/
+/-- mirrors flare/runtime/timer_wheel.mojo#TimerWheel._jump sha=33f7786d7db4 at=59bda50f -/
 def jump64 (s : TW) (now : Nat) : TW × List Nat :=
   let c := (jumpIds s).foldl (triage64 now (fun (later : List Nat) eid _ => later ++ [eid]))
     ⟨s.entries, [], []⟩
@@ -303,12 +303,12 @@ def jump64 (s : TW) (now : Nat) : TW × List Nat :=
 
 /-- `advance(now_ms: UInt64)`: the jump test and the `while tick < now`
 loop in `UInt64`.
-mirrors flare/runtime/timer_wheel.mojo:169-256 @59bda50 -/
+mirrors flare/runtime/timer_wheel.mojo#TimerWheel.advance sha=d5c643b2869a at=59bda50f -/
 def advance64 (s : TW) (now : UInt64) : TW × List Nat :=
   if now > u s.tick ∧ now - u s.tick > 512 then jump64 s now.toNat
   else ticks64 (if u s.tick < now then (now - u s.tick).toNat else 0) s
 
-/-- mirrors flare/runtime/timer_wheel.mojo `next_fire_ms` (fixed, RT-01) -/
+/-- mirrors flare/runtime/timer_wheel.mojo#TimerWheel.next_fire_ms sha=db47299912c9 at=8fbcfc85 (fixed, RT-01) -/
 def nextFire64 (s : TW) : UInt64 :=
   match scan s (hintLimit s) 1 with
   | some d => u s.tick + u d

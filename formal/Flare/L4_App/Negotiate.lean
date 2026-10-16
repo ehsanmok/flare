@@ -8,11 +8,9 @@ Models `_parse_q` and `negotiate_encoding` from `flare/http/middleware.mojo`.
 * Byte layer: the header is split on `,`, each entry is stripped, the name
   (before the first `;`) is stripped and ASCII-lowercased, and the weight is
   read from the first `q=`/`Q=` in the parameters by `parseQ`.
-* Decision layer: `decide'` / `negotiate` are the shipped decision (fixed,
-  APP-20): per-coding maxima and the `*` weight are collected over all
-  entries and the pick is made after the loop. `implFold` / `decideOld` /
-  `negotiateOld` are the pre-fix loop over `(token, q)` entries with state
-  `(best_q, best_enc)` that counted `*` only while `best_q == 0`.
+* Decision layer: `decide'` / `negotiate`: per-coding maxima and the `*`
+  weight are collected over all entries and the pick is made after the
+  loop.
 * Spec: `specPick`, written from RFC 9110 §12.5.3 independently of the
   code. The effective weight of a coding is the largest weight of an entry
   naming it, else the weight of `*` (which "matches any available content
@@ -78,7 +76,7 @@ def frac : Bytes → Nat → Nat → Nat
     else q * 10 ^ (3 - p)
   | [], p, q => q * 10 ^ (3 - p)
 
-/-- mirrors flare/http/middleware.mojo:131-166 @59bda50 -/
+/-- mirrors flare/http/middleware.mojo#_parse_q sha=5c46c237a141 at=59bda50f -/
 def parseQ (v : Bytes) : Nat :=
   match v.dropWhile (fun b => b == 32 || b == 9) with
   | [] => 1000
@@ -90,13 +88,13 @@ def parseQ (v : Bytes) : Nat :=
       | _ => 0
 
 /-- First `q=` / `Q=` in the parameter text; returns what follows `=`.
-mirrors flare/http/middleware.mojo:220-233 @59bda50 -/
+mirrors flare/http/middleware.mojo#negotiate_encoding sha=02ced3afc572 at=59bda50f -/
 def findQ : Bytes → Option Bytes
   | c :: d :: r => if (c = 113 ∨ c = 81) ∧ d = 61 then some r else findQ (d :: r)
   | _ => none
 
 /-- One stripped, non-empty entry → `(token, q)`.
-mirrors flare/http/middleware.mojo:199-233 @59bda50 -/
+mirrors flare/http/middleware.mojo#negotiate_encoding sha=02ced3afc572 at=59bda50f -/
 def parseEntry (entry : Bytes) : Tok × Nat :=
   let name := strip (entry.takeWhile (· ≠ 59))
   let rest := entry.dropWhile (· ≠ 59)
@@ -107,7 +105,7 @@ def parseEntry (entry : Bytes) : Tok × Nat :=
       | none => 1000
   (classify name, q)
 
-/-- mirrors flare/http/middleware.mojo:193-202 @59bda50 -/
+/-- mirrors flare/http/middleware.mojo#negotiate_encoding sha=02ced3afc572 at=59bda50f -/
 def parseHeader (h : Bytes) : List (Tok × Nat) :=
   ((splitComma h).map strip).filter (· ≠ []) |>.map parseEntry
 
@@ -118,7 +116,7 @@ def nc (x : UInt8) : Bool := x != 44
 
 /-- `for i in range(pos, n): if src[i] == 44: end = i; break` (with
 `end = n` when no comma follows).
-mirrors flare/http/middleware.mojo:194-198 @59bda50 -/
+mirrors flare/http/middleware.mojo#negotiate_encoding sha=02ced3afc572 at=59bda50f -/
 def scanComma (s : Bytes) (i : Nat) : Nat :=
   if h : i < s.length then
     if s[i] = 44 then i else scanComma s (i + 1)
@@ -149,7 +147,7 @@ theorem scanComma_ge (s : Bytes) (i : Nat) (hi : i ≤ s.length) : i ≤ scanCom
 /-- The `while pos < n` loop: the entry is `accept[pos:end]`, then
 `pos = end + 1`. Returns the raw entries in order (stripping and the
 empty-entry `continue` are applied by `parseHeaderMojo`).
-mirrors flare/http/middleware.mojo:193-202 @59bda50 -/
+mirrors flare/http/middleware.mojo#negotiate_encoding sha=02ced3afc572 at=59bda50f -/
 def mojoLoop (s : Bytes) (pos : Nat) : List Bytes :=
   if h : pos < s.length then
     (s.drop pos).take (scanComma s pos - pos) :: mojoLoop s (scanComma s pos + 1)
@@ -283,39 +281,10 @@ theorem parseHeaderMojo_eq (h : Bytes) : parseHeaderMojo h = parseHeader h := by
   unfold keep at this
   rw [mojoLoop_eq h h.length 0 (by omega), List.drop_zero, ← this]
 
-/-! ## Decision layer (the Mojo loop) -/
+/-! ## Decision layer -/
 
 inductive Enc | br | gzip | identity
   deriving DecidableEq, Repr
-
-/-- Loop body of the pre-fix `negotiate_encoding` (APP-20): `*` counted only
-while `best_q == 0` and always selected identity.
-mirrors flare/http/middleware.mojo:236-252 @59bda50 -/
-def step (brOk : Bool) (s : Nat × Enc) (e : Tok × Nat) : Nat × Enc :=
-  let (bq, be) := s
-  let (t, q) := e
-  match t with
-  | .star => if bq = 0 then (q, .identity) else (bq, be)
-  | .br => if brOk then (if q > bq ∨ (q = bq ∧ be ≠ .br) then (q, .br) else (bq, be))
-           else (bq, be)
-  | .gzip => if q > bq ∨ (q = bq ∧ be = .identity) then (q, .gzip) else (bq, be)
-  | .identity => if q > bq then (q, .identity) else (bq, be)
-  | .other => (bq, be)
-
-def implFold (brOk : Bool) (es : List (Tok × Nat)) : Nat × Enc :=
-  es.foldl (step brOk) (0, .identity)
-
-/-- Final decision of the pre-fix loop on a list of parsed entries:
-`(encoding, quality)`.
-mirrors flare/http/middleware.mojo:253-260 @59bda50 -/
-def decideOld (brOk : Bool) (es : List (Tok × Nat)) : Enc × Nat :=
-  let (bq, be) := implFold brOk es
-  if bq = 0 then (.identity, 0) else (be, bq)
-
-/-- `negotiate_encoding` before the APP-20 fix.
-mirrors flare/http/middleware.mojo:169-260 @59bda50 -/
-def negotiateOld (brOk : Bool) (accept : Bytes) : Enc × Nat :=
-  if accept = [] then (.identity, 1000) else decideOld brOk (parseHeader accept)
 
 /-! ## Spec (RFC 9110 §12.5.3) -/
 
@@ -440,122 +409,10 @@ theorem classify_upper (name : Bytes) :
 it as gzip); such an entry is ignored, which only ever yields identity. -/
 example : classify [120, 45, 103, 122, 105, 112] = .other := by decide
 
-/-! ## Decision layer vs spec -/
-
-def NoStar (es : List (Tok × Nat)) : Prop := ∀ e ∈ es, e.1 ≠ .star
-
-/-- Invariant of the Mojo loop relative to the running per-coding maxima. -/
-def Inv (brOk : Bool) (s : Nat × Enc) (b g i : Option Nat) : Prop :=
-  let bb := if brOk then b.getD 0 else 0
-  s.1 = max bb (max (g.getD 0) (i.getD 0)) ∧
-  (0 < s.1 → s.2 = top bb (g.getD 0) (i.getD 0))
+/-! ## Order independence of the spec -/
 
 def updE (t : Tok) (o : Option Nat) (e : Tok × Nat) : Option Nat :=
   if e.1 = t then optMax o e.2 else o
-
-theorem optMax_getD (o : Option Nat) (q : Nat) : (optMax o q).getD 0 = max (o.getD 0) q := by
-  cases o <;> simp [optMax]
-
-theorem arith_gzip (B b g i q : Nat) (E : Enc) (h1 : B = max b (max g i))
-    (h2 : 0 < B → E = top b g i) :
-    (if q > B ∨ (q = B ∧ E = .identity) then (q, Enc.gzip) else (B, E)).1 = max b (max (max g q) i) ∧
-    (0 < (if q > B ∨ (q = B ∧ E = .identity) then (q, Enc.gzip) else (B, E)).1 →
-      (if q > B ∨ (q = B ∧ E = .identity) then (q, Enc.gzip) else (B, E)).2 = top b (max g q) i) := by
-  unfold top at *
-  cases E <;> grind
-
-theorem arith_br (B b g i q : Nat) (E : Enc) (h1 : B = max b (max g i))
-    (h2 : 0 < B → E = top b g i) :
-    (if q > B ∨ (q = B ∧ E ≠ .br) then (q, Enc.br) else (B, E)).1 = max (max b q) (max g i) ∧
-    (0 < (if q > B ∨ (q = B ∧ E ≠ .br) then (q, Enc.br) else (B, E)).1 →
-      (if q > B ∨ (q = B ∧ E ≠ .br) then (q, Enc.br) else (B, E)).2 = top (max b q) g i) := by
-  unfold top at *
-  cases E <;> grind
-
-theorem arith_id (B b g i q : Nat) (E : Enc) (h1 : B = max b (max g i))
-    (h2 : 0 < B → E = top b g i) :
-    (if q > B then (q, Enc.identity) else (B, E)).1 = max b (max g (max i q)) ∧
-    (0 < (if q > B then (q, Enc.identity) else (B, E)).1 →
-      (if q > B then (q, Enc.identity) else (B, E)).2 = top b g (max i q)) := by
-  unfold top at *
-  cases E <;> grind
-
-theorem inv_step (brOk : Bool) (s : Nat × Enc) (b g i : Option Nat) (e : Tok × Nat)
-    (he : e.1 ≠ .star) (h : Inv brOk s b g i) :
-    Inv brOk (step brOk s e) (updE .br b e) (updE .gzip g e) (updE .identity i e) := by
-  obtain ⟨bq, be⟩ := s
-  obtain ⟨t, q⟩ := e
-  unfold Inv at *
-  obtain ⟨h1, h2⟩ := h
-  cases t with
-  | star => exact absurd rfl he
-  | other => simpa [step, updE] using And.intro h1 h2
-  | br =>
-    cases brOk with
-    | false => simpa [step, updE] using And.intro h1 h2
-    | true =>
-      have := arith_br bq (b.getD 0) (g.getD 0) (i.getD 0) q be h1 h2
-      simpa [step, updE, optMax_getD] using this
-  | gzip =>
-    have := arith_gzip bq (if brOk then b.getD 0 else 0) (g.getD 0) (i.getD 0) q be h1 h2
-    simpa [step, updE, optMax_getD] using this
-  | identity =>
-    have := arith_id bq (if brOk then b.getD 0 else 0) (g.getD 0) (i.getD 0) q be h1 h2
-    simpa [step, updE, optMax_getD] using this
-
-theorem explicitQ_foldl (es : List (Tok × Nat)) (t : Tok) (o : Option Nat) :
-    es.foldl (fun o e => if e.1 = t then optMax o e.2 else o) o =
-      es.foldl (fun o e => updE t o e) o := rfl
-
-theorem inv_fold (brOk : Bool) (es : List (Tok × Nat)) (hs : NoStar es) :
-    ∀ s b g i, Inv brOk s b g i →
-      Inv brOk (es.foldl (step brOk) s)
-        (es.foldl (updE .br) b) (es.foldl (updE .gzip) g) (es.foldl (updE .identity) i) := by
-  induction es with
-  | nil => intro s b g i h; exact h
-  | cons e es ih =>
-    intro s b g i h
-    simp only [List.foldl_cons]
-    exact ih (fun x hx => hs x (by simp [hx])) _ _ _ _
-      (inv_step brOk s b g i e (hs e (by simp)) h)
-
-theorem explicitQ_none_of_noStar (es : List (Tok × Nat)) (hs : NoStar es) :
-    explicitQ es .star = none := by
-  unfold explicitQ
-  suffices ∀ o : Option Nat, o = none →
-      es.foldl (fun o e => if e.1 = Tok.star then optMax o e.2 else o) o = none by
-    exact this none rfl
-  induction es with
-  | nil => intro o h; exact h
-  | cons e es ih =>
-    intro o h; simp only [List.foldl_cons]
-    apply ih (fun x hx => hs x (by simp [hx]))
-    rw [if_neg (hs e (by simp))]; exact h
-
-/-- **Refinement without `*`** (general): for any entry list with no
-wildcard, flare's loop computes exactly the RFC pick — the highest
-effective weight among available codings, ties br > gzip > identity,
-duplicates resolved by maximum, and passthrough when every weight is 0. -/
-theorem opt_match_id (o : Option Nat) :
-    (match o with | some q => some q | none => none) = o := by cases o <;> rfl
-
-theorem decideOld_eq_spec_of_noStar (brOk : Bool) (es : List (Tok × Nat)) (hs : NoStar es) :
-    decideOld brOk es = specPick brOk es := by
-  have h := inv_fold brOk es hs (0, .identity) none none none
-    (by simp [Inv])
-  unfold decideOld implFold specPick qOf choose
-  rw [explicitQ_none_of_noStar es hs]
-  simp only [explicitQ, explicitQ_foldl, opt_match_id]
-  unfold Inv at h
-  obtain ⟨h1, h2⟩ := h
-  cases hr : es.foldl (step brOk) (0, Enc.identity) with
-  | mk bq be =>
-    rw [hr] at h1 h2
-    simp only at h1 h2 ⊢
-    rw [← h1]
-    by_cases hz : bq = 0
-    · simp [hz]
-    · simp [hz, h2 (by omega)]
 
 theorem optMax_comm (o : Option Nat) (a b : Nat) :
     optMax (optMax o a) b = optMax (optMax o b) a := by
@@ -573,47 +430,7 @@ theorem specPick_perm (brOk : Bool) {es es' : List (Tok × Nat)} (hp : es.Perm e
     specPick brOk es = specPick brOk es' := by
   simp only [specPick, qOf, explicitQ_perm hp]
 
-/-- Order independence of flare's loop on wildcard-free headers (general). -/
-theorem decideOld_perm_of_noStar (brOk : Bool) {es es' : List (Tok × Nat)}
-    (hp : es.Perm es') (hs : NoStar es) :
-    decideOld brOk es = decideOld brOk es' := by
-  rw [decideOld_eq_spec_of_noStar brOk es hs,
-    decideOld_eq_spec_of_noStar brOk es' (fun e he => hs e (hp.mem_iff.2 he)),
-    specPick_perm brOk hp]
-
-theorem fold_not_br (es : List (Tok × Nat)) :
-    ∀ s : Nat × Enc, s.2 ≠ .br → (es.foldl (step false) s).2 ≠ .br := by
-  induction es with
-  | nil => intro s hs; exact hs
-  | cons e es ih =>
-    intro s hs; simp only [List.foldl_cons]; apply ih
-    obtain ⟨bq, be⟩ := s; obtain ⟨t, q⟩ := e
-    cases t <;> grind [step]
-
-/-- br is chosen only when brotli is linkable (general, any header). -/
-theorem decideOld_br_imp (brOk : Bool) (es : List (Tok × Nat)) :
-    (decideOld brOk es).1 = .br → brOk = true := by
-  intro h
-  cases brOk with
-  | true => rfl
-  | false =>
-    exfalso
-    have h0 := fold_not_br es (0, .identity) (by simp)
-    unfold decideOld implFold at h
-    cases hr : es.foldl (step false) (0, Enc.identity) with
-    | mk bq be =>
-      rw [hr] at h h0
-      simp only at h h0
-      by_cases hz : bq = 0 <;> simp_all
-
-/-- Byte-level corollary: any non-empty header without a `*` entry is
-negotiated exactly as the RFC spec over its parsed entries. -/
-theorem negotiateOld_eq_spec_of_noStar (brOk : Bool) (h : Bytes) (hne : h ≠ [])
-    (hs : NoStar (parseHeader h)) :
-    negotiateOld brOk h = specPick brOk (parseHeader h) := by
-  simp [negotiateOld, hne, decideOld_eq_spec_of_noStar brOk _ hs]
-
-/-! ## Shipped decision (fixed, APP-20: `*` handled per RFC) -/
+/-! ## The decision -/
 
 /-- State: running explicit maxima for br, gzip, identity and `*`. -/
 def stepFixed (s : Option Nat × Option Nat × Option Nat × Option Nat) (e : Tok × Nat) :
@@ -623,7 +440,7 @@ def stepFixed (s : Option Nat × Option Nat × Option Nat × Option Nat) (e : To
 
 /-- `negotiate_encoding`'s decision as shipped (fixed, APP-20): the running
 maxima for br, gzip, identity and `*` over all entries, then the pick.
-mirrors flare/http/middleware.mojo:195-272 (fixed, APP-20) -/
+mirrors flare/http/middleware.mojo#negotiate_encoding sha=e9b3c8932b97 at=1f8487cd (fixed, APP-20) -/
 def decide' (brOk : Bool) (es : List (Tok × Nat)) : Enc × Nat :=
   let (b, g, i, w) := es.foldl stepFixed (none, none, none, none)
   let eff := fun (o : Option Nat) => (match o with | some q => some q | none => w).getD 0
@@ -643,7 +460,7 @@ theorem decide'_eq_spec (brOk : Bool) (es : List (Tok × Nat)) :
   unfold decide' specPick qOf explicitQ
   rw [foldl_stepFixed]; rfl
 
-/-- `negotiate_encoding` as shipped. mirrors flare/http/middleware.mojo:169-272
+/-- `negotiate_encoding` as shipped. mirrors flare/http/middleware.mojo#negotiate_encoding sha=e9b3c8932b97 at=1f8487cd
 (fixed, APP-20) -/
 def negotiate (brOk : Bool) (accept : Bytes) : Enc × Nat :=
   if accept = [] then (.identity, 1000) else decide' brOk (parseHeader accept)
@@ -685,14 +502,5 @@ theorem decide'_refused_identity (brOk : Bool) (es : List (Tok × Nat))
   unfold specPick
   simp only [qOf, h, Option.getD_some]
   exact choose_zero_identity _ _
-
-/-- `negotiate_encoding` before the fix, with the index-level entry loop. -/
-def negotiateOldMojo (brOk : Bool) (accept : Bytes) : Enc × Nat :=
-  if accept = [] then (.identity, 1000) else decideOld brOk (parseHeaderMojo accept)
-
-/-- Every theorem about `negotiateOld` holds for the transliterated loop. -/
-theorem negotiateOldMojo_eq : negotiateOldMojo = negotiateOld := by
-  funext brOk accept
-  simp only [negotiateOldMojo, negotiateOld, parseHeaderMojo_eq]
 
 end Flare.L4.Negotiate

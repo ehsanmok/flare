@@ -32,7 +32,7 @@ def portLoop : Bytes → Int64 → Option Int64
     if c < 48 || c > 57 then none
     else portLoop cs (v * 10 + Int64.ofNat (c - 48).toNat)
 
-/-- mirrors flare/net/address.mojo:477-495 @59bda50 -/
+/-- mirrors flare/net/address.mojo#_parse_port_strict sha=54880a32ee35 at=59bda50f -/
 def parsePortStrict (digits : Bytes) : Option UInt16 :=
   if digits.length == 0 || digits.length > 5 then none
   else match portLoop digits 0 with
@@ -141,7 +141,7 @@ structure InetEnv.Valid (E : InetEnv) : Prop where
   ntop6_ne : ∀ x, E.ntop6 x ≠ []
   ntop6_chars : ∀ x, ∀ c ∈ E.ntop6 x, isHex c = true ∨ c = b ':' ∨ c = b '.'
 
-/-- mirrors flare/net/address.mojo:54-150 @59bda50 (`IpAddr.parse`; the
+/-- mirrors flare/net/address.mojo#IpAddr.parse sha=86fa7fba8fd3 at=59bda50f (`IpAddr.parse`; the
 `ntop[0] == 0` failure check is `ntop = []`). -/
 def parseIp (E : InetEnv) (s : Bytes) : Option IpAddr :=
   if s = [] then none
@@ -153,13 +153,13 @@ def parseIp (E : InetEnv) (s : Bytes) : Option IpAddr :=
       | none => none
 
 /-- `_find_char`: index of the first `ch`, or -1. mirrors
-flare/net/address.mojo:305-316 @59bda50 -/
+flare/net/address.mojo#_find_char+_find_char_from sha=b81ab80de3ea at=59bda50f -/
 def findChar (s : Bytes) (ch : UInt8) : Int :=
   match s.findIdx? (· == ch) with
   | some i => i
   | none => -1
 
-/-- mirrors flare/net/address.mojo:393-442 @59bda50 -/
+/-- mirrors flare/net/address.mojo#SocketAddr.parse+SocketAddr.__eq__ sha=8935d27b4717 at=59bda50f -/
 def parseSock (E : InetEnv) (s : Bytes) : Option SocketAddr :=
   if s = [] then none
   else if s.any badSock then none
@@ -178,7 +178,7 @@ def parseSock (E : InetEnv) (s : Bytes) : Option SocketAddr :=
       let p ← parsePortStrict (s.drop (colon.toNat + 1))
       pure ⟨ip, p⟩
 
-/-- mirrors flare/net/address.mojo:463-473 @59bda50 (`SocketAddr.write_to`;
+/-- mirrors flare/net/address.mojo#SocketAddr.write_to+_parse_port_strict sha=282393382493 at=59bda50f (`SocketAddr.write_to`;
 `writer.write(UInt16)` renders the shortest decimal). -/
 def render (sa : SocketAddr) : Bytes :=
   if sa.ip.v6 then b '[' :: (sa.ip.addr ++ b ']' :: b ':' :: dec sa.port.toNat)

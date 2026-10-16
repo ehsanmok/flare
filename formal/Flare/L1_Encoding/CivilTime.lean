@@ -18,15 +18,9 @@ Model. Mojo `Int` arithmetic is modeled in unbounded `Int`; Mojo `//` and
 `Int.%` for the positive divisors used here. 64-bit overflow is not modeled
 (all intermediates stay below `2^40` for years in `[-10^6, 10^6]`).
 
-The era step was Hinnant's C++ formula written for *truncating* division,
-`(year if year >= 0 else year - 399) // 400`, but Mojo `//` floors. The two
-agree for `year ≥ 0`, i.e. dates from 0000-03-01 on
-(`daysFromCivilOld_eq`, `civilFromDaysOld_eq`); before that the result was off
-by one day. That was finding ENC-02 (`Flare.Bugs.ENC_02`), now fixed: flare
-uses the floor era (`year // 400`, `days // 146097`) and `daysFromCivil` /
-`civilFromDays` below mirror the shipped code. The pre-fix functions are kept
-as `daysFromCivilOld` / `civilFromDaysOld` for the counterexample; all
-calendar theorems are proved for the shipped functions over all of `Int`.
+flare uses the floor era (`year // 400`, `days // 146097`; Mojo `//`
+floors), and `daysFromCivil` / `civilFromDays` below mirror it. All
+calendar theorems hold over all of `Int`.
 -/
 namespace Flare.L1.CivilTime
 
@@ -57,52 +51,28 @@ def DayNumbering (f : Int → Int → Int → Int) : Prop :=
 
 /-! ## Implementation -/
 
-/-- March-based year. mirrors flare/runtime/date_cache.mojo:91 @59bda50 -/
+/-- March-based year. mirrors flare/runtime/date_cache.mojo#civil_to_unix_seconds sha=eaa73ca74f56 at=59bda50f -/
 def shiftYear (y m : Int) : Int := y - (if m ≤ 2 then 1 else 0)
 
-/-- March-based month in `[0, 11]`. mirrors flare/runtime/date_cache.mojo:94 @59bda50 -/
+/-- March-based month in `[0, 11]`. mirrors flare/runtime/date_cache.mojo#civil_to_unix_seconds sha=eaa73ca74f56 at=59bda50f -/
 def shiftMonth (m : Int) : Int := m + (if m ≤ 2 then 9 else -3)
 
 /-- Day-of-year where March-based month `mp` starts.
-mirrors flare/runtime/date_cache.mojo:95,159 @59bda50 -/
+mirrors flare/runtime/date_cache.mojo#civil_to_unix_seconds+unix_seconds_to_civil sha=daa6f58fe32b at=59bda50f -/
 def mStart (mp : Int) : Int := (153 * mp + 2) / 5
 
 /-- Days of an era before year-of-era `yoe`.
-mirrors flare/runtime/date_cache.mojo:96,157 @59bda50 -/
+mirrors flare/runtime/date_cache.mojo#civil_to_unix_seconds+unix_seconds_to_civil sha=daa6f58fe32b at=59bda50f -/
 def startOf (yoe : Int) : Int := 365 * yoe + yoe / 4 - yoe / 100
 
-/-- mirrors flare/runtime/date_cache.mojo:155 @59bda50 -/
+/-- mirrors flare/runtime/date_cache.mojo#unix_seconds_to_civil sha=2522668f2a2a at=59bda50f -/
 def yoeOf (doe : Int) : Int := (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365
 
-/-- mirrors flare/runtime/date_cache.mojo:158 @59bda50 -/
+/-- mirrors flare/runtime/date_cache.mojo#unix_seconds_to_civil sha=2522668f2a2a at=59bda50f -/
 def mpOf (doy : Int) : Int := (5 * doy + 2) / 153
 
-/-- Pre-fix `civil_to_unix_seconds` day part (truncating-division era under
-floor `//`; flare/runtime/date_cache.mojo:92 @59bda50). -/
-def daysFromCivilOld (y m d : Int) : Int :=
-  let year := shiftYear y m
-  let era := (if 0 ≤ year then year else year - 399) / 400
-  let yoe := year - era * 400
-  let doy := mStart (shiftMonth m) + d - 1
-  let doe := startOf yoe + doy
-  era * 146097 + doe - 719468
-
-/-- Pre-fix day part of `unix_seconds_to_civil` (flare/runtime/date_cache.mojo:153
-@59bda50). -/
-def civilFromDaysOld (z : Int) : Int × Int × Int :=
-  let days := z + 719468
-  let era := (if 0 ≤ days then days else days - 146096) / 146097
-  let doe := days - era * 146097
-  let yoe := yoeOf doe
-  let y := yoe + era * 400
-  let doy := doe - startOf yoe
-  let mp := mpOf doy
-  let d := doy - mStart mp + 1
-  let m := if mp < 10 then mp + 3 else mp - 9
-  (if m ≤ 2 then y + 1 else y, m, d)
-
 /-- `civil_to_unix_seconds` day part, floor era (`year // 400`).
-mirrors flare/runtime/date_cache.mojo:91-97 (fixed, ENC-02) -/
+mirrors flare/runtime/date_cache.mojo#civil_to_unix_seconds sha=4b7a508fbf16 at=5a85e66a (fixed, ENC-02) -/
 def daysFromCivil (y m d : Int) : Int :=
   let year := shiftYear y m
   let era := year / 400
@@ -111,12 +81,12 @@ def daysFromCivil (y m d : Int) : Int :=
   let doe := startOf yoe + doy
   era * 146097 + doe - 719468
 
-/-- mirrors flare/runtime/date_cache.mojo:71-98 (fixed, ENC-02) -/
+/-- mirrors flare/runtime/date_cache.mojo#civil_to_unix_seconds sha=4b7a508fbf16 at=5a85e66a (fixed, ENC-02) -/
 def civilToUnix (y m d hh mm ss : Int) : Int :=
   daysFromCivil y m d * 86400 + hh * 3600 + mm * 60 + ss
 
 /-- The day part of `unix_seconds_to_civil`, floor era (`days // 146097`).
-mirrors flare/runtime/date_cache.mojo:152-163 (fixed, ENC-02) -/
+mirrors flare/runtime/date_cache.mojo#unix_seconds_to_civil sha=92712c862792 at=5a85e66a (fixed, ENC-02) -/
 def civilFromDays (z : Int) : Int × Int × Int :=
   let days := z + 719468
   let era := days / 146097
@@ -138,7 +108,7 @@ structure Civil where
   second : Int
   dow : Int
 
-/-- mirrors flare/runtime/date_cache.mojo:130-174 (fixed, ENC-02) -/
+/-- mirrors flare/runtime/date_cache.mojo#unix_seconds_to_civil sha=92712c862792 at=5a85e66a (fixed, ENC-02) -/
 def unixToCivil (s : Int) : Civil :=
   let days := s / 86400
   let sod := s - days * 86400
@@ -146,16 +116,6 @@ def unixToCivil (s : Int) : Civil :=
   let dow := if dow < 0 then dow + 7 else dow
   let c := civilFromDays days
   ⟨c.1, c.2.1, c.2.2, sod / 3600, (sod % 3600) / 60, sod % 60, dow⟩
-
-/-! ## Where the pre-fix functions agree with the shipped ones -/
-
-theorem daysFromCivilOld_eq (y m d : Int) (h : 0 ≤ shiftYear y m) :
-    daysFromCivilOld y m d = daysFromCivil y m d := by
-  simp only [daysFromCivilOld, daysFromCivil, if_pos h]
-
-theorem civilFromDaysOld_eq (z : Int) (h : -719468 ≤ z) :
-    civilFromDaysOld z = civilFromDays z := by
-  simp only [civilFromDaysOld, civilFromDays, if_pos (show 0 ≤ z + 719468 by omega)]
 
 /-! ## Arithmetic lemmas -/
 

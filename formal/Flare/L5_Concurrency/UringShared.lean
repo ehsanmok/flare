@@ -28,29 +28,22 @@ state: it uses the fd number once, when it arms the multishot accept
 and never again: later accepts are completions of the armed request, which
 holds its own reference to the socket. `sim_step` is a forward simulation
 into the epoll model in which every use of the number is matched, so the
-fixed teardown's safety carries over (`uring_fixed_noStale`,
-`uring_fixed_closedAtEnd`). Under the unfixed teardown only the arm can be
-stale (`uring_trace_shutdown_safe`, `uring_late_arm_stale`).
-
-The difference that matters is timing, not fd use: the loop waits with
-`ureactor.poll(1, ...)` on a ring built with `enable_wakeup=False`, so an idle
-worker never re-reads the stop flag. That is `Flare.Bugs.CONC_07`, and it
-applies to the per-worker-listener mode the scheduler normally picks for
-this loop.
+teardown's safety carries over (`uring_fixed_noStale`,
+`uring_fixed_closedAtEnd`).
 -/
 namespace Flare.L5.UringShared
 
 open Flare.L5.SharedListener
 
-/-- mirrors flare/http/frontend.mojo:114-133 @59bda50 -/
+/-- mirrors flare/http/frontend.mojo#HttpFrontend.requires_per_worker_listener sha=0619b91262d6 at=59bda50f -/
 def requiresPerWorker (linux probe bufring : Bool) (tls : Nat) : Bool :=
   linux && probe && bufring && tls == 0
 
-/-- mirrors flare/http/frontend.mojo:144-162 @59bda50 -/
+/-- mirrors flare/http/frontend.mojo#HttpFrontend.run_worker sha=d92fba8e45f2 at=59bda50f -/
 def uringDispatch (linux probe bufring : Bool) (tls extras : Nat) : Bool :=
   linux && probe && bufring && tls == 0 && extras == 0
 
-/-- mirrors flare/runtime/scheduler.mojo:388-430 @59bda50 -/
+/-- mirrors flare/runtime/scheduler.mojo#Scheduler.start sha=1ab2edc505a7 at=59bda50f -/
 def prebind (demands reuseport : Bool) (extras : Nat) : Bool :=
   demands || reuseport || decide (0 < extras)
 
@@ -71,7 +64,7 @@ theorem probe_skew_shared :
 
 /-- The io_uring worker on the shared-listener state: the number is used by
 the arm only.
-mirrors flare/http/_server_reactor_uring.mojo:843-981 @59bda50 -/
+mirrors flare/http/_server_reactor_uring.mojo#run_uring_bufring_reactor_loop_shared sha=eec8fc1931de at=59bda50f -/
 def uwStep (stop : Bool) (w : W) : Option (W × Bool) :=
   match w.pc with
   | .reg => some ({ w with pc := .check }, true)
@@ -79,9 +72,9 @@ def uwStep (stop : Bool) (w : W) : Option (W × Bool) :=
   | .acc => some ({ w with pc := .check }, false)
   | .done => none
 
-/-- mirrors flare/http/_server_reactor_uring.mojo:843-981 and
-flare/runtime/scheduler.mojo:655-668,846-900 @59bda50 -/
-def ustep (c : Cfg) (s : St) : Lbl → Option St
+/-- mirrors flare/http/_server_reactor_uring.mojo#run_uring_bufring_reactor_loop_shared sha=eec8fc1931de at=193ddcec and
+flare/runtime/scheduler.mojo#Scheduler._signal_stop+Scheduler.drain sha=aea259247361 at=ea1b9282 -/
+def ustep (hard : Bool) (s : St) : Lbl → Option St
   | .w i =>
     match s.ws[i]? with
     | none => none
@@ -89,9 +82,9 @@ def ustep (c : Cfg) (s : St) : Lbl → Option St
       (uwStep s.stop w).map fun (w', u) =>
         { s with ws := s.ws.set i w', stale := s.stale || (u && s.fd != .lis) }
   | .reuse => if s.fd = .closed then some { s with fd := .other } else none
-  | .m => mStep c s
+  | .m => mStep hard s
 
-def ults (c : Cfg) (n : Nat) : LTS St Lbl := LTS.ofFn (· = init n) (ustep c)
+def ults (hard : Bool) (n : Nat) : LTS St Lbl := LTS.ofFn (· = init n) (ustep hard)
 
 /-- Same state except that the epoll model may have more stale uses. -/
 def R (u s : St) : Prop :=
@@ -102,8 +95,8 @@ theorem uwStep_le {st : Bool} {w w' : W} {b : Bool} (h : uwStep st w = some (w',
   cases hpc : w.pc <;> simp only [uwStep, hpc, Option.some.injEq, Prod.mk.injEq, reduceCtorEq] at h <;>
     obtain ⟨rfl, rfl⟩ := h <;> simp [wStep, hpc]
 
-theorem mStep_stale (c : Cfg) (s : St) (b : Bool) :
-    mStep c { s with stale := b } = (mStep c s).map (fun x => { x with stale := b }) := by
+theorem mStep_stale (hard : Bool) (s : St) (b : Bool) :
+    mStep hard { s with stale := b } = (mStep hard s).map (fun x => { x with stale := b }) := by
   obtain ⟨ws, stop, fd, m, st⟩ := s
   cases m with
   | signal => rfl
@@ -119,7 +112,7 @@ theorem mStep_stale (c : Cfg) (s : St) (b : Bool) :
   | free => simp [mStep, freeFd, anyDet]
   | fin => rfl
 
-theorem mStep_keeps_stale {c : Cfg} {s s' : St} (h : mStep c s = some s') : s'.stale = s.stale := by
+theorem mStep_keeps_stale {hard : Bool} {s s' : St} (h : mStep hard s = some s') : s'.stale = s.stale := by
   unfold mStep at h
   split at h
   · simp only [Option.some.injEq] at h; subst h; rfl
@@ -143,8 +136,8 @@ theorem R_eq {u s : St} (h : R u s) : u = { s with stale := u.stale } := by
 
 /-- Forward simulation: every io_uring step is an epoll step with the same
 label, and a stale use on the io_uring side is a stale use on the epoll side. -/
-theorem sim_step (c : Cfg) {u s u' : St} {l : Lbl} (hR : R u s) (hu : ustep c u l = some u') :
-    ∃ s', step c s l = some s' ∧ R u' s' := by
+theorem sim_step (hard : Bool) {u s u' : St} {l : Lbl} (hR : R u s) (hu : ustep hard u l = some u') :
+    ∃ s', step hard s l = some s' ∧ R u' s' := by
   obtain ⟨h1, h2, h3, h4, h5⟩ := hR
   cases l with
   | w i =>
@@ -176,7 +169,7 @@ theorem sim_step (c : Cfg) {u s u' : St} {l : Lbl} (hR : R u s) (hu : ustep c u 
   | m =>
     simp only [ustep] at hu
     rw [R_eq ⟨h1, h2, h3, h4, h5⟩, mStep_stale] at hu
-    cases hs : mStep c s with
+    cases hs : mStep hard s with
     | none => simp [hs] at hu
     | some s' =>
       simp only [hs, Option.map_some, Option.some.injEq] at hu; subst hu
@@ -184,57 +177,39 @@ theorem sim_step (c : Cfg) {u s u' : St} {l : Lbl} (hR : R u s) (hu : ustep c u 
       intro hst
       rw [mStep_keeps_stale hs]; exact h5 hst
 
-theorem sim_run (c : Cfg) (n : Nat) {u s u' : St} {ls : List Lbl} (hR : R u s)
-    (hr : (ults c n).Run u ls u') : ∃ s', (lts c n).Run s ls s' ∧ R u' s' := by
+theorem sim_run (hard : Bool) (n : Nat) {u s u' : St} {ls : List Lbl} (hR : R u s)
+    (hr : (ults hard n).Run u ls u') : ∃ s', (lts hard n).Run s ls s' ∧ R u' s' := by
   induction hr generalizing s with
   | nil => exact ⟨s, .nil _, hR⟩
   | cons hst _ ih =>
-    obtain ⟨s₁, h₁, hR₁⟩ := sim_step c hR hst
+    obtain ⟨s₁, h₁, hR₁⟩ := sim_step hard hR hst
     obtain ⟨s', hr', hR'⟩ := ih hR₁
     exact ⟨s', .cons h₁ hr', hR'⟩
 
-theorem sim_reachable (c : Cfg) (n : Nat) {u : St} (h : (ults c n).Reachable u) :
-    ∃ s, (lts c n).Reachable s ∧ R u s := by
+theorem sim_reachable (hard : Bool) (n : Nat) {u : St} (h : (ults hard n).Reachable u) :
+    ∃ s, (lts hard n).Reachable s ∧ R u s := by
   obtain ⟨u₀, ls, rfl, hr⟩ := h
-  obtain ⟨s, hr', hR⟩ := sim_run c n ⟨rfl, rfl, rfl, rfl, id⟩ hr
+  obtain ⟨s, hr', hR⟩ := sim_run hard n ⟨rfl, rfl, rfl, rfl, id⟩ hr
   exact ⟨s, ⟨_, ls, rfl, hr'⟩, hR⟩
 
-/-- With the CONC-05 fix, an io_uring worker on the shared fd never arms on
-the number after it stopped naming the listener. -/
+/-- An io_uring worker on the shared fd never arms on the number after it
+stopped naming the listener. -/
 theorem uring_fixed_noStale (hard : Bool) (n : Nat) (u : St)
-    (h : (ults (cfgFixed hard) n).Reachable u) : NoStaleUse u := by
+    (h : (ults hard n).Reachable u) : NoStaleUse u := by
   obtain ⟨s, hs, hR⟩ := sim_reachable _ n h
-  have := fixed_noStale hard n s hs
+  have := noStale hard n s hs
   simp only [NoStaleUse] at this ⊢
   cases hu : u.stale
   · rfl
   · rw [hR.2.2.2.2 hu] at this; cases this
 
 theorem uring_fixed_closedAtEnd (hard : Bool) (n : Nat) (u : St)
-    (h : (ults (cfgFixed hard) n).Reachable u) : ClosedAtEnd u := by
+    (h : (ults hard n).Reachable u) : ClosedAtEnd u := by
   obtain ⟨s, hs, ⟨h1, -, h3, h4, -⟩⟩ := sim_reachable _ n h
   intro hm hd
-  have := fixed_closedAtEnd hard n s hs
+  have := closedAtEnd hard n s hs
   simp only [anyDet] at hd this
   rw [h3]; rw [h4] at hm; rw [h1] at hd
   exact this hm hd
-
-def uexec (c : Cfg) : St → List Lbl → Option St
-  | s, [] => some s
-  | s, l :: ls => (ustep c s l).bind fun s' => uexec c s' ls
-
-/-- CONC-05's shutdown trace (register, pass the check, close, reuse, use the
-number) is harmless here: the io_uring worker does not touch the number
-after arming. -/
-theorem uring_trace_shutdown_safe :
-    (uexec cfgShutdown (init 1) [.w 0, .w 0, .m, .reuse, .w 0]).map (·.stale) = some false := by
-  decide
-
-/-- …but a worker that arms after the unfixed teardown closed the number
-(the scheduler signals before the worker thread reached the arm) arms on
-whatever file now has that number. -/
-theorem uring_late_arm_stale :
-    (uexec cfgShutdown (init 1) [.m, .reuse, .w 0]).map (·.stale) = some true := by
-  decide
 
 end Flare.L5.UringShared

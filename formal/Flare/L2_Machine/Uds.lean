@@ -7,9 +7,7 @@ import Flare.Core
 prefix, the path's UTF-8 bytes and a NUL; `read_path_from_sockaddr_un`
 reads bytes from offset 2 up to the first NUL (at most
 `min(used_len - 2, SUN_PATH_MAX)` bytes) and builds the `String` from them as
-UTF-8 (fixed, NET-06). Before the fix it appended `chr(b)` for each byte `b`
-(`readPathOld`), i.e. it decoded Latin-1 and re-encoded every byte `≥ 0x80`
-as a 2-byte UTF-8 sequence.
+UTF-8.
 
 A Mojo `String` is modelled by its UTF-8 bytes (`Bytes`); `out += chr(b)`
 appends the UTF-8 encoding of code point `b`. The family-prefix bytes are
@@ -25,7 +23,7 @@ def sockaddrUnSize (linux : Bool) : Nat := 2 + sunPathMax linux
 
 /-- `fill_sockaddr_un`: `none` = raises (too long / embedded NUL); otherwise
 the bytes written and the returned `addrlen`.
-mirrors flare/uds/_libc.mojo:55-107 @59bda50 -/
+mirrors flare/uds/_libc.mojo#fill_sockaddr_un sha=75d1f91709ca at=59bda50f -/
 def fill (linux : Bool) (h0 h1 : UInt8) (path : Bytes) : Option (Bytes × Nat) :=
   if path.length ≥ sunPathMax linux then none
   else if (0 : UInt8) ∈ path then none
@@ -43,14 +41,9 @@ def latin1ToUtf8 : Bytes → Bytes
 def rawPath (linux : Bool) (buf : Bytes) (usedLen : Nat) : Bytes :=
   ((buf.drop 2).take (min (usedLen - 2) (sunPathMax linux))).takeWhile (· != 0)
 
-/-- Pre-fix decoder: `out += chr(Int(b))` per byte
-(flare/uds/_libc.mojo:110-133 @59bda50). -/
-def readPathOld (linux : Bool) (buf : Bytes) (usedLen : Nat) : Bytes :=
-  latin1ToUtf8 (rawPath linux buf usedLen)
-
 /-- The shipped decoder: the collected bytes become the `String` as UTF-8
 (`String(unsafe_from_utf8=...)`), as `fill_sockaddr_un` encoded them.
-mirrors flare/uds/_libc.mojo:110-140 (fixed, NET-06) -/
+mirrors flare/uds/_libc.mojo#read_path_from_sockaddr_un sha=1784a1a2fe38 at=7071fffa (fixed, NET-06) -/
 def readPath (linux : Bool) (buf : Bytes) (usedLen : Nat) : Bytes :=
   rawPath linux buf usedLen
 
@@ -121,24 +114,5 @@ theorem latin1ToUtf8_ascii (p : Bytes) (h : ∀ b ∈ p, b < 0x80) : latin1ToUtf
   | cons b bs ih =>
     simp only [latin1ToUtf8, chrUtf8]
     rw [if_pos (h b (by simp)), ih (fun x hx => h x (by simp [hx]))]; rfl
-
-/-- **Characterisation of the defect**: the pre-fix decoder returns the bound
-path exactly when every byte of it is ASCII; any non-ASCII path comes back
-longer (each byte `≥ 0x80` becomes two). -/
-theorem readPathOld_fill_iff_ascii (linux : Bool) (h0 h1 : UInt8) (p b rest : Bytes) (n usedLen : Nat)
-    (h : fill linux h0 h1 p = some (b, n)) (hu : n ≤ usedLen) :
-    readPathOld linux (b ++ rest) usedLen = p ↔ ∀ x ∈ p, x < 0x80 := by
-  have hr : rawPath linux (b ++ rest) usedLen = p := readPath_fill linux h0 h1 p b rest n usedLen h hu
-  unfold readPathOld; rw [hr]
-  constructor
-  · intro he x hx
-    have hl := congrArg List.length he
-    rw [latin1ToUtf8_length] at hl
-    have h0' : (p.filter (fun b => decide (0x80 ≤ b))).length = 0 := by omega
-    rw [List.length_eq_zero_iff, List.filter_eq_nil_iff] at h0'
-    have := h0' x hx
-    simp only [decide_eq_true_eq] at this
-    exact UInt8.not_le.1 this
-  · exact latin1ToUtf8_ascii p
 
 end Flare.L2.Uds

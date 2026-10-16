@@ -14,8 +14,9 @@ sequential model of `serve` is faithful (the lock linearises workers).
 * `step` transliterates one `serve` with Mojo `Int` (= `Int64`, wrapping)
   arithmetic: every Mojo `+ - *` is wrapped with `w`, Mojo `//` is floor
   division (`Int.fdiv`) wrapped with `w`. It is the shipped code, with the
-  APP-40 clamp of `elapsed` to `maxElapsed`; `stepOld` is the pre-fix code
-  (59bda50), kept for the counterexample in `Flare.Bugs.APP_40`.
+  APP-40 clamp of `elapsed` to `maxElapsed`. `stepUnclamped` is the same
+  step without the clamp; it agrees with `step` whenever `elapsed` is
+  within the clamp, which is how the general proofs use it.
 * `spec` is the textbook token bucket in exact arithmetic (RFC-less;
   written from the docstring "admits up to `rate_per_sec` requests per
   second with a bucket depth of `burst`"): refill
@@ -30,10 +31,9 @@ Results:
 * `step_last_ok`: the clock carry never runs ahead of `now`, never goes
   backwards, and leaves less than one milli-token period (+1 ns) uncredited
   (general): the remainder fix is sound.
-* `stepOld_eq_spec`, `stepOld_inv`, `stepOld_last_ok`: the same for the
-  pre-fix `stepOld` under the extra hypothesis that the refill product
-  `elapsed * rate` fits in `Int64`. Without it the invariant is false: see
-  `Flare.Bugs.APP_40`.
+* `stepUnclamped_eq_spec`, `stepUnclamped_inv`, `stepUnclamped_last_ok`: the
+  same for `stepUnclamped` under the extra hypothesis that the refill
+  product `elapsed * rate` fits in `Int64`.
 -/
 namespace Flare.L4.RateLimit
 
@@ -59,7 +59,7 @@ def init (burst t0 : Int) : State := { tokens := w (burst * 1000), last := t0 }
 
 /-- The body of `serve` after the clamped `elapsed` has been computed
 (reliability.mojo:372-391): refill, clock carry, capacity clamp, admit.
-mirrors flare/http/reliability.mojo:384-401 (fixed, APP-40) -/
+mirrors flare/http/reliability.mojo#RateLimit.serve sha=9a7ea110fa57 at=571b6abf (fixed, APP-40) -/
 def core (rate burst : Int) (s : State) (now elapsed : Int) : State × Bool :=
   let refill := fdivM (w (elapsed * rate)) 1000000
   let last1 := if refill > 0 then w (s.last + fdivM (w (refill * 1000000)) rate) else s.last
@@ -72,29 +72,28 @@ def core (rate burst : Int) (s : State) (now elapsed : Int) : State × Bool :=
   ({ tokens := nt2, last := last2 }, allow)
 
 /-- Clamped elapsed time (reliability.mojo:366-371).
-mirrors flare/http/reliability.mojo:372-374 (fixed, APP-40) -/
+mirrors flare/http/reliability.mojo#RateLimit.serve sha=9a7ea110fa57 at=571b6abf (fixed, APP-40) -/
 def elapsedOf (s : State) (now : Int) : Int :=
   let elapsed0 := w (now - s.last)
   if elapsed0 < 0 then 0 else elapsed0
 
-/-- One pre-fix `serve` call with `rate_per_sec > 0` (the `<= 0`
-pass-through branch does not touch the cell): `elapsed` is multiplied by
-`rate` unclamped, which wraps after a long idle time (APP-40). `burst` is
-the defaulted field value (`burst if burst > 0 else rate_per_sec`).
-mirrors flare/http/reliability.mojo:358-394 @59bda50 (pre-fix) -/
-def stepOld (rate burst : Int) (s : State) (now : Int) : State × Bool :=
+/-- One `serve` refill without the `max_elapsed` clamp: `elapsed` is
+multiplied by `rate` as is, so it only fits in `Int64` for a bounded idle
+time. `burst` is the defaulted field value (`burst if burst > 0 else
+rate_per_sec`). -/
+def stepUnclamped (rate burst : Int) (s : State) (now : Int) : State × Bool :=
   core rate burst s now (elapsedOf s now)
 
 /-- The longest idle time that still matters: an empty bucket is full after
 `⌊burst·10⁹/rate⌋ + 1` ns, so a longer `elapsed` is clamped to this before
 the refill product is formed (`max_elapsed`).
-mirrors flare/http/reliability.mojo:381-383 (fixed, APP-40) -/
+mirrors flare/http/reliability.mojo#RateLimit.serve sha=9a7ea110fa57 at=571b6abf (fixed, APP-40) -/
 def maxElapsed (rate burst : Int) : Int :=
   w (fdivM (w (w (burst * 1000) * 1000000)) rate + 1)
 
 /-- One shipped `serve` call with `rate_per_sec > 0`: returns the new cell
 and whether the request is admitted.
-mirrors flare/http/reliability.mojo:361-404 (fixed, APP-40) -/
+mirrors flare/http/reliability.mojo#RateLimit.serve sha=9a7ea110fa57 at=571b6abf (fixed, APP-40) -/
 def step (rate burst : Int) (s : State) (now : Int) : State × Bool :=
   let e := elapsedOf s now
   core rate burst s now (if e > maxElapsed rate burst then maxElapsed rate burst else e)
@@ -164,14 +163,14 @@ theorem elapsedOf_eq (s : State) (now : Int) (hl0 : 0 ≤ s.last) (hl1 : s.last 
   have he : w (now - s.last) = now - s.last := w_of_fits (fits_of (by omega) (by omega))
   simp only [elapsedOf, he]; rw [if_neg (by omega)]
 
-/-- Under `Sane`, every intermediate Mojo value of the pre-fix code is
+/-- Under `Sane`, every intermediate Mojo value of `stepUnclamped` is
 exact, so its token count and decision equal the spec's with
 `elapsed = now - last`. -/
-theorem stepOld_eq_spec (rate burst : Int) (s : State) (now : Int)
+theorem stepUnclamped_eq_spec (rate burst : Int) (s : State) (now : Int)
     (h : Sane rate burst s now) :
-    ((stepOld rate burst s now).1.tokens, (stepOld rate burst s now).2)
+    ((stepUnclamped rate burst s now).1.tokens, (stepUnclamped rate burst s now).2)
       = spec rate (burst * 1000) s.tokens (now - s.last) := by
-  unfold stepOld
+  unfold stepUnclamped
   rw [elapsedOf_eq s now h.last_nonneg h.last_le h.now_le]
   exact core_eq_spec rate burst s now _ h.rate_pos h.cap_nonneg h.cap_le h.tok_nonneg h.tok_le
     (by have := h.last_le; omega) h.prod_fits
@@ -184,21 +183,21 @@ theorem spec_inv (rate cap tokens elapsed : Int) (hr : 0 ≤ rate) (he : 0 ≤ e
   simp only [spec]
   split <;> simp <;> omega
 
-/-- Invariant `0 ≤ tokens ≤ burst·1000` is preserved by the pre-fix `serve`
+/-- Invariant `0 ≤ tokens ≤ burst·1000` is preserved by `stepUnclamped`
 whenever the refill product does not overflow. -/
-theorem stepOld_inv (rate burst : Int) (s : State) (now : Int) (h : Sane rate burst s now) :
-    0 ≤ (stepOld rate burst s now).1.tokens ∧ (stepOld rate burst s now).1.tokens ≤ burst * 1000 := by
-  have e := congrArg Prod.fst (stepOld_eq_spec rate burst s now h)
+theorem stepUnclamped_inv (rate burst : Int) (s : State) (now : Int) (h : Sane rate burst s now) :
+    0 ≤ (stepUnclamped rate burst s now).1.tokens ∧ (stepUnclamped rate burst s now).1.tokens ≤ burst * 1000 := by
+  have e := congrArg Prod.fst (stepUnclamped_eq_spec rate burst s now h)
   simp only at e
   rw [e]
   exact spec_inv _ _ _ _ (Int.le_of_lt h.rate_pos) (by have := h.last_le; omega) h.tok_nonneg h.tok_le
 
-/-- The clock carry of the pre-fix code: the new `last`
+/-- The clock carry of `stepUnclamped`: the new `last`
 lies in `[last, now]`, and the time left uncredited is less than one
 milli-token period plus one nanosecond: `(now - last') * rate < 10⁶ + rate`. -/
-theorem stepOld_last_ok (rate burst : Int) (s : State) (now : Int) (h : Sane rate burst s now) :
-    s.last ≤ (stepOld rate burst s now).1.last ∧ (stepOld rate burst s now).1.last ≤ now ∧
-    (now - (stepOld rate burst s now).1.last) * rate < 1000000 + rate := by
+theorem stepUnclamped_last_ok (rate burst : Int) (s : State) (now : Int) (h : Sane rate burst s now) :
+    s.last ≤ (stepUnclamped rate burst s now).1.last ∧ (stepUnclamped rate burst s now).1.last ≤ now ∧
+    (now - (stepUnclamped rate burst s now).1.last) * rate < 1000000 + rate := by
   obtain ⟨hr, hr2, hc0, hc1, hn0, hn1, hl0, hl1, ht0, ht1, hp⟩ := h
   unfold I64_MAX at hn1 hp
   have he : w (now - s.last) = now - s.last := w_of_fits (fits_of (by omega) (by omega))
@@ -209,7 +208,7 @@ theorem stepOld_last_ok (rate burst : Int) (s : State) (now : Int) (h : Sane rat
   have hR : fdivM ((now - s.last) * rate) 1000000 = (now - s.last) * rate / 1000000 := by
     unfold fdivM; rw [fdiv_pos _ _ (by decide)]
     exact w_of_fits (fits_of (by omega) (by omega))
-  simp only [stepOld, core, elapsedOf, he, if_neg (show ¬ now - s.last < 0 by omega), hP, hR, hcap]
+  simp only [stepUnclamped, core, elapsedOf, he, if_neg (show ¬ now - s.last < 0 by omega), hP, hR, hcap]
   have hlast0 : now = s.last + (now - s.last) := by omega
   generalize hE : now - s.last = E at hP0 hp hlast0 ⊢
   have hR0 : 0 ≤ E * rate / 1000000 := Int.ediv_nonneg hP0 (by decide)
@@ -390,14 +389,14 @@ theorem step_last_ok (rate burst : Int) (s : State) (now : Int) (h : SaneFix rat
     rw [hlast]
     refine ⟨hl1, Int.le_refl _, ?_⟩
     simp; omega
-  · have hsame : step rate burst s now = stepOld rate burst s now := by
-      unfold step stepOld
+  · have hsame : step rate burst s now = stepUnclamped rate burst s now := by
+      unfold step stepUnclamped
       rw [hE]
       simp only [if_neg hgt]
     rw [hsame]
     have hle : (now - s.last) * rate ≤ maxElapsed rate burst * rate :=
       Int.mul_le_mul_of_nonneg_right (by omega) (Int.le_of_lt hr)
-    exact stepOld_last_ok rate burst s now
+    exact stepUnclamped_last_ok rate burst s now
       ⟨hr, hr2, hc0, by omega, by omega, hn1, hl0, hl1, ht0, ht1, by unfold I64_MAX; omega⟩
 
 /-- Exact overflow threshold: the refill product overflows iff

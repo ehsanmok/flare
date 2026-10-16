@@ -20,7 +20,7 @@ namespace Flare.L3.Quic.AckExpand
 
 /-- The inner `while p >= lo` loop. Returns the extended output and
 whether the function returned early (cap reached or `p == 0`).
-mirrors flare/quic/state.mojo:402-407 and 420-425 @59bda50 -/
+mirrors flare/quic/_state_helpers.mojo#expand_ack_ranges sha=2518349aaff5 at=ea1b9282 -/
 def emitLoop (cap lo : Nat) : Nat → List Nat → List Nat × Bool
   | 0, out => if lo ≤ 0 then (out ++ [0], true) else (out, false)
   | p + 1, out =>
@@ -30,7 +30,7 @@ def emitLoop (cap lo : Nat) : Nat → List Nat → List Nat × Bool
     else (out, false)
 
 /-- The loop over the additional ranges `(gap, length)`.
-mirrors flare/quic/state.mojo:408-426 @59bda50 -/
+mirrors flare/quic/_state_helpers.mojo#expand_ack_ranges sha=2518349aaff5 at=ea1b9282 -/
 def rangesLoop (cap : Nat) (curLo : Nat) (out : List Nat) :
     List (Nat × Nat) → List Nat
   | [] => out
@@ -43,8 +43,7 @@ def rangesLoop (cap : Nat) (curLo : Nat) (out : List Nat) :
       | (o, true) => o
       | (o, false) => rangesLoop cap nlo o rs
 
-/-- mirrors flare/quic/state.mojo:388-427 @59bda50 (`_ACK_EXPAND_CAP` = 256
-at state.mojo:380) -/
+/-- mirrors flare/quic/_state_helpers.mojo#expand_ack_ranges+_ACK_EXPAND_CAP sha=d795235236ae at=ea1b9282 (`_ACK_EXPAND_CAP` = 256) -/
 def expand (cap largest first : Nat) (ranges : List (Nat × Nat)) : List Nat :=
   match emitLoop cap (largest - first) largest [] with
   | (o, true) => o

@@ -48,14 +48,9 @@ Results:
   as the connection model tolerates spurious readiness, which level-triggered
   epoll requires anyway.
 * `routing_ok`: no client has the listener's token, so the accept drainer
-  only ever sees listener events. It holds for the shipped listener token
-  (above every fd) whether or not stdin is open.
-  `fd0_reachable_old` / `fd0_never_served_old`: before MACH-01 the listener
-  token was `0`, so when fd 0 was free `accept` could return fd 0, whose
-  token collided with the listener's; that connection's state never changed
-  again, because every event for it went to the accept drainer. Only its idle
-  timer (if any) ever closed it (`Flare.Bugs.MACH_01`). `fd0_served` is the
-  shipped counterpart: the same trace dispatches the fd-0 client's event.
+  only ever sees listener events. It holds because the listener token is
+  above every fd (MACH-01), whether or not stdin is open; `fd0_served`: a
+  client accepted on fd 0 has its events dispatched to it.
   `HttpServer.serve` runs the same loop in `_unified_reactor_impl.mojo`.
 -/
 namespace Flare.Machine
@@ -65,13 +60,13 @@ abbrev Fd := Nat
 /-- Every fd the kernel can hand out is below this (`int`, 2^31). -/
 def fdLimit : Nat := 2147483648
 
-/-- mirrors flare/runtime/event.mojo `LISTENER_TOKEN` (fixed, MACH-01): 2^40,
+/-- mirrors flare/runtime/event.mojo#LISTENER_TOKEN sha=bcfba1c5c115 at=7cdf6421 (fixed, MACH-01): 2^40,
 above every fd. -/
 def listenerToken : Nat := 1099511627776
 
 theorem fdLimit_le_listenerToken : fdLimit ≤ listenerToken := by decide
 
-/-- mirrors flare/http/_reactor/conn_handle.mojo `StepResult` @59bda50
+/-- mirrors flare/http/_reactor/keepalive_scan.mojo#StepResult sha=3ddd08f88e14 at=59bda50f
 (`want_read`, `want_write`, `done`, `idle_timeout_ms`; `h2c_upgrade` is not
 modelled). `idleMs = 0` cancels the idle timer, `> 0` re-arms it, `< 0`
 leaves it alone (lifecycle.mojo:105-114). -/
@@ -102,9 +97,6 @@ structure Params where
   stdinOpen : Bool
   /-- `_cleanup_conn` cancels the connection's timer (flare: `true`) -/
   cancelOnCleanup : Bool
-  /-- the reactor token the listener is registered under: `listenerToken`
-  since MACH-01, `0` before (when it collided with a client on fd 0) -/
-  listenerTok : Fd
 
 structure Timer where
   id : Nat
@@ -181,7 +173,7 @@ def schedule (c : Cfg S) (f : Fd) (ms gen : Nat) : Cfg S :=
   { c with wheel := c.wheel ++ [⟨c.nextTid, f, c.now + ms, gen⟩],
            timers := upd c.timers f (some c.nextTid), nextTid := c.nextTid + 1 }
 
-/-- mirrors flare/http/_reactor/lifecycle.mojo:117-147 @59bda50
+/-- mirrors flare/http/_reactor/lifecycle.mojo#_cleanup_conn sha=cff33bcd82f3 at=59bda50f
 (`cancel = false` is the variant without the cancel at 129-137: the entry
 is popped from `timers` but the timer stays in the wheel). -/
 def cleanup (cancel : Bool) (c : Cfg S) (f : Fd) : Cfg S :=
@@ -195,7 +187,7 @@ def interestOf (r : StepResult) (old : Nat) : Nat :=
 def liveAfter (l : Live S) (st : S) (r : StepResult) : Live S :=
   { l with st := st, interest := interestOf r l.interest }
 
-/-- mirrors flare/http/_reactor/lifecycle.mojo:80-114 @59bda50 -/
+/-- mirrors flare/http/_reactor/lifecycle.mojo#_apply_step sha=be67fb7132af at=59bda50f -/
 def applyStep (c : Cfg S) (f : Fd) (l : Live S) (st : S) (r : StepResult) : Cfg S :=
   if r.idleMs = 0 then cancelFd (setConn c f (some (liveAfter l st r))) f
   else if 0 < r.idleMs then
@@ -214,7 +206,10 @@ def fireAll (cancel : Bool) (tm : Nat) : Cfg S → List Timer → Cfg S
     | none => fireAll cancel tm c ts
 
 /-- `reactor.poll` returned `toks`, then `wheel.advance(now, fired)` and the
-fired loop (`_server_reactor_epoll.mojo:163-178`). -/
+fired loop (`_server_reactor_epoll.mojo:163-178`). The shipped loop now reaps
+the fired connections after the batch instead (`_expired_idle_conns`), sparing
+one the batch re-armed; this step still reaps before it.
+mirrors flare/http/_server_reactor_epoll.mojo#_run_handler_loop_impl sha=1465c17e48c9 at=59bda50f -/
 def pollStep (cancel : Bool) (c : Cfg S) (now : Nat) (toks : List Fd) : Cfg S :=
   fireAll cancel now { c with now := now, batch := toks, wheel := c.wheel.filter (fun t => now < t.due) }
     (c.wheel.filter (fun t => t.due ≤ now))
@@ -244,19 +239,19 @@ def dispatchAt (M : ConnModel) (P : Params) (c : Cfg M.S) (f : Fd) (i : M.I) : C
 /-- One machine step. -/
 def step (M : ConnModel) (P : Params) (c : Cfg M.S) : Label M.I → Option (Cfg M.S)
   | .poll now toks =>
-    if c.batch = [] ∧ c.now ≤ now ∧ toks.all (fun k => k = P.listenerTok || (c.conns k).isSome) = true then
+    if c.batch = [] ∧ c.now ≤ now ∧ toks.all (fun k => k = listenerToken || (c.conns k).isSome) = true then
       some (pollStep P.cancelOnCleanup c now toks)
     else none
   | .accept fd regOk =>
-    if c.batch.head? = some P.listenerTok ∧ (c.conns fd).isNone = true ∧ fd ≠ P.lfd ∧
+    if c.batch.head? = some listenerToken ∧ (c.conns fd).isNone = true ∧ fd ≠ P.lfd ∧
         (P.stdinOpen = true → fd ≠ 0) ∧ fd < fdLimit then
       some (acceptOr M c fd regOk)
     else none
   | .acceptDone =>
-    if c.batch.head? = some P.listenerTok then some { c with batch := c.batch.tail } else none
+    if c.batch.head? = some listenerToken then some { c with batch := c.batch.tail } else none
   | .dispatch i =>
     match c.batch with
-    | f :: rest => if f = P.listenerTok then none else some (dispatchAt M P { c with batch := rest } f i)
+    | f :: rest => if f = listenerToken then none else some (dispatchAt M P { c with batch := rest } f i)
     | [] => none
 
 def lts (M : ConnModel) (P : Params) : LTS (Cfg M.S) (Label M.I) :=
@@ -746,38 +741,33 @@ theorem conn_invariant_lifts (M : ConnModel) (P : Params) (Q : M.S → Prop)
 
 /-- **Routing.** No live connection has the listener's token, so every
 listener-token event the loop hands to the accept drainer is the listener's.
-It holds when the token is above every fd (the shipped `listenerToken`,
-whether or not stdin is open) and, for the pre-fix token `0`, when fd 0 is in
-use. -/
+The token is above every fd, so this holds whether or not stdin is open. -/
 theorem routing_ok (M : ConnModel) (P : Params)
-    (hP : fdLimit ≤ P.listenerTok ∨ (P.listenerTok = 0 ∧ P.stdinOpen = true))
-    (c : Cfg M.S) (hr : (lts M P).Reachable c) : c.conns P.listenerTok = none := by
-  have hind : (lts M P).Inductive (fun c : Cfg M.S => c.conns P.listenerTok = none) := by
+    (c : Cfg M.S) (hr : (lts M P).Reachable c) : c.conns listenerToken = none := by
+  have hind : (lts M P).Inductive (fun c : Cfg M.S => c.conns listenerToken = none) := by
     refine ⟨fun s hs => by subst hs; rfl, ?_⟩
     intro s lab s' h hs
-    show s'.conns P.listenerTok = none
+    show s'.conns listenerToken = none
     change step M P s lab = some s' at hs
     cases lab with
     | poll now toks =>
       simp only [step] at hs; split at hs
       · cases hs
-        cases e : (pollStep P.cancelOnCleanup s now toks).conns P.listenerTok with
+        cases e : (pollStep P.cancelOnCleanup s now toks).conns listenerToken with
         | none => rfl
         | some l =>
-          have := fireAll_conns_sub _ _ _ _ P.listenerTok l e
-          change s.conns P.listenerTok = some l at this
+          have := fireAll_conns_sub _ _ _ _ listenerToken l e
+          change s.conns listenerToken = some l at this
           rw [h] at this; cases this
       · cases hs
     | accept fd regOk =>
       simp only [step] at hs; split at hs
       · rename_i hc
-        have hfd : P.listenerTok ≠ fd := by
+        have hfd : listenerToken ≠ fd := by
           intro e
-          rcases hP with h1 | ⟨h0, hs0⟩
-          · have := hc.2.2.2.2
-            rw [← e] at this
-            exact absurd this (Nat.not_lt.2 h1)
-          · exact hc.2.2.2.1 hs0 (by rw [← e]; exact h0)
+          have := hc.2.2.2.2
+          rw [← e] at this
+          exact absurd this (Nat.not_lt.2 fdLimit_le_listenerToken)
         cases hs
         cases regOk
         · exact h
@@ -800,54 +790,6 @@ theorem routing_ok (M : ConnModel) (P : Params)
           rw [dispatchAt_conns_other M P _ i (Ne.symm hf0)]; exact h
   exact hind.reachable c hr
 
-/-- **Pre-fix: a connection on fd 0 is never served.** With the listener
-token `0`, no machine step changes the connection on fd 0: it can only
-disappear (idle timeout). Its events carry the listener's token and go to the
-accept drainer. -/
-theorem fd0_never_served_old (M : ConnModel) (P : Params) (hT : P.listenerTok = 0)
-    (c c' : Cfg M.S) (lab : Label M.I)
-    (hs : step M P c lab = some c') (l l' : Live M.S)
-    (h0 : c.conns 0 = some l) (h0' : c'.conns 0 = some l') : l' = l := by
-  cases lab with
-  | poll now toks =>
-    simp only [step] at hs; split at hs
-    · cases hs
-      have := fireAll_conns_sub _ _ _ _ 0 l' h0'
-      change c.conns 0 = some l' at this
-      rw [h0] at this; exact (Option.some.inj this).symm
-    · cases hs
-  | accept fd regOk =>
-    simp only [step] at hs; split at hs
-    · rename_i hc
-      have hfd : (0 : Nat) ≠ fd := by
-        intro e; subst e
-        have := hc.2.1; rw [h0] at this; simp at this
-      cases hs
-      cases regOk
-      · simp only [acceptOr] at h0'; rw [h0] at h0'; exact (Option.some.inj h0').symm
-      · simp only [acceptOr] at h0'
-        rw [acceptStep_conns_other M c hfd, h0] at h0'; exact (Option.some.inj h0').symm
-    · cases hs
-  | acceptDone =>
-    simp only [step] at hs; split at hs
-    · cases hs; change c.conns 0 = some l' at h0'
-      rw [h0] at h0'; exact (Option.some.inj h0').symm
-    · cases hs
-  | dispatch i =>
-    simp only [step] at hs
-    cases hb : c.batch with
-    | nil => simp [hb] at hs
-    | cons f rest =>
-      simp only [hb] at hs
-      split at hs
-      · cases hs
-      · rename_i hf0
-        cases hs
-        rw [hT] at hf0
-        rw [dispatchAt_conns_other M P _ i (Ne.symm hf0)] at h0'
-        change c.conns 0 = some l' at h0'
-        rw [h0] at h0'; exact (Option.some.inj h0').symm
-
 /-! ## Concrete traces -/
 
 /-- A toy connection: counts the events it has seen and keeps reading; the
@@ -860,12 +802,9 @@ abbrev counter : ConnModel where
   onEvent := fun s fin => (s + 1, ⟨true, false, fin, -1⟩)
   idleMs := 10
 
-def flareP : Params := ⟨3, true, true, listenerToken⟩
-def noCancelP : Params := ⟨3, true, false, listenerToken⟩
-def stdinClosedP : Params := ⟨3, false, true, listenerToken⟩
-/-- the pre-fix loop (listener under token 0) with stdin closed -/
-def stdinClosedOldP : Params := ⟨3, false, true, 0⟩
-
+def flareP : Params := ⟨3, true, true⟩
+def noCancelP : Params := ⟨3, true, false⟩
+def stdinClosedP : Params := ⟨3, false, true⟩
 def runSteps (M : ConnModel) (P : Params) : Cfg M.S → List (Label M.I) → Option (Cfg M.S)
   | c, [] => some c
   | c, l :: ls => (step M P c l).bind (runSteps M P · ls)
@@ -926,41 +865,12 @@ theorem stale_event_redelivered :
       some ([⟨5, 0, 0, 10, 10⟩], some (1, 1)) := by
   decide
 
-/-- Pre-fix (listener token 0), stdin closed: a client accepted on fd 0 is
-live and its next event (token 0) is a listener event. -/
-def fd0TraceOld : List (Label Bool) :=
-  [.poll 0 [0], .accept 0 true, .acceptDone, .poll 1 [0]]
-
-theorem fd0_trace_old :
-    (runSteps counter stdinClosedOldP initCfg fd0TraceOld).map
-      (fun c => ((c.conns 0).map (·.st), c.batch)) = some (some 0, [0]) := by
-  decide
-
-theorem fd0_event_not_dispatched_old (fin : Bool) :
-    (runSteps counter stdinClosedOldP initCfg fd0TraceOld).bind
-      (fun c => step counter stdinClosedOldP c (.dispatch fin)) = none := by
-  cases fin <;> decide
-
-/-- **Pre-fix: fd 0 is reachable** when stdin is closed. -/
-theorem fd0_reachable_old :
-    ∃ c, (lts counter stdinClosedOldP).Reachable c ∧ (c.conns 0).isSome := by
-  cases h : runSteps counter stdinClosedOldP initCfg fd0TraceOld with
-  | none => have := fd0_trace_old; rw [h] at this; cases this
-  | some c =>
-    have hk := fd0_trace_old
-    rw [h] at hk
-    simp only [Option.map_some, Option.some.injEq, Prod.mk.injEq] at hk
-    refine ⟨c, ⟨initCfg, fd0TraceOld, rfl, runSteps_run _ _ _ _ _ h⟩, ?_⟩
-    cases e : c.conns 0 with
-    | none => rw [e] at hk; cases hk.1
-    | some _ => rfl
-
-/-- Shipped, stdin closed: the client accepted on fd 0 is registered under
-token 0, which is not the listener's, so its next event reaches it. -/
+/-- Stdin closed: the client accepted on fd 0 is registered under token 0,
+which is not the listener's, so its next event reaches it. -/
 def fd0Trace : List (Label Bool) :=
   [.poll 0 [listenerToken], .accept 0 true, .acceptDone, .poll 1 [0], .dispatch false]
 
-/-- **A client on fd 0 is served** (shipped): after the accept, its event is
+/-- **A client on fd 0 is served**: after the accept, its event is
 dispatched and the connection's state changes (the toy connection counts the
 events it has seen). -/
 theorem fd0_served :

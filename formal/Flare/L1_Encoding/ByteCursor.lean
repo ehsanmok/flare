@@ -6,28 +6,18 @@ import Flare.L1_Encoding.Utf8
 length-delimited guard (`grpc/proto.mojo`)
 
 `ByteReader` is `{buf, pos : Int}`; every read calls `_need(n)`, which
-raises unless `n ≥ 0 ∧ pos + n ≤ len(buf)`. The shipped check (fixed,
-ENC-04) is `n < 0 or n > len(buf) - pos`, which cannot overflow. Before the
-fix it was `pos + n > len(buf)` computed in Mojo `Int` (`Int64`, wrapping),
-so `pos + n` could wrap negative and pass the check (`guard`, `needOld`,
-`skipOld`). The same expression guarded `ProtoReader.read_bytes` /
-`ProtoReader.skip` in `grpc/proto.mojo`, where `n` is a 64-bit varint taken
-from the wire; that reader is fixed too (ENC-03; pre-fix versions
-`PReader.skipLenOld` / `readBytesOld`).
+raises unless `n ≥ 0 ∧ pos + n ≤ len(buf)`. The check is
+`n < 0 or n > len(buf) - pos`, which cannot overflow in Mojo `Int`
+(`Int64`). `ProtoReader.read_bytes` / `ProtoReader.skip` in
+`grpc/proto.mojo`, where `n` is a 64-bit varint taken from the wire, use
+the same check.
 
-* `guard_iff` gives the exact acceptance set of the pre-fix `_need`:
-  in-bounds requests **or** requests whose sum `pos + n` overflows `Int64`.
-* `guard_iff_of_small`: for `n ≤ 2^63 - 1 - len` (every in-tree caller of
-  `ByteReader`) the pre-fix check was exact.
-* `guardFixed_iff`: the shipped guard `n > len - pos` is exact for every `n`.
+* `guardFixed_iff`: the guard is exact for every `n`.
 * `Inv` (`0 ≤ pos ≤ len`) is preserved by every operation that passes the
   shipped guard (`skip_inv`, `readBytes_spec`), and every read touches only
   `[pos, pos + k)`.
 * Read-after-write round trips for all six integer widths, and
   `readUtf8_wf`: `read_utf8` only ever returns RFC 3629 well-formed bytes.
-
-The counterexamples are in `Flare.Bugs.ENC_03` (protobuf) and
-`Flare.Bugs.ENC_04` (`ByteReader`).
 -/
 namespace Flare.L1.ByteCursor
 open Flare.Bytes (getD)
@@ -39,11 +29,6 @@ set_option linter.unusedSimpArgs false
 theorem add_toInt_of_fits (a b : Int64) (h1 : -2 ^ 63 ≤ a.toInt + b.toInt)
     (h2 : a.toInt + b.toInt < 2 ^ 63) : (a + b).toInt = a.toInt + b.toInt := by
   rw [Int64.toInt_add]; exact Int.bmod_eq_of_le (by omega) (by omega)
-
-theorem add_toInt_of_overflow (a b : Int64) (h : 2 ^ 63 ≤ a.toInt + b.toInt) :
-    (a + b).toInt = a.toInt + b.toInt - 2 ^ 64 := by
-  have := a.toInt_lt; have := b.toInt_lt
-  rw [Int64.toInt_add, Int.bmod_def]; split <;> omega
 
 theorem sub_toInt_of_fits (a b : Int64) (h1 : -2 ^ 63 ≤ a.toInt - b.toInt)
     (h2 : a.toInt - b.toInt < 2 ^ 63) : (a - b).toInt = a.toInt - b.toInt := by
@@ -57,44 +42,16 @@ theorem lenI_toInt (b : Bytes) (h : b.length < 2 ^ 63) : (lenI b).toInt = b.leng
 
 /-! ## The bounds guard -/
 
-/-- `n < 0 or pos + n > len` is *false* (the guard does not raise).
-the pre-fix `ByteReader._need` (flare/io/byte_cursor.mojo @59bda50); both
-that and flare/grpc/proto.mojo now use `guardFixed` (ENC-03, ENC-04) -/
-def guard (pos n : Int64) (len : Nat) : Bool :=
-  !(decide (n < 0) || decide (pos + n > Int64.ofNat len))
-
-/-- Minimal fix: compare against the remaining length instead of forming
-`pos + n` (`len - pos` cannot overflow when `0 ≤ pos ≤ len`). -/
+/-- `n < 0 or n > len - pos` is *false* (the guard does not raise); `len - pos`
+cannot overflow when `0 ≤ pos ≤ len`. `ByteReader._need` and the
+`grpc/proto.mojo` reader both use it. -/
 def guardFixed (pos n : Int64) (len : Nat) : Bool :=
   !(decide (n < 0) || decide (n > Int64.ofNat len - pos))
 
 /-- Cursor invariant: `0 ≤ pos ≤ len(buf)`, and the buffer fits in a Mojo `Int`. -/
 def PosInv (pos : Int64) (len : Nat) : Prop := 0 ≤ pos.toInt ∧ pos.toInt ≤ len ∧ len < 2 ^ 63
 
-/-- **Exact behaviour of `_need`**: it accepts in-bounds requests and also
-every request whose `pos + n` overflows `Int64`. -/
-theorem guard_iff (pos n : Int64) (len : Nat) (hI : PosInv pos len) :
-    guard pos n len = true ↔
-      0 ≤ n.toInt ∧ (pos.toInt + n.toInt ≤ len ∨ 2 ^ 63 ≤ pos.toInt + n.toInt) := by
-  obtain ⟨h0, h1, h2⟩ := hI
-  have hl : (Int64.ofNat len).toInt = len := Int64.toInt_ofNat_of_lt h2
-  have := n.toInt_lt
-  simp only [guard, Bool.not_eq_true', Bool.or_eq_false_iff, decide_eq_false_iff_not,
-    Int64.lt_iff_toInt_lt, gt_iff_lt, hl, Int64.toInt_zero]
-  by_cases hn : 0 ≤ n.toInt
-  · by_cases ho : pos.toInt + n.toInt < 2 ^ 63
-    · rw [add_toInt_of_fits _ _ (by omega) ho]; omega
-    · rw [add_toInt_of_overflow _ _ (by omega)]; omega
-  · omega
-
-/-- For requests below `2^63 - len` (all in-tree `ByteReader` callers pass
-`n < 2^32`) the guard is exact. -/
-theorem guard_iff_of_small (pos n : Int64) (len : Nat) (hI : PosInv pos len)
-    (hn : n.toInt < 2 ^ 63 - len) :
-    guard pos n len = true ↔ 0 ≤ n.toInt ∧ pos.toInt + n.toInt ≤ len := by
-  rw [guard_iff pos n len hI]; have := hI.2.1; omega
-
-/-- The fixed guard is exact for every `n`. -/
+/-- The guard is exact for every `n`. -/
 theorem guardFixed_iff (pos n : Int64) (len : Nat) (hI : PosInv pos len) :
     guardFixed pos n len = true ↔ 0 ≤ n.toInt ∧ pos.toInt + n.toInt ≤ len := by
   obtain ⟨h0, h1, h2⟩ := hI
@@ -104,7 +61,7 @@ theorem guardFixed_iff (pos n : Int64) (len : Nat) (hI : PosInv pos len) :
   rw [sub_toInt_of_fits _ _ (by rw [hl]; omega) (by rw [hl]; omega), hl]
   omega
 
-/-- Advancing by an accepted (fixed-guard) amount preserves the invariant. -/
+/-- Advancing by an accepted amount preserves the invariant. -/
 theorem advance_inv (pos n : Int64) (len : Nat) (hI : PosInv pos len)
     (h : guardFixed pos n len = true) : PosInv (pos + n) len ∧ (pos + n).toInt = pos.toInt + n.toInt := by
   rw [guardFixed_iff pos n len hI] at h
@@ -123,48 +80,45 @@ namespace Reader
 /-- `self.buf[self.pos + k]` (only evaluated after the guard passed). -/
 def byteAt (r : Reader) (k : Nat) : UInt8 := getD r.buf (r.pos.toInt.toNat + k)
 
-/-- mirrors flare/io/byte_cursor.mojo:143-160 (fixed, ENC-04): `_need` raises
+/-- mirrors flare/io/byte_cursor.mojo#ByteReader._need sha=b7a4079b051e at=dadf0801 (fixed, ENC-04): `_need` raises
 iff `n < 0 or n > len(buf) - pos`. -/
 def need (r : Reader) (n : Int64) : Bool := guardFixed r.pos n r.buf.length
 
-/-- Pre-fix `_need` (wrapping `pos + n > len`), kept for `Flare.Bugs.ENC_04`. -/
-def needOld (r : Reader) (n : Int64) : Bool := guard r.pos n r.buf.length
-
 def adv (r : Reader) (n : Int64) : Reader := { r with pos := r.pos + n }
 
-/-- mirrors flare/io/byte_cursor.mojo:162-168 (fixed, ENC-04) -/
+/-- mirrors flare/io/byte_cursor.mojo#ByteReader.read_u8 sha=dca64841f691 at=dadf0801 (fixed, ENC-04) -/
 def readU8 (r : Reader) : Option (UInt8 × Reader) :=
   if r.need 1 then some (r.byteAt 0, r.adv 1) else none
 
-/-- mirrors flare/io/byte_cursor.mojo:170-177 (fixed, ENC-04) -/
+/-- mirrors flare/io/byte_cursor.mojo#ByteReader.read_u16_be sha=854684464d32 at=dadf0801 (fixed, ENC-04) -/
 def readU16be (r : Reader) : Option (UInt16 × Reader) :=
   if r.need 2 then some (((r.byteAt 0).toUInt16 <<< 8) ||| (r.byteAt 1).toUInt16, r.adv 2) else none
 
-/-- mirrors flare/io/byte_cursor.mojo:179-186 (fixed, ENC-04) -/
+/-- mirrors flare/io/byte_cursor.mojo#ByteReader.read_u16_le sha=e15a8729a0bc at=dadf0801 (fixed, ENC-04) -/
 def readU16le (r : Reader) : Option (UInt16 × Reader) :=
   if r.need 2 then some ((r.byteAt 0).toUInt16 ||| ((r.byteAt 1).toUInt16 <<< 8), r.adv 2) else none
 
-/-- mirrors flare/io/byte_cursor.mojo:188-200 (fixed, ENC-04) -/
+/-- mirrors flare/io/byte_cursor.mojo#ByteReader.read_u32_be sha=0302a88c8cd9 at=dadf0801 (fixed, ENC-04) -/
 def readU32be (r : Reader) : Option (UInt32 × Reader) :=
   if r.need 4 then
     some (((r.byteAt 0).toUInt32 <<< 24) ||| ((r.byteAt 1).toUInt32 <<< 16) |||
       ((r.byteAt 2).toUInt32 <<< 8) ||| (r.byteAt 3).toUInt32, r.adv 4)
   else none
 
-/-- mirrors flare/io/byte_cursor.mojo:202-214 (fixed, ENC-04) -/
+/-- mirrors flare/io/byte_cursor.mojo#ByteReader.read_u32_le sha=a615b935f924 at=dadf0801 (fixed, ENC-04) -/
 def readU32le (r : Reader) : Option (UInt32 × Reader) :=
   if r.need 4 then
     some ((r.byteAt 0).toUInt32 ||| ((r.byteAt 1).toUInt32 <<< 8) |||
       ((r.byteAt 2).toUInt32 <<< 16) ||| ((r.byteAt 3).toUInt32 <<< 24), r.adv 4)
   else none
 
-/-- mirrors flare/io/byte_cursor.mojo:216-225 (fixed, ENC-04) -/
+/-- mirrors flare/io/byte_cursor.mojo#ByteReader.read_u64_be sha=bc05acbcad97 at=dadf0801 (fixed, ENC-04) -/
 def readU64be (r : Reader) : Option (UInt64 × Reader) :=
   if r.need 8 then
     some ((List.range 8).foldl (fun v k => (v <<< 8) ||| (r.byteAt k).toUInt64) 0, r.adv 8)
   else none
 
-/-- mirrors flare/io/byte_cursor.mojo:227-236 (fixed, ENC-04) -/
+/-- mirrors flare/io/byte_cursor.mojo#ByteReader.read_u64_le sha=733cfebdd71a at=dadf0801 (fixed, ENC-04) -/
 def readU64le (r : Reader) : Option (UInt64 × Reader) :=
   if r.need 8 then
     some ((List.range 8).foldl (fun v k => v ||| ((r.byteAt k).toUInt64 <<< (k.toUInt64 * 8))) 0, r.adv 8)
@@ -173,29 +127,25 @@ def readU64le (r : Reader) : Option (UInt64 × Reader) :=
 /-- The `n` bytes at the cursor. -/
 def slice (r : Reader) (n : Int64) : Bytes := (r.buf.drop r.pos.toInt.toNat).take n.toInt.toNat
 
-/-- mirrors flare/io/byte_cursor.mojo:238-246 (fixed, ENC-04) -/
+/-- mirrors flare/io/byte_cursor.mojo#ByteReader.read_bytes sha=c28da49b2b80 at=dadf0801 (fixed, ENC-04) -/
 def readBytes (r : Reader) (n : Int64) : Option (Bytes × Reader) :=
   if r.need n then some (r.slice n, r.adv n) else none
 
-/-- mirrors flare/io/byte_cursor.mojo:248-263 (fixed, ENC-04) -/
+/-- mirrors flare/io/byte_cursor.mojo#ByteReader.read_utf8 sha=b6e0d57fc0ce at=dadf0801 (fixed, ENC-04) -/
 def readUtf8 (r : Reader) (n : Int64) : Option (Bytes × Reader) :=
   if r.need n then
     if Flare.L1.Utf8.isValidUtf8 (r.slice n) then some (r.slice n, r.adv n) else none
   else none
 
-/-- mirrors flare/io/byte_cursor.mojo:265-268 (fixed, ENC-04) -/
+/-- mirrors flare/io/byte_cursor.mojo#ByteReader.skip sha=32d2038ee69f at=dadf0801 (fixed, ENC-04) -/
 def skip (r : Reader) (n : Int64) : Option Reader :=
   if r.need n then some (r.adv n) else none
-
-/-- Pre-fix `skip` (wrapping guard), kept for `Flare.Bugs.ENC_04`. -/
-def skipOld (r : Reader) (n : Int64) : Option Reader :=
-  if r.needOld n then some (r.adv n) else none
 
 def Inv (r : Reader) : Prop := PosInv r.pos r.buf.length
 
 end Reader
 
-/-- `skip` (shipped, fixed guard) preserves `0 ≤ pos ≤ len` for every `n`. -/
+/-- `skip` preserves `0 ≤ pos ≤ len` for every `n`. -/
 theorem skip_inv (r r' : Reader) (n : Int64) (hI : r.Inv) (h : r.skip n = some r') :
     r'.Inv := by
   unfold Reader.skip at h
@@ -225,20 +175,6 @@ theorem readBytes_spec (r : Reader) (n : Int64) (s : Bytes) (r' : Reader) (hI : 
       simp only [Reader.slice, List.getElem?_take, List.getElem?_drop, if_pos (show j < n.toInt.toNat by omega)]
   · cases h
 
-/-- Under the invariant, the pre-fix `_need` was already exact for every
-request below `2^63 - len`, so `skip`/`read_bytes` from in-tree callers
-(`n < 2^32`) stayed in bounds before the fix as well. -/
-theorem skipOld_inv_of_small (r r' : Reader) (n : Int64) (hI : r.Inv)
-    (hn : n.toInt < 2 ^ 63 - r.buf.length) (h : r.skipOld n = some r') : r'.Inv := by
-  unfold Reader.skipOld Reader.needOld at h
-  split at h
-  · next hg =>
-    cases h
-    have hb := (guard_iff_of_small _ _ _ hI hn).mp hg
-    have : guardFixed r.pos n r.buf.length = true := (guardFixed_iff _ _ _ hI).mpr hb
-    exact (advance_inv _ _ _ hI this).1
-  · cases h
-
 /-- **`read_utf8` only returns well-formed UTF-8** (RFC 3629). -/
 theorem readUtf8_wf (r : Reader) (n : Int64) (s : Bytes) (r' : Reader)
     (h : r.readUtf8 n = some (s, r')) : Flare.L1.Utf8.WF s := by
@@ -253,22 +189,22 @@ theorem readUtf8_wf (r : Reader) (n : Int64) (s : Bytes) (r' : Reader)
 
 /-! ## `ByteWriter` -/
 
-/-- mirrors flare/io/byte_cursor.mojo:307-310 @59bda50 -/
+/-- mirrors flare/io/byte_cursor.mojo#ByteWriter.write_u16_le sha=346f5741b6b5 at=59bda50f -/
 def writeU16be (v : UInt16) : Bytes := [((v >>> 8) &&& 0xFF).toUInt8, (v &&& 0xFF).toUInt8]
-/-- mirrors flare/io/byte_cursor.mojo:313-316 @59bda50 -/
+/-- mirrors flare/io/byte_cursor.mojo#ByteWriter.write_u32_be sha=2a1a9564ad9a at=59bda50f -/
 def writeU16le (v : UInt16) : Bytes := [(v &&& 0xFF).toUInt8, ((v >>> 8) &&& 0xFF).toUInt8]
-/-- mirrors flare/io/byte_cursor.mojo:319-324 @59bda50 -/
+/-- mirrors flare/io/byte_cursor.mojo#ByteWriter.write_u32_le sha=691009473dd0 at=59bda50f -/
 def writeU32be (v : UInt32) : Bytes :=
   [((v >>> 24) &&& 0xFF).toUInt8, ((v >>> 16) &&& 0xFF).toUInt8, ((v >>> 8) &&& 0xFF).toUInt8,
    (v &&& 0xFF).toUInt8]
-/-- mirrors flare/io/byte_cursor.mojo:327-332 @59bda50 -/
+/-- mirrors flare/io/byte_cursor.mojo#ByteWriter.write_u64_be sha=9f33ac91fea0 at=59bda50f -/
 def writeU32le (v : UInt32) : Bytes :=
   [(v &&& 0xFF).toUInt8, ((v >>> 8) &&& 0xFF).toUInt8, ((v >>> 16) &&& 0xFF).toUInt8,
    ((v >>> 24) &&& 0xFF).toUInt8]
-/-- mirrors flare/io/byte_cursor.mojo:335-339 @59bda50 -/
+/-- mirrors flare/io/byte_cursor.mojo#ByteWriter.write_u64_le sha=051e04191255 at=59bda50f -/
 def writeU64be (v : UInt64) : Bytes :=
   (List.range 8).map fun k => ((v >>> (56 - k * 8).toUInt64) &&& 0xFF).toUInt8
-/-- mirrors flare/io/byte_cursor.mojo:342-346 @59bda50 -/
+/-- mirrors flare/io/byte_cursor.mojo#ByteWriter.write_bytes sha=ece1d8e76e27 at=59bda50f -/
 def writeU64le (v : UInt64) : Bytes :=
   (List.range 8).map fun k => ((v >>> (k * 8).toUInt64) &&& 0xFF).toUInt8
 
@@ -425,7 +361,7 @@ structure PReader where
 
 namespace PReader
 
-/-- mirrors flare/grpc/proto.mojo:212-226 @59bda50 (`_raw_varint`) -/
+/-- mirrors flare/grpc/proto.mojo#ProtoReader.has_more+ProtoReader._raw_varint sha=5a368cd2df77 at=59bda50f (`_raw_varint`) -/
 def rawVarint (r : PReader) : Option (UInt64 × PReader) := go r.pos 0 0
 where
   go (pos : Int64) (shift : Nat) (acc : UInt64) : Option (UInt64 × PReader) :=
@@ -438,10 +374,10 @@ where
       else go (pos + 1) (shift + 7) acc
   termination_by 64 - shift
 
-/-- mirrors flare/grpc/proto.mojo:207-208 @59bda50 (`has_more`) -/
+/-- mirrors flare/grpc/proto.mojo#ProtoReader.__init__+ProtoReader.has_more sha=11e19654112b at=59bda50f (`has_more`) -/
 def hasMore (r : PReader) : Bool := decide (r.pos < Int64.ofNat r.data.length)
 
-/-- mirrors flare/grpc/proto.mojo:228-234 @59bda50 (`read_tag`) -/
+/-- mirrors flare/grpc/proto.mojo#ProtoReader._raw_varint+ProtoReader.read_tag sha=327bfd8a5e1d at=59bda50f (`read_tag`) -/
 def readTag (r : PReader) : Option ((Int64 × Int64) × PReader) :=
   match rawVarint r with
   | none => none
@@ -450,7 +386,7 @@ def readTag (r : PReader) : Option ((Int64 × Int64) × PReader) :=
     let wire := (key &&& 7).toInt64
     if field ≤ 0 then none else some ((field, wire), r)
 
-/-- mirrors flare/grpc/proto.mojo:300-303 (fixed, ENC-03) (`skip`, `WIRE_LEN` branch):
+/-- mirrors flare/grpc/proto.mojo#ProtoReader.skip sha=9f68870e0dcc at=ee6671c5 (fixed, ENC-03) (`skip`, `WIRE_LEN` branch):
 `n < 0 or n > len(data) - pos` raises, otherwise `pos += n`. -/
 def skipLen (r : PReader) : Option PReader :=
   match rawVarint r with
@@ -459,32 +395,13 @@ def skipLen (r : PReader) : Option PReader :=
     let n := v.toInt64
     if guardFixed r.pos n r.data.length then some { r with pos := r.pos + n } else none
 
-/-- mirrors flare/grpc/proto.mojo:275-285 (fixed, ENC-03) (`read_bytes`) -/
+/-- mirrors flare/grpc/proto.mojo#ProtoReader.read_bytes sha=bb73626186d5 at=ee6671c5 (fixed, ENC-03) (`read_bytes`) -/
 def readBytes (r : PReader) : Option (Bytes × PReader) :=
   match rawVarint r with
   | none => none
   | some (v, r) =>
     let n := v.toInt64
     if guardFixed r.pos n r.data.length then
-      some ((r.data.drop r.pos.toInt.toNat).take n.toInt.toNat, { r with pos := r.pos + n })
-    else none
-
-/-- Pre-fix `skip` (`WIRE_LEN`), kept so `Flare.Bugs.ENC_03` stays checkable:
-guarded by the wrapping `pos + n > len` test. -/
-def skipLenOld (r : PReader) : Option PReader :=
-  match rawVarint r with
-  | none => none
-  | some (v, r) =>
-    let n := v.toInt64
-    if guard r.pos n r.data.length then some { r with pos := r.pos + n } else none
-
-/-- Pre-fix `read_bytes` (same wrapping guard). -/
-def readBytesOld (r : PReader) : Option (Bytes × PReader) :=
-  match rawVarint r with
-  | none => none
-  | some (v, r) =>
-    let n := v.toInt64
-    if guard r.pos n r.data.length then
       some ((r.data.drop r.pos.toInt.toNat).take n.toInt.toNat, { r with pos := r.pos + n })
     else none
 

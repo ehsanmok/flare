@@ -25,23 +25,12 @@ inductive Res where
 
 /-- One `TcpStream.write`: `send` result `r`; `r > 0` and `r = 0` are both
 returned, `r < 0` raises (EINTR retry is absorbed into the oracle).
-mirrors flare/tcp/stream.mojo:481-523 @59bda50 -/
+mirrors flare/tcp/stream.mojo#TcpStream.write sha=bae9694b2edf at=59bda50f -/
 def write (r : Int) : Option Nat := if r < 0 then none else some r.toNat
-
-/-- Pre-fix `TcpStream.write_all`: `while sent < total: sent += write(...)`
-with no check for a 0 return (flare/tcp/stream.mojo:497-519 @59bda50). -/
-def writeAllOld (total : Nat) (o : Nat → Nat → Int) : Nat → Nat → Nat → Res
-  | 0, _, sent => if sent < total then .outOfFuel sent else .done sent
-  | fuel + 1, k, sent =>
-    if sent < total then
-      match write (o k (total - sent)) with
-      | none => .err
-      | some n => writeAllOld total o fuel (k + 1) (sent + n)
-    else .done sent
 
 /-- `write_all_chunks`, shared by `TcpStream.write_all` and
 `UnixStream.write_all`: a 0 return for a non-empty chunk raises.
-mirrors flare/net/_write_loop.mojo:22-55 (fixed, NET-02) -/
+mirrors flare/net/_write_loop.mojo#write_all_chunks sha=c7ce671656a2 at=daf6b672 (fixed, NET-02) -/
 def writeAll (total : Nat) (o : Nat → Nat → Int) : Nat → Nat → Nat → Res
   | 0, _, sent => if sent < total then .outOfFuel sent else .done sent
   | fuel + 1, k, sent =>
@@ -52,21 +41,9 @@ def writeAll (total : Nat) (o : Nat → Nat → Int) : Nat → Nat → Nat → R
       | some n => writeAll total o fuel (k + 1) (sent + n)
     else .done sent
 
-/-- Pre-fix `UnixStream.write_all` decrements `remaining` instead of
-incrementing `sent`; `write` returns `sent >= 0` and raises otherwise, so the
-loop is `writeAllOld` up to the change of variable `remaining = total - sent`.
-(flare/uds/stream.mojo:140-163 @59bda50) -/
-def udsWriteAllOld (total : Nat) (o : Nat → Nat → Int) : Nat → Nat → Nat → Res
-  | 0, _, rem => if rem > 0 then .outOfFuel (total - rem) else .done (total - rem)
-  | fuel + 1, k, rem =>
-    if rem > 0 then
-      let r := o k rem
-      if r < 0 then .err else udsWriteAllOld total o fuel (k + 1) (rem - r.toNat)
-    else .done (total - rem)
-
 /-- `UnixStream.write_all` (now `write_all_chunks` as well): same loop with
 `remaining` in place of `sent`.
-mirrors flare/uds/stream.mojo:140-170 (fixed, NET-02) -/
+mirrors flare/uds/stream.mojo#UnixStream.write+UnixStream.write_all+UnixStream._write_chunk+UnixStream.shutdown_read sha=2fc6fe6cad22 at=daf6b672 (fixed, NET-02) -/
 def udsWriteAll (total : Nat) (o : Nat → Nat → Int) : Nat → Nat → Nat → Res
   | 0, _, rem => if rem > 0 then .outOfFuel (total - rem) else .done (total - rem)
   | fuel + 1, k, rem =>
@@ -200,24 +177,11 @@ def zeroOracle : Nat → Nat → Int := fun _ _ => 0
 theorem zeroOracle_weak : Weak zeroOracle := by
   intro k len _; unfold SendContract zeroOracle; omega
 
-/-- **Non-termination of the pre-fix loop under the weak contract**: for
-every fuel the loop is still running with nothing sent (the state
-`sent = 0` repeats). -/
-theorem writeAllOld_livelock_weak (total : Nat) (htot : 0 < total) :
-    ∀ fuel k, writeAllOld total zeroOracle fuel k 0 = .outOfFuel 0 := by
-  intro fuel
-  induction fuel with
-  | zero => intro k; simp [writeAllOld, htot]
-  | succ f ih =>
-    intro k
-    simp only [writeAllOld, if_pos htot, zeroOracle, write]
-    simpa using ih (k + 1)
-
 /-! ## read_exact -/
 
 /-- `TcpStream.read_exact`: `n = read(...)`; `n = 0` raises (EOF),
 `n < 0` raises, else `received += n`.
-mirrors flare/tcp/stream.mojo:429-456 @59bda50 -/
+mirrors flare/tcp/stream.mojo#TcpStream.read+TcpStream.read_exact sha=cf52493f2450 at=59bda50f -/
 def readExact (size : Nat) (o : Nat → Nat → Int) : Nat → Nat → Nat → Res
   | 0, _, rcv => if rcv < size then .outOfFuel rcv else .done rcv
   | fuel + 1, k, rcv =>
@@ -257,7 +221,7 @@ theorem readExact_terminates (size : Nat) (o : Nat → Nat → Int)
 Returns the number of cells fully consumed and the new remaining cells
 (the first one possibly shortened). Mirrors the inner `while consumed > 0
 and i < n` loop.
-mirrors flare/runtime/iovec.mojo `writev_buf_all` inner loop (fixed, RT-02) -/
+mirrors flare/runtime/iovec.mojo#writev_buf_all sha=ad9ef1189d55 at=013ffcc8 inner loop (fixed, RT-02) -/
 def consume : Nat → List Nat → Nat × List Nat
   | _, [] => (0, [])
   | 0, rest => (0, rest)
@@ -311,27 +275,10 @@ structure VState where
   remaining : Int
   deriving DecidableEq, Repr
 
-/-- Pre-fix `writev_buf_all` (flare/runtime/iovec.mojo:312-361 @59bda50), kept for the
-RT-02 counterexample: `sent = writev(...)`; `sent <= 0` → **return**
-(silently); else `remaining -= sent` and advance through the cells.
-`writev_buf` itself raises on `-1`, so the oracle's `< 0` is `err`. -/
-def writevAllOld (o : Nat → Nat → Int) : Nat → Nat → VState → Res × VState
-  | 0, _, s => (if s.remaining > 0 then .outOfFuel 0 else .done 0, s)
-  | fuel + 1, k, s =>
-    if s.remaining > 0 then
-      let r := o k (sum s.rest)
-      if r < 0 then (.err, s)
-      else if r = 0 then (.done 0, s)
-      else
-        let c := consume r.toNat s.rest
-        writevAllOld o fuel (k + 1)
-          { first := s.first + c.1, rest := c.2, remaining := s.remaining - r }
-    else (.done 0, s)
-
 /-- `writev_buf_all`: `sent = writev(...)`; `sent <= 0` raises (`-1` inside
 `writev_buf`, `0` in the loop); else `remaining -= sent` and advance through
 the cells.
-mirrors flare/runtime/iovec.mojo `writev_buf_all` (fixed, RT-02) -/
+mirrors flare/runtime/iovec.mojo#writev_buf_all sha=ad9ef1189d55 at=013ffcc8 (fixed, RT-02) -/
 def writevAll (o : Nat → Nat → Int) : Nat → Nat → VState → Res × VState
   | 0, _, s => (if s.remaining > 0 then .outOfFuel 0 else .done 0, s)
   | fuel + 1, k, s =>
@@ -386,18 +333,32 @@ theorem writevAll_strong (n : Nat) (o : Nat → Nat → Int) (h : Strong o) :
       have : s.remaining = 0 := by omega
       simp [this, VInv, h2]; omega
 
+/-- For every oracle, even one breaking the POSIX contract, a normal return
+means nothing is left to write (RT-02: a 0 return is an error, not a
+silent stop). -/
+theorem writevAll_done_complete (o : Nat → Nat → Int) :
+    ∀ fuel k s, (writevAll o fuel k s).1 = .done 0 → (writevAll o fuel k s).2.remaining ≤ 0 := by
+  intro fuel
+  induction fuel with
+  | zero =>
+    intro k s h
+    simp only [writevAll] at h ⊢
+    split at h <;> simp_all <;> omega
+  | succ f ih =>
+    intro k s
+    simp only [writevAll]
+    by_cases hp : s.remaining > 0
+    · rw [if_pos hp]
+      by_cases hr : o k (sum s.rest) ≤ 0
+      · simp [hr]
+      · simp only [hr, if_false]; exact ih _ _
+    · rw [if_neg hp]; intro _; simp only; omega
+
 /-- Caller-precondition note: if `total_bytes` understates the cells, the
 loop returns normally with bytes still queued (silent truncation). -/
 theorem writevAll_understated :
     let s : VState := { first := 0, rest := [4, 4], remaining := 4 }
     writevAll (fun _ len => (len : Int)) 3 0 s = (.done 0, { first := 2, rest := [], remaining := -4 }) := by
-  decide
-
-/-- ... and if it overstates them, the loop sees `writev` of zero cells
-return 0. The pre-fix loop returned silently (RT-02); the shipped one raises. -/
-theorem writevAllOld_overstated :
-    let s : VState := { first := 0, rest := [4], remaining := 6 }
-    writevAllOld (fun _ len => (len : Int)) 3 0 s = (.done 0, { first := 1, rest := [], remaining := 2 }) := by
   decide
 
 theorem writevAll_overstated :

@@ -1,8 +1,6 @@
 import Flare.L4_App
-/-! L4 application layer: axiom footprint of the headline theorems. Expected
-outside `Flare.Bugs`: `propext`, `Quot.sound`, `Classical.choice`. Concrete
-counterexamples in `Flare.Bugs.APP_*` that use `native_decide` additionally
-report a per-theorem auxiliary axiom `<thm>._native.native_decide.ax_*`. -/
+/-! L4 application layer: axiom footprint of the headline theorems. Expected:
+`propext`, `Quot.sound`, `Classical.choice`. -/
 
 -- ConnSM (HTTP/1.1 connection state machine)
 #print axioms Flare.L4.ConnSM.inv_inductive
@@ -13,16 +11,14 @@ report a per-theorem auxiliary axiom `<thm>._native.native_decide.ax_*`. -/
 #print axioms Flare.L4.ConnSM.run_segs_frozen
 #print axioms Flare.L4.ConnSM.ka_bound
 #print axioms Flare.L4.ConnSM.closeHonoured_step
-#print axioms Flare.L4.ConnSM.fixed_no_request_after_close_header
+#print axioms Flare.L4.ConnSM.no_request_after_close_header
 #print axioms Flare.L4.ConnSM.Framing.serialize_spec
 #print axioms Flare.L4.ConnSM.Framing.headFlag_spec
 #print axioms Flare.L4.ConnSM.Framing.staticBytes_spec
 -- KeepAlive (Connection header)
 #print axioms Flare.L4.KeepAlive.computeCloseAfter_eq_spec
-#print axioms Flare.L4.KeepAlive.computeCloseAfterOld_single
 #print axioms Flare.L4.KeepAlive.wantsClose_spec
 #print axioms Flare.L4.KeepAlive.wantsClose_sound_close
-#print axioms Flare.L4.KeepAlive.wantsCloseOld_sound_close
 -- ServerConfig
 #print axioms Flare.L4.ServerConfig.default_check
 #print axioms Flare.L4.ServerConfig.body_timer_le_request
@@ -41,7 +37,6 @@ report a per-theorem auxiliary axiom `<thm>._native.native_decide.ax_*`. -/
 #print axioms Flare.L4.ComptimeRouter.serveCT_eq_serve
 #print axioms Flare.L4.ComptimeRouter.matchOne_eq_spec
 #print axioms Flare.L4.ComptimeRouter.matchOne_nonfinal_wild
-#print axioms Flare.L4.ComptimeRouter.scanCTOld_eq
 -- Middleware
 #print axioms Flare.L4.Middleware.logger_transparent
 #print axioms Flare.L4.Middleware.catchPanic_total
@@ -56,7 +51,6 @@ report a per-theorem auxiliary axiom `<thm>._native.native_decide.ax_*`. -/
 #print axioms Flare.L4.Middleware.compress_vary
 #print axioms Flare.L4.Middleware.compress_agrees
 -- Negotiate / Cors / Cookie / Form / Url
-#print axioms Flare.L4.Negotiate.decideOld_eq_spec_of_noStar
 #print axioms Flare.L4.Negotiate.decide'_eq_spec
 #print axioms Flare.L4.Negotiate.negotiate_eq_spec
 #print axioms Flare.L4.Negotiate.decide'_perm
@@ -65,7 +59,6 @@ report a per-theorem auxiliary axiom `<thm>._native.native_decide.ax_*`. -/
 #print axioms Flare.L4.Cors.originAllowed_sound
 #print axioms Flare.L4.Cors.originAllowed_iff
 #print axioms Flare.L4.Cors.originAllowed_perm
-#print axioms Flare.L4.Cors.originAllowedOld_sound
 #print axioms Flare.L4.Cors.acao_not_star_with_creds
 #print axioms Flare.L4.Cors.attach_has_vary
 #print axioms Flare.L4.Cors.serve_vary
@@ -75,23 +68,23 @@ report a per-theorem auxiliary axiom `<thm>._native.native_decide.ax_*`. -/
 #print axioms Flare.L4.Cookie.parseMaxAge_complete
 #print axioms Flare.L4.Form.urldecodeBytes_urlencode
 #print axioms Flare.L4.Form.urldecode_urlencode
-#print axioms Flare.L4.Form.parseFormOld_toUrlencoded
 #print axioms Flare.L4.Form.parseForm_toUrlencoded
 #print axioms Flare.L4.Form.urldecode_valid
 #print axioms Flare.L4.Url.parsePort_iff
 #print axioms Flare.L4.Url.parse_port
 #print axioms Flare.L4.Url.parse_spec
-#print axioms Flare.L4.Url.parseOld_eq_parse_of_clean
 -- Reliability: RateLimit / CircuitBreaker / Retry
 #print axioms Flare.L4.RateLimit.step_eq_spec
 #print axioms Flare.L4.RateLimit.step_inv
 #print axioms Flare.L4.RateLimit.step_last_ok
-#print axioms Flare.L4.RateLimit.stepOld_eq_spec
-#print axioms Flare.L4.RateLimit.stepOld_inv
+#print axioms Flare.L4.RateLimit.stepUnclamped_eq_spec
+#print axioms Flare.L4.RateLimit.stepUnclamped_inv
 #print axioms Flare.L4.RateLimit.overflow_iff
 #print axioms Flare.L4.CircuitBreaker.counts_inductive
-#print axioms Flare.L4.CircuitBreaker.step_counts_inv_shipped
+#print axioms Flare.L4.CircuitBreaker.step_counts_inv
 #print axioms Flare.L4.CircuitBreaker.step_open_rejects
+#print axioms Flare.L4.CircuitBreaker.cooldown_respected
+#print axioms Flare.L4.CircuitBreaker.single_probe
 #print axioms Flare.L4.Retry.budget_le_max
 #print axioms Flare.L4.Retry.sleep_bounds
 #print axioms Flare.L4.Retry.serve_calls_bounded
@@ -99,6 +92,7 @@ report a per-theorem auxiliary axiom `<thm>._native.native_decide.ax_*`. -/
 -- Client: Redirect / ClientPool
 #print axioms Flare.L4.Redirect.decide_follow_lt_max
 #print axioms Flare.L4.Redirect.sendLoop_terminates
+#print axioms Flare.L4.Redirect.rdsAux_no_dots
 #print axioms Flare.L4.Redirect.sendLoop_confined
 #print axioms Flare.L4.Redirect.sendLoop_auth_monotone
 #print axioms Flare.L4.Redirect.sendLoop_cookie_proxy_monotone
@@ -107,78 +101,18 @@ report a per-theorem auxiliary axiom `<thm>._native.native_decide.ax_*`. -/
 #print axioms Flare.L4.ClientPool.caps
 #print axioms Flare.L4.ClientPool.acquire_same_origin
 -- Drain (single worker)
-#print axioms Flare.L4.Drain.drainOld_ignores_timeout
-#print axioms Flare.L4.Drain.drain_report_zero
-
--- Findings: counterexample and fix-meets-spec per issue
-#print axioms Flare.Bugs.APP_01.violates_spec
-#print axioms Flare.Bugs.APP_01.fixed_close_header_implies_close
-#print axioms Flare.Bugs.APP_02.violates_spec
-#print axioms Flare.Bugs.APP_02.wantsCloseFixed_meets_spec
-#print axioms Flare.Bugs.APP_03.violates_spec
-#print axioms Flare.Bugs.APP_03.computeCloseAfterFixed_meets_spec
-#print axioms Flare.Bugs.APP_04.static_head_emits_body
-#print axioms Flare.Bugs.APP_04.staticFixed_head_no_body
-#print axioms Flare.Bugs.APP_05.handler_error_head_emits_body
-#print axioms Flare.Bugs.APP_05.errorFixed_head_no_body
-#print axioms Flare.Bugs.APP_06.violates_spec
-#print axioms Flare.Bugs.APP_06.capFixed_spec
-#print axioms Flare.Bugs.APP_10.matchOne_violates_spec
-#print axioms Flare.Bugs.APP_10.fixed_meets_spec
-#print axioms Flare.Bugs.APP_20.negotiate_violates_spec
-#print axioms Flare.Bugs.APP_20.fixed_meets_spec
-#print axioms Flare.Bugs.APP_21.violates_spec
-#print axioms Flare.Bugs.APP_21.fixed_meets_spec
-#print axioms Flare.Bugs.APP_22.violates_spec
-#print axioms Flare.Bugs.APP_22.fixed_meets_spec
-#print axioms Flare.Bugs.APP_23.host_confusion
-#print axioms Flare.Bugs.APP_23.implFixed_meets_spec
-#print axioms Flare.Bugs.APP_24.urldecode_violates_spec
-#print axioms Flare.Bugs.APP_24.urldecodeFixed_meets_spec
-#print axioms Flare.Bugs.APP_24.parseForm_rejects_F0
-#print axioms Flare.Bugs.APP_25.host_has_at
-#print axioms Flare.Bugs.APP_25.implFixed_meets_spec
-#print axioms Flare.Bugs.APP_26.violates_spec
-#print axioms Flare.Bugs.APP_26.fixed_meets_spec
-#print axioms Flare.Bugs.APP_27.violates_spec
-#print axioms Flare.Bugs.APP_27.fixed_meets_spec
-#print axioms Flare.Bugs.APP_40.full_bucket_rejected_after_idle
-#print axioms Flare.Bugs.APP_40.implFixed_refines_spec
-#print axioms Flare.Bugs.APP_41.slow_failure_skips_cooldown
-#print axioms Flare.Bugs.APP_41.fixed_cooldown_respected
-#print axioms Flare.Bugs.APP_41.shipped_meets_spec
-#print axioms Flare.Bugs.APP_42.halfopen_admits_two
-#print axioms Flare.Bugs.APP_42.fixed_halfopen_one_probe
-#print axioms Flare.Bugs.APP_42.shipped_meets_spec
-#print axioms Flare.Bugs.APP_43.violates_spec
-#print axioms Flare.Bugs.APP_43.resolveLocation_network_path
-#print axioms Flare.Bugs.APP_44.host_case_not_same_origin
-#print axioms Flare.Bugs.APP_44.sameOrigin_case
-#print axioms Flare.Bugs.APP_45.query_only_reference_wrong
-#print axioms Flare.Bugs.APP_45.dot_segments_kept
-#print axioms Flare.Bugs.APP_45.resolveLocation_query_only
-#print axioms Flare.Bugs.APP_45.rdsAux_no_dots
-#print axioms Flare.Bugs.APP_45.rfc_5_4_1_examples
+-- Fixed findings
 
 -- Drain timeout, client pool leases, h2c hand-off, WebSocket over TLS
-#print axioms Flare.L4.Drain.drainOld_ignores_timeout
-#print axioms Flare.L4.Drain.fixed_graceful
+#print axioms Flare.L4.Drain.graceful
 #print axioms Flare.L4.ClientLease.dispose_first
 #print axioms Flare.L4.ClientLease.dispose_second
 #print axioms Flare.L4.ClientLease.release_once
 #print axioms Flare.L4.ClientLease.inv_reachable
 #print axioms Flare.L4.ClientLease.acquire_not_held
 #print axioms Flare.L4.ClientLease.pool_fd_once
-#print axioms Flare.L4.ConnExt.H2c.impl_spins
-#print axioms Flare.L4.ConnExt.H2c.fixed_spec
-#print axioms Flare.L4.ConnExt.Ws.old_violates
+#print axioms Flare.L4.ConnExt.H2c.run_spec
 #print axioms Flare.L4.ConnExt.Ws.spec
-#print axioms Flare.Bugs.APP_46.violates_spec
-#print axioms Flare.Bugs.APP_46.fixed_meets_spec
-#print axioms Flare.Bugs.APP_47.violates_spec
-#print axioms Flare.Bugs.APP_47.fixed_meets_spec
-#print axioms Flare.Bugs.APP_48.violates_spec
-#print axioms Flare.Bugs.APP_48.fixed_meets_spec
 
 -- Liveness under fair events, streaming bodies, TLS cross-interest, Negotiate splitter
 #print axioms Flare.L4.ConnLive.eventually_served
@@ -195,13 +129,12 @@ report a per-theorem auxiliary axiom `<thm>._native.native_decide.ax_*`. -/
 #print axioms Flare.L4.ConnStream.Tls.inv_route
 #print axioms Flare.L4.ConnStream.Tls.interest_nonempty
 #print axioms Flare.L4.Negotiate.parseHeaderMojo_eq
-#print axioms Flare.L4.Negotiate.negotiateOldMojo_eq
-
 -- Interim 100 Continue that the socket does not take whole (APP-49)
-#print axioms Flare.L4.Continue.Plain.violates
-#print axioms Flare.L4.Continue.Plain.fixed_spec
-#print axioms Flare.L4.Continue.Tls.violates
-#print axioms Flare.L4.Continue.Tls.fixed_spec
-#print axioms Flare.Bugs.APP_49.violates_spec
-#print axioms Flare.Bugs.APP_49.tls_response_lost
-#print axioms Flare.Bugs.APP_49.fixed_meets_spec
+#print axioms Flare.L4.Continue.Plain.run_spec
+#print axioms Flare.L4.Continue.Tls.run_spec
+-- Documented policies (DOC-04 to DOC-08)
+#print axioms Flare.L4.Policies.ErrorLog.policy
+#print axioms Flare.L4.Policies.EntryPoints.entry_spec
+#print axioms Flare.L4.Policies.Session.expires
+#print axioms Flare.L4.Policies.TlsReload.rotates
+#print axioms Flare.L4.Policies.Tickets.opt_in

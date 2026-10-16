@@ -19,62 +19,62 @@ open Flare.L4
 
 variable {Req : Type}
 
-/-- mirrors flare/http/_reactor/conn_handle.mojo `StepResult` construction
-@59bda50 (`want_read` in STATE_READING, `want_write` in STATE_WRITING). -/
+/-- mirrors the flare/http/_reactor/keepalive_scan.mojo#StepResult sha=3ddd08f88e14 at=59bda50f
+construction in conn_handle.mojo (`want_read` in STATE_READING, `want_write` in
+STATE_WRITING). -/
 def stepResult (idle write : Nat) (s : ConnSM.St Req) : Machine.StepResult :=
   { wantRead := decide (s.phase = .reading)
     wantWrite := decide (s.phase = .writing)
     done := s.done
     idleMs := if s.done then 0 else if s.phase = .writing then write else idle }
 
-/-- `ConnHandle` as the worker loop's per-connection model. `fix = true` is
-the APP-01-fixed handle. -/
-def http (fix : Bool) (P : ConnSM.Params Req) (idle write : Nat) : Machine.ConnModel where
+/-- `ConnHandle` as the worker loop's per-connection model. -/
+def http (P : ConnSM.Params Req) (idle write : Nat) : Machine.ConnModel where
   S := ConnSM.St Req
   I := ConnSM.Ev
   init := ConnSM.init
-  onEvent s e := (ConnSM.step fix P s e, stepResult idle write (ConnSM.step fix P s e))
+  onEvent s e := (ConnSM.step P s e, stepResult idle write (ConnSM.step P s e))
   idleMs := idle
 
 /-- **The connection invariant holds inside the server.** In every reachable
 worker state (any accept / poll / dispatch / timer interleaving, any fd
 reuse), every live connection satisfies `ConnSM.Inv`. -/
-theorem server_conns_inv (fix : Bool) (P : ConnSM.Params Req) (hP : ConnSM.Oracle.WF P)
-    (idle write : Nat) (MP : Machine.Params) (c : Machine.Cfg (http fix P idle write).S)
-    (hr : (Machine.lts (http fix P idle write) MP).Reachable c) :
+theorem server_conns_inv (P : ConnSM.Params Req) (hP : ConnSM.Oracle.WF P)
+    (idle write : Nat) (MP : Machine.Params) (c : Machine.Cfg (http P idle write).S)
+    (hr : (Machine.lts (http P idle write) MP).Reachable c) :
     ∀ f l, c.conns f = some l → ConnSM.Inv P l.st :=
-  Machine.conn_invariant_lifts (http fix P idle write) MP (ConnSM.Inv P) (ConnSM.inv_init P)
-    (fun s e h => ConnSM.inv_step fix P hP s e h) c hr
+  Machine.conn_invariant_lifts (http P idle write) MP (ConnSM.Inv P) (ConnSM.inv_init P)
+    (fun s e h => ConnSM.inv_step P hP s e h) c hr
 
 /-- **One response per request, in order, on every live connection.** The
 requests answered by queued responses are exactly the dispatched requests,
 each the framing oracle's reading of exactly its own bytes, and the bytes on
 the wire are a prefix of the queued responses. -/
-theorem server_responses_fifo (fix : Bool) (P : ConnSM.Params Req) (hP : ConnSM.Oracle.WF P)
-    (idle write : Nat) (MP : Machine.Params) (c : Machine.Cfg (http fix P idle write).S)
-    (hr : (Machine.lts (http fix P idle write) MP).Reachable c) (f : Machine.Fd)
-    (l : Machine.Live (http fix P idle write).S) (hf : c.conns f = some l) :
+theorem server_responses_fifo (P : ConnSM.Params Req) (hP : ConnSM.Oracle.WF P)
+    (idle write : Nat) (MP : Machine.Params) (c : Machine.Cfg (http P idle write).S)
+    (hr : (Machine.lts (http P idle write) MP).Reachable c) (f : Machine.Fd)
+    (l : Machine.Live (http P idle write).S) (hf : c.conns f = some l) :
     l.st.log.filterMap ConnSM.Out.req = l.st.segs.map Prod.snd ∧
     (∀ p ∈ l.st.segs, P.frame p.1 = .complete p.2 p.1.length) ∧
     l.st.wire <+: ConnSM.flat P l.st.log := by
-  have hi := server_conns_inv fix P hP idle write MP c hr f l hf
+  have hi := server_conns_inv P hP idle write MP c hr f l hf
   exact ⟨hi.answers, hi.segs_ok, ConnSM.Inv.wire_prefix P l.st hi⟩
 
 /-- **Keep-alive bound on every live connection.** -/
-theorem server_ka_bound (fix : Bool) (P : ConnSM.Params Req) (hP : ConnSM.Oracle.WF P)
-    (idle write : Nat) (MP : Machine.Params) (c : Machine.Cfg (http fix P idle write).S)
-    (hr : (Machine.lts (http fix P idle write) MP).Reachable c) (f : Machine.Fd)
-    (l : Machine.Live (http fix P idle write).S) (hf : c.conns f = some l) :
+theorem server_ka_bound (P : ConnSM.Params Req) (hP : ConnSM.Oracle.WF P)
+    (idle write : Nat) (MP : Machine.Params) (c : Machine.Cfg (http P idle write).S)
+    (hr : (Machine.lts (http P idle write) MP).Reachable c) (f : Machine.Fd)
+    (l : Machine.Live (http P idle write).S) (hf : c.conns f = some l) :
     l.st.ka ≤ max P.maxKA 1 :=
-  (server_conns_inv fix P hP idle write MP c hr f l hf).ka_le
+  (server_conns_inv P hP idle write MP c hr f l hf).ka_le
 
 /-- **No stale idle close, with HTTP connections.** Every idle close the
 server performs hits the connection that armed the timer. -/
-theorem server_no_stale_timer (fix : Bool) (P : ConnSM.Params Req) (idle write : Nat)
+theorem server_no_stale_timer (P : ConnSM.Params Req) (idle write : Nat)
     (MP : Machine.Params) (hP : MP.cancelOnCleanup = true)
-    (c : Machine.Cfg (http fix P idle write).S)
-    (hr : (Machine.lts (http fix P idle write) MP).Reachable c) :
+    (c : Machine.Cfg (http P idle write).S)
+    (hr : (Machine.lts (http P idle write) MP).Reachable c) :
     ∀ k ∈ c.kills, k.victim = k.armer :=
-  Machine.no_stale_timer (http fix P idle write) MP hP c hr
+  Machine.no_stale_timer (http P idle write) MP hP c hr
 
 end Flare.MachineHttp

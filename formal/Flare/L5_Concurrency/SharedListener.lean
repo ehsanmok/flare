@@ -19,11 +19,11 @@ So a worker touches the number at registration and at every listener event
 of a batch it polled before observing the stop flag; a slow handler earlier
 in the same batch delays that accept arbitrarily.
 
-Teardown (`shutdown` :746-760, `drain` :778-901) starts with
-`_signal_and_close_listener` (:655-668): store stop := True, then `close` the
-number. `_free_resources` (:703-744) later frees the `TcpListener` (with
-`fd := -1` so it is not closed twice). `drain` detaches workers that miss the
-deadline; nothing protects the shared listener for them.
+Teardown (`shutdown`, `drain`) starts with `_signal_stop`: store stop :=
+True, leaving the number open (CONC-05). `drain` detaches workers that miss
+the deadline; `_free_resources` then closes the shared listener only when no
+worker was detached, and otherwise leaks it so a detached worker never uses
+a reused number.
 
 ## Semantics
 
@@ -47,7 +47,7 @@ interleaving of `close`, `reuse` and `accept` is sequentially consistent.
 namespace Flare.L5.SharedListener
 
 /-- Worker program counter.
-mirrors flare/http/_server_reactor_epoll.mojo:150-266 @59bda50 -/
+mirrors flare/http/_server_reactor_epoll.mojo#_run_handler_loop_impl sha=1465c17e48c9 at=59bda50f -/
 inductive WPc where
   | reg    -- :155-156 `register_exclusive(listener_fd, ...)`
   | check  -- :163 `while not load_stop_flag(stopping_addr)`
@@ -67,9 +67,9 @@ inductive Fd where
   deriving DecidableEq, Repr
 
 /-- Teardown thread.
-mirrors flare/runtime/scheduler.mojo:746-760,815-901 @59bda50 -/
+mirrors flare/runtime/scheduler.mojo#Scheduler.shutdown+Scheduler.drain sha=5d2b1769fbd6 at=59bda50f -/
 inductive MPc where
-  | signal          -- `_signal_and_close_listener`
+  | signal          -- `_signal_stop`
   | sweep (k : Nat) -- join worker k if it returned, else detach it (drain)
   | free            -- stuck-worker carve-out + `_free_resources`
   | fin
@@ -81,14 +81,6 @@ structure St where
   fd : Fd
   m : MPc
   stale : Bool
-  deriving DecidableEq, Repr
-
-/-- `hard`: `shutdown()` / `drain(timeout_ms <= 0)` (every worker joined;
-the sweep waits). `fix`: the CONC-05 fix (no early close; close in
-`_free_resources` only when no worker was detached, else leak). -/
-structure Cfg where
-  hard : Bool
-  fix : Bool
   deriving DecidableEq, Repr
 
 inductive Lbl where
@@ -104,7 +96,7 @@ spawned, none registered yet. -/
 def init (n : Nat) : St := ⟨List.replicate n w0, false, .lis, .signal, false⟩
 
 /-- One worker step: the new worker and whether it used the fd number.
-mirrors flare/http/_server_reactor_epoll.mojo:155-193 @59bda50 -/
+mirrors flare/http/_server_reactor_epoll.mojo#_run_handler_loop_impl sha=1465c17e48c9 at=59bda50f -/
 def wStep (stop : Bool) (w : W) : Option (W × Bool) :=
   match w.pc with
   | .reg => some ({ w with pc := .check }, true)
@@ -112,41 +104,35 @@ def wStep (stop : Bool) (w : W) : Option (W × Bool) :=
   | .acc => some ({ w with pc := .check }, true)
   | .done => none
 
-/-- Storing the stop flag. Pre-fix (`fix = false`) `_signal_and_close_listener`
-also closed the shared fd; shipped (`fix = true`) `_signal_stop` does not.
-mirrors flare/runtime/scheduler.mojo:655-675 (fixed, CONC-05);
-pre-fix: flare/runtime/scheduler.mojo:655-668 @59bda50 -/
-def signalFd (c : Cfg) (fd : Fd) : Fd :=
-  if c.fix then fd else if fd = .lis then .closed else fd
-
 def anyDet (s : St) : Bool := s.ws.any (·.detached)
 
 /-- Freeing the shared listener: closed once after the join, leaked when a
-worker was detached (`fix = true`).
-mirrors flare/runtime/scheduler.mojo:706-725,907-918 (fixed, CONC-05);
-pre-fix: flare/runtime/scheduler.mojo:703-724,890-900 @59bda50 -/
-def freeFd (c : Cfg) (s : St) : Fd :=
-  if c.fix then (if anyDet s then s.fd else if s.fd = .lis then .closed else s.fd)
-  else s.fd
+worker was detached (CONC-05).
+mirrors flare/runtime/scheduler.mojo#Scheduler._free_resources+Scheduler.drain sha=2930b24e0585 at=45813d7d (fixed, CONC-05) -/
+def freeFd (s : St) : Fd :=
+  if anyDet s then s.fd else if s.fd = .lis then .closed else s.fd
 
-/-- mirrors flare/runtime/scheduler.mojo:655-668,846-900 @59bda50 -/
-def mStep (c : Cfg) (s : St) : Option St :=
+/-- `hard`: `shutdown()` / `drain(timeout_ms <= 0)` (every worker joined;
+the sweep waits). Storing the stop flag leaves the shared fd open (CONC-05).
+mirrors flare/runtime/scheduler.mojo#Scheduler._signal_stop+Scheduler._join_workers sha=557690e12b80 at=45813d7d (fixed, CONC-05) and
+flare/runtime/scheduler.mojo#Scheduler._signal_stop+Scheduler.drain sha=aea259247361 at=ea1b9282 -/
+def mStep (hard : Bool) (s : St) : Option St :=
   match s.m with
-  | .signal => some { s with stop := true, fd := signalFd c s.fd, m := .sweep 0 }
+  | .signal => some { s with stop := true, m := .sweep 0 }
   | .sweep k =>
     match s.ws[k]? with
     | none => some { s with m := .free }
     | some w =>
       if w.pc = .done then
         some { s with ws := s.ws.set k { w with joined := true }, m := .sweep (k + 1) }
-      else if c.hard then none
+      else if hard then none
       else some { s with ws := s.ws.set k { w with detached := true }, m := .sweep (k + 1) }
-  | .free => some { s with fd := freeFd c s, m := .fin }
+  | .free => some { s with fd := freeFd s, m := .fin }
   | .fin => none
 
-/-- mirrors flare/http/_server_reactor_epoll.mojo:155-193 and
-flare/runtime/scheduler.mojo:655-668,846-900 @59bda50 -/
-def step (c : Cfg) (s : St) : Lbl → Option St
+/-- mirrors flare/http/_server_reactor_epoll.mojo#_run_handler_loop_impl sha=1465c17e48c9 at=193ddcec and
+flare/runtime/scheduler.mojo#Scheduler._signal_stop+Scheduler.drain sha=aea259247361 at=ea1b9282 -/
+def step (hard : Bool) (s : St) : Lbl → Option St
   | .w i =>
     match s.ws[i]? with
     | none => none
@@ -154,16 +140,9 @@ def step (c : Cfg) (s : St) : Lbl → Option St
       (wStep s.stop w).map fun (w', u) =>
         { s with ws := s.ws.set i w', stale := s.stale || (u && s.fd != .lis) }
   | .reuse => if s.fd = .closed then some { s with fd := .other } else none
-  | .m => mStep c s
+  | .m => mStep hard s
 
-def lts (c : Cfg) (n : Nat) : LTS St Lbl := LTS.ofFn (· = init n) (step c)
-
-/-- Pre-fix `shutdown()` / `drain(timeout_ms <= 0)` (counterexamples). -/
-def cfgShutdown : Cfg := ⟨true, false⟩
-/-- Pre-fix `drain(timeout_ms > 0)` (counterexamples). -/
-def cfgDrain : Cfg := ⟨false, false⟩
-/-- The shipped teardown (CONC-05 fix); `hard` selects `shutdown` / hard drain. -/
-def cfgFixed (hard : Bool) : Cfg := ⟨hard, true⟩
+def lts (hard : Bool) (n : Nat) : LTS St Lbl := LTS.ofFn (· = init n) (step hard)
 
 /-! ## Spec -/
 
@@ -175,7 +154,7 @@ def NoStaleUse (s : St) : Prop := s.stale = false
 detached (then it must stay open: that worker may still accept on it). -/
 def ClosedAtEnd (s : St) : Prop := s.m = .fin → anyDet s = false → s.fd ≠ .lis
 
-/-! ## Inductive invariant of the fixed teardown -/
+/-! ## Inductive invariant -/
 
 def Inv (s : St) : Prop :=
   s.stale = false ∧
@@ -238,7 +217,7 @@ theorem inv_init (n : Nat) : Inv (init n) := by
   · intro h; cases h
 
 theorem inv_step (hard : Bool) (s s' : St) (l : Lbl) (I : Inv s)
-    (h : step (cfgFixed hard) s l = some s') : Inv s' := by
+    (h : step hard s l = some s') : Inv s' := by
   obtain ⟨i1, i2, i3, i4, i5, i6, i7⟩ := I
   cases l with
   | w i =>
@@ -296,7 +275,7 @@ theorem inv_step (hard : Bool) (s s' : St) (l : Lbl) (I : Inv s)
       simp only [hm, Option.some.injEq] at h; subst h
       have hfd := i6 hm
       refine ⟨i1, i2, ?_, ?_, ?_, ?_, ?_⟩
-      · intro hne; simp [signalFd, cfgFixed, hfd] at hne
+      · intro hne; simp [hfd] at hne
       · intro k hk j x hjk; simp at hk; omega
       · intro h'; rcases h' with h' | h' <;> cases h'
       · intro h'; cases h'
@@ -366,7 +345,7 @@ theorem inv_step (hard : Bool) (s s' : St) (l : Lbl) (I : Inv s)
       have hdec := i5 (Or.inl hm)
       refine ⟨i1, i2, ?_, ?_, ?_, ?_, ?_⟩
       · intro hne j x hx
-        simp only [freeFd, cfgFixed, if_true] at hne
+        simp only [freeFd] at hne
         split at hne
         · exact i3 hne j x hx
         · rename_i had
@@ -377,29 +356,29 @@ theorem inv_step (hard : Bool) (s s' : St) (l : Lbl) (I : Inv s)
       · intro _; exact hdec
       · intro h'; cases h'
       · intro _
-        show anyDet s = true ∨ freeFd (cfgFixed hard) s ≠ .lis
-        simp only [freeFd, cfgFixed, if_true]
+        show anyDet s = true ∨ freeFd s ≠ .lis
+        simp only [freeFd]
         cases had : anyDet s
         · right; simp only [Bool.false_eq_true, if_false]; split <;> simp_all
         · left; rfl
     | fin => simp [hm] at h
 
-theorem inv_inductive (hard : Bool) (n : Nat) : (lts (cfgFixed hard) n).Inductive Inv where
+theorem inv_inductive (hard : Bool) (n : Nat) : (lts hard n).Inductive Inv where
   init := by rintro s rfl; exact inv_init n
   step := fun s l s' hi hs => inv_step hard s s' l hi hs
 
 /-! ## Headline properties -/
 
-/-- Fixed teardown, `shutdown` or `drain`, any number of workers, any
+/-- Teardown, `shutdown` or `drain`, any number of workers, any
 interleaving with unrelated fd allocations: no worker ever registers or
 accepts on the listener's number after it stopped naming the listener. -/
-theorem fixed_noStale (hard : Bool) (n : Nat) (s : St)
-    (h : (lts (cfgFixed hard) n).Reachable s) : NoStaleUse s :=
+theorem noStale (hard : Bool) (n : Nat) (s : St)
+    (h : (lts hard n).Reachable s) : NoStaleUse s :=
   ((inv_inductive hard n).reachable s h).1
 
 /-- …and the listener is not leaked when every worker was joined. -/
-theorem fixed_closedAtEnd (hard : Bool) (n : Nat) (s : St)
-    (h : (lts (cfgFixed hard) n).Reachable s) : ClosedAtEnd s := by
+theorem closedAtEnd (hard : Bool) (n : Nat) (s : St)
+    (h : (lts hard n).Reachable s) : ClosedAtEnd s := by
   intro hm hd
   rcases ((inv_inductive hard n).reachable s h).2.2.2.2.2.2 hm with h' | h'
   · rw [hd] at h'; cases h'
@@ -415,23 +394,5 @@ theorem stop_exits (w : W) (hw : w.pc = WPc.check ∨ w.pc = WPc.acc) :
   rcases hw with hw | hw
   · left; simp [wStep, hw]
   · right; simp [wStep, hw]
-
-/-! ## Traces -/
-
-def exec (c : Cfg) : St → List Lbl → Option St
-  | s, [] => some s
-  | s, l :: ls => (step c s l).bind fun s' => exec c s' ls
-
-theorem run_of_exec (c : Cfg) (n : Nat) :
-    ∀ (s : St) (ls : List Lbl) (s' : St), exec c s ls = some s' → (lts c n).Run s ls s'
-  | s, [], s', h => by simp [exec] at h; subst h; exact .nil _
-  | s, l :: ls, s', h => by
-    simp only [exec, Option.bind_eq_some_iff] at h
-    obtain ⟨s₁, h₁, h₂⟩ := h
-    exact .cons h₁ (run_of_exec c n s₁ ls s' h₂)
-
-theorem reachable_of_exec (c : Cfg) (n : Nat) (ls : List Lbl) (s : St)
-    (h : exec c (init n) ls = some s) : (lts c n).Reachable s :=
-  ⟨_, ls, rfl, run_of_exec c n _ ls s h⟩
 
 end Flare.L5.SharedListener

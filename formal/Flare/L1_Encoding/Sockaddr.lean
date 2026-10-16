@@ -30,7 +30,7 @@ def afInet : Nat := 2
 
 /-! ## Impl (transliteration) -/
 
-/-- mirrors flare/net/_libc.mojo:209-247 @59bda50 -/
+/-- mirrors flare/net/_libc.mojo#_fill_sockaddr_in sha=7c956a33980f at=59bda50f -/
 def fillIn (pl : Platform) (b0 : Bytes) (port : UInt16) (ip : Bytes) : Bytes :=
   let b := match pl with
     | .macos => (b0.set 0 16).set 1 2
@@ -38,7 +38,7 @@ def fillIn (pl : Platform) (b0 : Bytes) (port : UInt16) (ip : Bytes) : Bytes :=
   let b := (b.set 2 (port >>> 8).toUInt8).set 3 (port &&& 0xFF).toUInt8
   (((b.set 4 (getD ip 0)).set 5 (getD ip 1)).set 6 (getD ip 2)).set 7 (getD ip 3)
 
-/-- mirrors flare/net/_libc.mojo:250-297 @59bda50 (the three `for` loops are
+/-- mirrors flare/net/_libc.mojo#_fill_sockaddr_in6 sha=ee8d994d4452 at=59bda50f (the three `for` loops are
 `List.set` folds over the same index ranges). -/
 def fillIn6 (pl : Platform) (b0 : Bytes) (port : UInt16) (ip : Bytes) : Bytes :=
   let af6 := afInet6 pl
@@ -50,11 +50,11 @@ def fillIn6 (pl : Platform) (b0 : Bytes) (port : UInt16) (ip : Bytes) : Bytes :=
   let b := (List.range 16).foldl (fun b i => b.set (8 + i) (getD ip i)) b
   (List.range' 24 4).foldl (fun b i => b.set i 0) b
 
-/-- mirrors flare/net/_libc.mojo:300-321 @59bda50 -/
+/-- mirrors flare/net/_libc.mojo#_read_port_from_sockaddr sha=d9108923cf78 at=59bda50f -/
 def readPort (b : Bytes) : UInt16 :=
   ((getD b 2).toUInt16 <<< 8) ||| (getD b 3).toUInt16
 
-/-- mirrors flare/net/_libc.mojo:395-411 @59bda50 -/
+/-- mirrors flare/net/_libc.mojo#_read_ipv6_from_sockaddr+_get_family_from_sockaddr sha=3b468063a2a2 at=59bda50f -/
 def getFamily (pl : Platform) (b : Bytes) : Nat :=
   match pl with
   | .macos => (getD b 1).toNat

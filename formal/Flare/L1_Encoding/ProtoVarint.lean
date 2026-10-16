@@ -27,7 +27,7 @@ namespace Flare.L1.ProtoVarint
 open Flare.L1.ByteCursor
 open Flare.Bytes (getD)
 
-/-- mirrors flare/grpc/proto.mojo:108-117 @59bda50 (`ProtoWriter._raw_varint`) -/
+/-- mirrors flare/grpc/proto.mojo#ProtoWriter._raw_varint sha=982005d534fa at=59bda50f (`ProtoWriter._raw_varint`) -/
 def writeVarint (v : UInt64) : Bytes :=
   let byte : UInt8 := (v &&& 0x7F).toUInt8
   let v' := v >>> 7

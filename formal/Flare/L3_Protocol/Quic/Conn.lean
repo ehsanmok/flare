@@ -24,10 +24,8 @@ The spec `specStep` is written from RFC 9000 and is role-aware:
 Results:
 * `spec_closing_absorbing` / `specRun_absorbing`: in the spec, once the
   connection is closing, draining or closed it never becomes usable again.
-* `implStep` (flare): HANDSHAKE_DONE used to set ESTABLISHED in every state
-  (`Flare.Bugs.QUIC_04`, closed connection reopened; fixed, it now acts only in
-  HANDSHAKE) and was accepted by the server (`Flare.Bugs.QUIC_09`; fixed, the
-  server role raises PROTOCOL_VIOLATION).
+* `implStep` (flare): HANDSHAKE_DONE acts only in HANDSHAKE, and the server
+  role raises PROTOCOL_VIOLATION on it.
 * `implStep_eq_spec`, `run_eq_spec`: the shipped step equals the spec on every
   state, role and event.
 * `implStep_client_eq_spec`, `implStep_absorbing`: corollaries; closing /
@@ -38,7 +36,7 @@ Results:
 namespace Flare.L3.Quic.Conn
 open Flare.L3.Quic.Frame
 
-/-- mirrors flare/quic/state.mojo:127-131 @59bda50 -/
+/-- mirrors flare/quic/state.mojo#CONN_STATE_HANDSHAKE+CONN_STATE_ESTABLISHED+CONN_STATE_CLOSING+CONN_STATE_DRAINING+CONN_STATE_CLOSED sha=54b69463fd4c at=59bda50f -/
 inductive CState | handshake | established | closing | draining | closed
   deriving DecidableEq, Repr
 
@@ -58,27 +56,27 @@ def CState.terminal : CState → Bool
 
 /-! ## flare -/
 
-/-- mirrors flare/quic/state.mojo:861-873 @59bda50 -/
+/-- mirrors flare/quic/state.mojo#mark_handshake_complete sha=574674ed984b at=59bda50f -/
 def markHandshakeComplete (s : CState) : CState :=
   if s = .handshake then .established else s
 
 /-- Connection-state effect of one decoded frame.
-mirrors flare/quic/state.mojo:430-445 (apply_connection_close: DRAINING),
+mirrors flare/quic/state.mojo#apply_connection_close sha=59dee456aa9d at=59bda50f (apply_connection_close: DRAINING),
 489-503 (apply_handshake_done: acts only in HANDSHAKE, no role test; fixed, QUIC-04),
-640-760 (every other callback leaves `conn.state` alone) @59bda50 -/
+640-760 (every other callback leaves `conn.state` alone) -/
 def frameEffect (s : CState) : Frame → CState
   | .connectionClose .. => .draining
   | .handshakeDone => markHandshakeComplete s
   | _ => s
 
-/-- mirrors flare/quic/state.mojo:890-911 @59bda50 -/
+/-- mirrors flare/quic/state.mojo#connection_close sha=b7b2a911e9e0 at=59bda50f -/
 def localClose (s : CState) : CState :=
   if s = .closing ∨ s = .draining ∨ s = .closed then s else .closing
 
 /-- One step of flare's machine; `none` = connection error (a server receiving
 HANDSHAKE_DONE, QUIC-09: `Connection.is_server` makes `on_handshake_done` raise
 PROTOCOL_VIOLATION). `handle_frame_buf` drops every frame once the connection is CLOSED.
-mirrors flare/quic/state.mojo:766-791 -/
+mirrors flare/quic/state.mojo#_ConnFrameHandler.on_path_response+_ConnFrameHandler.on_connection_close+_ConnFrameHandler.on_handshake_done+_ConnFrameHandler.on_datagram sha=7f142082ff2a at=0fc661cf -/
 def implStep (role : Role) (s : CState) : Ev → Option CState
   | .frame f =>
     if s = .closed then some s

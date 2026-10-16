@@ -14,22 +14,19 @@ Four small models of `flare/qpack/dynamic.mojo` and `flare/qpack/codec.mojo`:
 2. Field-line reference resolution (`decode_field_section_dynamic`): Base
    from Required Insert Count + Sign/Delta Base, pre-base / post-base
    absolute indices, and the table lookup. `specResolve` is RFC 9204
-   §4.5.1.2 + §4.5.2-§4.5.5 over `Nat`. `implOldResolve` is flare (UInt64 wrap).
-   `implResolve` is the shipped (fixed) resolver with the three checks the
-   old one lacked, proved equal to the spec (`implResolve_eq_spec`);
-   `implOldResolve` is the pre-fix code, which accepts everything the spec
-   accepts (`spec_imp_implOld`) but also more (Bugs/QPACK_01).
-3. The prefix read of the Sign byte (`buf[ric_enc.offset]`, dynamic.mojo:535;
-   unchecked before the QPACK-02 fix), see Bugs/QPACK_02.
+   §4.5.1.2 + §4.5.2-§4.5.5 over `Nat`. `implResolve` is flare's resolver
+   (UInt64 arithmetic, with range checks), proved equal to the spec
+   (`implResolve_eq_spec`).
+3. The prefix read of the Sign byte (`buf[ric_enc.offset]`, dynamic.mojo:535),
+   bounds-checked (`implSignReadIndex_inBounds`).
 4. String literals (`_decode_string_literal`, both branches): the H flag,
    the prefix-integer length, then the octets, Huffman-decoded by
-   `huffman_decode_simd` when H is set. `implOldLiteral_eq_spec` shows the byte
+   `huffman_decode_simd` when H is set. `implLiteralRaw_eq_spec` shows the byte
    stage is RFC 9204 §4.1.2 with RFC 7541 §5.2 Huffman decoding, through the L1
-   decoder (`Flare.L1.Huffman.okOnly_decodeSimdImpl`); pre-fix either way the
-   bytes reached `ascii_unchecked_string` unvalidated, and `implLiteral` now
-   rejects payloads that are not valid UTF-8 (Bugs/QPACK_03).
+   decoder (`Flare.L1.Huffman.okOnly_decodeSimdImpl`), and `implLiteral`
+   rejects payloads that are not valid UTF-8.
 5. Encoder-stream dynamic name reference / Duplicate (dynamic.mojo:310-327,348,365)
-   inside `apply_encoder_instructions_partial` (Bugs/QPACK_04).
+   inside `apply_encoder_instructions_partial`.
 -/
 namespace Flare.L3.Qpack.FieldSection
 
@@ -39,7 +36,7 @@ open Flare
 
 /-- Continuation loop of `decode_integer`; `k` is the remaining number of
 allowed continuation bytes (`m` goes 0,7,...,28; `m ≥ 35` raises).
-mirrors flare/http2/hpack.mojo:118-132 @59bda50 -/
+mirrors flare/http2/hpack.mojo#decode_integer sha=2fc694db686d at=59bda50f -/
 def decodeCont (buf : Bytes) : Nat → Nat → Nat → Nat → Option (Nat × Nat)
   | 0, _, _, _ => none
   | k + 1, off, value, m =>
@@ -51,7 +48,7 @@ def decodeCont (buf : Bytes) : Nat → Nat → Nat → Nat → Option (Nat × Na
       else if b / 128 = 0 then some (value, off + 1)
       else decodeCont buf k (off + 1) value (m + 7)
 
-/-- mirrors flare/http2/hpack.mojo:101-132 @59bda50 -/
+/-- mirrors flare/http2/hpack.mojo#decode_integer sha=2fc694db686d at=59bda50f -/
 def decodeInt (buf : Bytes) (offset prefixBits : Nat) : Option (Nat × Nat) :=
   if offset ≥ buf.length then none
   else
@@ -106,24 +103,11 @@ structure Geo where
   ic : UInt64
   deriving DecidableEq, Repr
 
-/-- Base, as flare computes it (UInt64 wrap). The fixed decoder guards
-`delta < ric` before using the `sign` branch (`implResolve`); the pre-fix
-decoder did not (`implOldResolve`).
-mirrors flare/qpack/dynamic.mojo:473-543 (fixed, QPACK-01) -/
+/-- Base, as flare computes it (UInt64 wrap); `implResolve` guards
+`delta < ric` before using the `sign` branch.
+mirrors flare/qpack/dynamic.mojo#_pre_base_abs+_post_base_abs+decode_field_section_dynamic sha=79782d861d64 at=088dd857 (fixed, QPACK-01) -/
 def implBase (ric delta : UInt64) (sign : Bool) : UInt64 :=
   if sign then ric - delta - 1 else ric + delta
-
-/-- PRE-FIX absolute index a reference resolved to, or `none` when flare
-raised (flare/qpack/dynamic.mojo @59bda50: no `delta < ric`, `ip < base` or
-`abs < ric` checks). Kept so `Bugs/QPACK_01` stays checkable. -/
-def implOldResolve (ric delta : UInt64) (sign : Bool) (g : Geo) (r : Ref) : Option UInt64 :=
-  let base := implBase ric delta sign
-  if ric > g.ic then none
-  else
-    let abs := match r with
-      | .pre ip => base - 1 - ip
-      | .post ip => base + ip
-    if abs < g.dropped ∨ abs ≥ g.ic then none else some abs
 
 /-- RFC 9204 §4.5.1.2 (Base; Sign=1 with `ReqInsertCount ≤ DeltaBase` is an
 error), §4.5.1.1/§2.2.1 (blocked when `ReqInsertCount > insert count`),
@@ -157,7 +141,7 @@ def RefSafe (ric : UInt64) (res : Option UInt64) : Prop :=
 
 /-- The fix: reject Sign=1 with `delta ≥ ric`, reject a pre-base relative
 index `≥ base`, and reject any absolute index `≥ ric`.
-mirrors flare/qpack/dynamic.mojo:473-508 (fixed, QPACK-01) -/
+mirrors flare/qpack/dynamic.mojo#_pre_base_abs+_post_base_abs sha=9e7fe2a5a978 at=088dd857 (fixed, QPACK-01) -/
 def fixedAbs (base : UInt64) : Ref → Option UInt64
   | .pre ip => if ip ≥ base then none else some (base - 1 - ip)
   | .post ip => some (base + ip)
@@ -167,7 +151,7 @@ def fixedCheck (ric : UInt64) (g : Geo) : Option UInt64 → Option UInt64
   | some abs => if abs ≥ ric ∨ abs < g.dropped ∨ abs ≥ g.ic then none else some abs
 
 /-- The shipped resolver.
-mirrors flare/qpack/dynamic.mojo:473-603 (fixed, QPACK-01) -/
+mirrors flare/qpack/dynamic.mojo#_pre_base_abs+_post_base_abs+decode_field_section_dynamic sha=79782d861d64 at=088dd857 (fixed, QPACK-01) -/
 def implResolve (ric delta : UInt64) (sign : Bool) (g : Geo) (r : Ref) : Option UInt64 :=
   if sign ∧ delta ≥ ric then none
   else if ric > g.ic then none
@@ -274,58 +258,19 @@ theorem implResolve_safe (ric delta : UInt64) (sign : Bool) (g : Geo) (r : Ref) 
     · rw [if_pos h2] at h; cases h
     · rw [if_neg h2] at h; exact fixedCheck_safe _ _ _ _ h
 
-/-- Completeness: whatever the RFC accepts, flare resolves to the same
-entry (flare's bug is accepting too much, not too little). -/
-theorem spec_imp_implOld (ric delta : UInt64) (sign : Bool) (g : Geo) (r : Ref)
-    (hb : Bounded ric delta g r) (a : Nat)
-    (hs : specResolve ric.toNat delta.toNat sign g.dropped.toNat g.ic.toNat r.isPost r.ip.toNat = some a) :
-    (implOldResolve ric delta sign g r).map UInt64.toNat = some a := by
-  have hf := implResolve_eq_spec ric delta sign g r hb
-  rw [hs] at hf
-  cases hfx : implResolve ric delta sign g r with
-  | none => rw [hfx] at hf; simp at hf
-  | some v =>
-    rw [hfx] at hf; simp at hf
-    unfold implResolve at hfx
-    unfold implOldResolve
-    by_cases h1 : sign = true ∧ delta ≥ ric
-    · rw [if_pos h1] at hfx; cases hfx
-    rw [if_neg h1] at hfx
-    by_cases h2 : ric > g.ic
-    · rw [if_pos h2] at hfx; cases hfx
-    rw [if_neg h2] at hfx
-    simp only [if_neg h2]
-    cases r with
-    | pre ip =>
-      simp only [fixedAbs] at hfx ⊢
-      by_cases h3 : ip ≥ implBase ric delta sign
-      · rw [if_pos h3] at hfx; cases hfx
-      rw [if_neg h3] at hfx
-      simp only [fixedCheck] at hfx
-      by_cases hc : implBase ric delta sign - 1 - ip ≥ ric ∨ implBase ric delta sign - 1 - ip < g.dropped ∨ implBase ric delta sign - 1 - ip ≥ g.ic
-      · rw [if_pos hc] at hfx; cases hfx
-      rw [if_neg hc] at hfx; cases hfx
-      rw [if_neg (fun hh => hc (Or.inr hh))]; simp [hf]
-    | post ip =>
-      simp only [fixedAbs, fixedCheck] at hfx ⊢
-      by_cases hc : implBase ric delta sign + ip ≥ ric ∨ implBase ric delta sign + ip < g.dropped ∨ implBase ric delta sign + ip ≥ g.ic
-      · rw [if_pos hc] at hfx; cases hfx
-      rw [if_neg hc] at hfx; cases hfx
-      rw [if_neg (fun hh => hc (Or.inr hh))]; simp [hf]
-
 /-- Encoder/decoder relative-index round trip: flare's encoder writes
 `rel = base - 1 - abs` (dynamic.mojo:441,447) and the decoder computes
 `base - 1 - rel`; for every referenced `abs < base` this is the identity.
-mirrors flare/qpack/dynamic.mojo:441,447,512 @59bda50 -/
+mirrors flare/qpack/dynamic.mojo#encode_field_section_dynamic+decode_field_section_dynamic sha=80158f4a8023 at=59bda50f -/
 theorem rel_roundtrip (base abs : Nat) (h : abs < base) :
     base - 1 - (base - 1 - abs) = abs := by omega
 
 /-! ## 3. The prefix read at dynamic.mojo:489 -/
 
-/-- PRE-FIX index read by `buf[ric_enc.offset]` after a successful Required
-Insert Count decode, or `none` if flare raised earlier (flare/qpack/dynamic.mojo
-@59bda50 had no bound check on that read). Kept for Bugs/QPACK_02. -/
-def implOldSignReadIndex (buf : Bytes) (total maxEntries : UInt64) : Option Nat :=
+/-- The offset of the Sign byte after a successful Required Insert Count
+decode, or `none` if the decoder raised earlier; `implSignReadIndex` adds the
+bound check before the read. -/
+def implSignOffset (buf : Bytes) (total maxEntries : UInt64) : Option Nat :=
   if buf.length < 2 then none
   else match decodeInt buf 0 8 with
     | none => none
@@ -335,9 +280,9 @@ def implOldSignReadIndex (buf : Bytes) (total maxEntries : UInt64) : Option Nat 
       | some _ => some off
 
 /-- The shipped decoder checks the cursor before reading the Sign byte.
-mirrors flare/qpack/dynamic.mojo:518-542 (fixed, QPACK-02) -/
+mirrors flare/qpack/dynamic.mojo#decode_field_section_dynamic sha=11d247ca507f at=39b4d5f7 (fixed, QPACK-02) -/
 def implSignReadIndex (buf : Bytes) (total maxEntries : UInt64) : Option Nat :=
-  match implOldSignReadIndex buf total maxEntries with
+  match implSignOffset buf total maxEntries with
   | some off => if off ≥ buf.length then none else some off
   | none => none
 
@@ -351,9 +296,9 @@ theorem implSignReadIndex_inBounds (buf : Bytes) (t m : UInt64) (i : Nat)
   · simp at h
 
 /-- Only the Sign read can go out of bounds: the offset is always `≤ len`. -/
-theorem implOldSignReadIndex_le (buf : Bytes) (t m : UInt64) (i : Nat)
-    (h : implOldSignReadIndex buf t m = some i) : i ≤ buf.length := by
-  unfold implOldSignReadIndex at h
+theorem implSignOffset_le (buf : Bytes) (t m : UInt64) (i : Nat)
+    (h : implSignOffset buf t m = some i) : i ≤ buf.length := by
+  unfold implSignOffset at h
   split at h
   · simp at h
   · split at h
@@ -367,11 +312,9 @@ theorem implOldSignReadIndex_le (buf : Bytes) (t m : UInt64) (i : Nat)
 
 /-- The byte stage of `_decode_string_literal`: the literal's bytes and the end
 offset. When the H bit is set the payload goes through `huffman_decode_simd`,
-which raises on any RFC 7541 §5.2 error (`okOnly`). Pre-fix these bytes went
-straight into `ascii_unchecked_string` (QPACK-03); the stage itself is
-unchanged and still feeds `implLiteral`.
-mirrors flare/qpack/codec.mojo:215-255 @59bda50 (pre-fix result) -/
-def implOldLiteral (buf : Bytes) (offset prefixBits : Nat) (hmask : UInt8) :
+which raises on any RFC 7541 §5.2 error (`okOnly`). `implLiteral` turns the
+bytes into a `String` only when they are valid UTF-8. -/
+def implLiteralRaw (buf : Bytes) (offset prefixBits : Nat) (hmask : UInt8) :
     Option (Bytes × Nat) :=
   if offset ≥ buf.length then none
   else match decodeInt buf offset prefixBits with
@@ -397,16 +340,16 @@ def specLiteral (buf : Bytes) (offset prefixBits : Nat) (hmask : UInt8) :
       else some ((buf.drop o).take n, o + n)
 
 /-- flare's literal decoder, Huffman branch included, is the RFC decoder. -/
-theorem implOldLiteral_eq_spec (buf : Bytes) (off p : Nat) (m : UInt8) :
-    implOldLiteral buf off p m = specLiteral buf off p m := by
-  simp only [implOldLiteral, specLiteral, Flare.L1.Huffman.okOnly_decodeSimdImpl]
+theorem implLiteralRaw_eq_spec (buf : Bytes) (off p : Nat) (m : UInt8) :
+    implLiteralRaw buf off p m = specLiteral buf off p m := by
+  simp only [implLiteralRaw, specLiteral, Flare.L1.Huffman.okOnly_decodeSimdImpl]
 
 /-- A Huffman literal whose payload is `Huffman.encode s` yields exactly `s`. -/
-theorem implOldLiteral_huffman (buf : Bytes) (off p : Nat) (m : UInt8) (n o : Nat) (s : Bytes)
+theorem implLiteralRaw_huffman (buf : Bytes) (off p : Nat) (m : UInt8) (n o : Nat) (s : Bytes)
     (hoff : off < buf.length) (hd : decodeInt buf off p = some (n, o)) (hn : o + n ≤ buf.length)
     (hh : Bytes.getD buf off &&& m ≠ 0) (hp : (buf.drop o).take n = Flare.L1.Huffman.encode s) :
-    implOldLiteral buf off p m = some (s, o + n) := by
-  rw [implOldLiteral_eq_spec]
+    implLiteralRaw buf off p m = some (s, o + n) := by
+  rw [implLiteralRaw_eq_spec]
   unfold specLiteral
   rw [if_neg (Nat.not_le.mpr hoff)]
   simp only [hd]
@@ -421,10 +364,10 @@ def StringOk (b : Bytes) : Prop := (ByteArray.mk b.toArray).validateUTF8 = true
 the ASCII fast path when every byte is `< 0x80` (valid UTF-8 by construction)
 and otherwise builds the `String` with `String(from_utf8=...)`, raising when the
 bytes are not valid UTF-8. Both routes accept exactly the valid-UTF-8 payloads.
-mirrors flare/qpack/codec.mojo:192-278 (fixed, QPACK-03) -/
+mirrors flare/qpack/codec.mojo#_literal_to_string+_decode_string_literal+decode_field_section sha=d495b585c094 at=de796c57 (fixed, QPACK-03) -/
 def implLiteral (buf : Bytes) (offset prefixBits : Nat) (hmask : UInt8) :
     Option (Bytes × Nat) :=
-  match implOldLiteral buf offset prefixBits hmask with
+  match implLiteralRaw buf offset prefixBits hmask with
   | some (b, o) => if (ByteArray.mk b.toArray).validateUTF8 then some (b, o) else none
   | none => none
 
@@ -444,7 +387,7 @@ theorem implLiteral_eq_spec_of_ok (buf : Bytes) (off p : Nat) (m : UInt8) (b : B
     (h : specLiteral buf off p m = some (b, o)) (hok : StringOk b) :
     implLiteral buf off p m = some (b, o) := by
   unfold implLiteral
-  rw [implOldLiteral_eq_spec, h]
+  rw [implLiteralRaw_eq_spec, h]
   simp only [StringOk] at hok
   simp [hok]
 
@@ -456,15 +399,6 @@ inductive Outcome where
   | streamError  -- raises QPACK_ENCODER_STREAM_ERROR (connection error)
   deriving DecidableEq, Repr
 
-/-- PRE-FIX outcome of an Insert With (dynamic) Name Reference / Duplicate
-whose value literal parsed. `get_abs` raised an *untagged* error, which the
-partial replayer treated as truncation.
-mirrors flare/qpack/dynamic.mojo:319-320,337-338,150-158,281-297 @59bda50
-(pre-fix; kept for the counterexample) -/
-def implOldDynRef (dropped ic ip : UInt64) : Outcome :=
-  let abs := ic - 1 - ip
-  if abs < dropped ∨ abs ≥ ic then .stall else .applied abs.toNat
-
 /-- RFC 9204 §4.3.2/§4.3.4 + §3.2.4/§2.2.3: a relative index that does not
 name a live entry is a QPACK_ENCODER_STREAM_ERROR connection error. -/
 def specDynRef (dropped ic ip : Nat) : Outcome :=
@@ -473,7 +407,7 @@ def specDynRef (dropped ic ip : Nat) : Outcome :=
 /-- The shipped resolution: `_relative_to_abs` checks `rel < len(entries)`
 (`ip < ic - dropped`) before the subtraction and raises a tagged
 QPACK_ENCODER_STREAM_ERROR otherwise.
-mirrors flare/qpack/dynamic.mojo:310-327,348,365 (fixed, QPACK-04) -/
+mirrors flare/qpack/dynamic.mojo#_relative_to_abs+_apply_one_encoder_instruction sha=785b38701c4d at=793ebcbb (fixed, QPACK-04) -/
 def implDynRef (dropped ic ip : UInt64) : Outcome :=
   if ip ≥ ic - dropped then .streamError
   else .applied (ic - 1 - ip).toNat
@@ -492,18 +426,5 @@ theorem implDynRef_eq_spec (dropped ic ip : UInt64) (hd : dropped ≤ ic) :
     congr 1
     have h1 : (ic - 1).toNat = ic.toNat - 1 := u_sub _ _ (by simp; omega)
     rw [u_sub _ _ (by omega), h1]
-
-/-- On in-range references flare already agrees with the spec; the gap is
-exactly the out-of-range case. -/
-theorem implOldDynRef_inRange (dropped ic ip : UInt64) (hd : dropped ≤ ic)
-    (h : ip.toNat < ic.toNat - dropped.toNat) :
-    implOldDynRef dropped ic ip = specDynRef dropped.toNat ic.toNat ip.toNat := by
-  rw [u_le] at hd
-  unfold implOldDynRef specDynRef
-  have h1 : (ic - 1).toNat = ic.toNat - 1 := u_sub _ _ (by simp; omega)
-  have hv : (ic - 1 - ip).toNat = ic.toNat - 1 - ip.toNat := by rw [u_sub _ _ (by omega), h1]
-  have : ¬ (ic - 1 - ip < dropped ∨ ic - 1 - ip ≥ ic) := by
-    simp only [u_lt, u_le, hv]; omega
-  simp [this, h, hv]
 
 end Flare.L3.Qpack.FieldSection

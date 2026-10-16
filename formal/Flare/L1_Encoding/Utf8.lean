@@ -228,8 +228,7 @@ theorem drop_eq_getD_cons (data : Bytes) (i : Nat) (h : i < data.length) :
 
 /-! ## `_is_valid_utf8` (byte_cursor and ws/frame) -/
 
-/-- mirrors flare/io/byte_cursor.mojo:52-107 @59bda50; flare/ws/frame.mojo:553-606
-@59bda50 is the same loop over a `List[UInt8]`. The `while i < n` loop with
+/-- mirrors flare/io/byte_cursor.mojo#_is_valid_utf8 sha=66e26f5b967b at=59bda50f; flare/ws/frame.mojo#_is_valid_utf8 sha=79f7118141ee at=59bda50f is the same loop over a `List[UInt8]`. The `while i < n` loop with
 early `return False` is the tail recursion on `i`. -/
 def validFrom (data : Bytes) (i : Nat) : Bool :=
   if i < data.length then
@@ -355,10 +354,10 @@ theorem isValidUtf8_iff (data : Bytes) : isValidUtf8 data = true ↔ WF data := 
 
 /-! ## `http/proto/utf8.mojo`: `_step` and `utf8_lossy_string` -/
 
-/-- mirrors flare/http/proto/utf8.mojo:24-27 @59bda50 -/
+/-- mirrors flare/http/proto/utf8.mojo#_is_cont sha=8554a554b1c8 at=59bda50f -/
 def isContB (b : UInt8) : Bool := b ≥ 0x80 && b ≤ 0xBF
 
-/-- mirrors flare/http/proto/utf8.mojo:30-90 @59bda50 (`n = len(data)`; the
+/-- mirrors flare/http/proto/utf8.mojo#_step sha=1b2fb002f8f6 at=59bda50f (`n = len(data)`; the
 mutable `lo`/`hi` are the `let`s). -/
 def step (data : Bytes) (i : Nat) : Int :=
   let n := data.length
@@ -487,7 +486,7 @@ def fix (data : Bytes) (i : Nat) (out : Bytes) : Bytes :=
 termination_by data.length - i
 decreasing_by all_goals (have := step_advance data i h; omega)
 
-/-- mirrors flare/http/proto/utf8.mojo:93-139 @59bda50 (`String(unsafe_from_utf8=)`
+/-- mirrors flare/http/proto/utf8.mojo#utf8_lossy_string sha=379ea80da6e6 at=59bda50f (`String(unsafe_from_utf8=)`
 is the identity on the byte buffer). -/
 def lossy (data : Bytes) : Bytes :=
   if data.length = 0 then []

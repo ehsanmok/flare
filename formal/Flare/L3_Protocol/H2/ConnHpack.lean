@@ -15,7 +15,7 @@ the table left by all blocks the connection has handed over so far
 * `decFold_blocks`: decoding the peer's encoded blocks in order gives, for
   every block that decodes, (a view of) exactly the peer's fields.
 * `lookup_sound_conn`: **across the whole connection**, while no GOAWAY is
-  emitted (server role, or client role with the H2-17 fix), the decoder
+  emitted, the decoder
   has seen exactly the peer's blocks, and every header list it returned
   is the peer's field list (up to `_octets_to_string`). A desynchronised
   table can only fail a decode, which `commit` answers with
@@ -48,39 +48,39 @@ def decAt (C : Codec) (budget : Nat) (c : Conn) : Dec :=
   | none => fun _ => .fail
 
 /-- `run`, with the decoder chosen from the current state. -/
-def runD (fx : Fix) (D : Conn → Dec) : Conn → List Ev → Option (Conn × List (Ev × List Out))
+def runD (D : Conn → Dec) : Conn → List Ev → Option (Conn × List (Ev × List Out))
   | c, [] => some (c, [])
   | c, e :: es =>
-    match step fx (D c) c e with
+    match step (D c) c e with
     | .error _ => none
     | .ok (c', o) =>
-      match runD fx D c' es with
+      match runD D c' es with
       | none => none
       | some (c'', tr) => some (c'', (e, o) :: tr)
 
-theorem runD_const (fx : Fix) (dec : Dec) :
-    ∀ (c : Conn) (es : List Ev), runD fx (fun _ => dec) c es = run fx dec c es := by
+theorem runD_const (dec : Dec) :
+    ∀ (c : Conn) (es : List Ev), runD (fun _ => dec) c es = run dec c es := by
   intro c es
   induction es generalizing c with
   | nil => rfl
   | cons e es ih => simp only [runD, run, ih]; try rfl
 
 /-- Sequencing for a state-dependent decoder. -/
-theorem seq_runD (fx : Fix) (D : Conn → Dec) :
+theorem seq_runD (D : Conn → Dec) :
     ∀ (es : List Ev) (c c'' : Conn) (tr : List (Ev × List Out)),
-      runD fx D c es = some (c'', tr) → c.goawaySent = false →
-      (fx.h2_17 = true ∨ c.isClient = false) → tr.all (fun p => !hasGoaway p.2) = true →
+      runD D c es = some (c'', tr) → c.goawaySent = false →
+      tr.all (fun p => !hasGoaway p.2) = true →
       (pendOf c'', c''.decLog) = rrun (pendOf c, c.decLog) (framesOf es) ∧
       c''.goawaySent = false ∧ c''.isClient = c.isClient := by
   intro es
   induction es with
   | nil =>
-    intro c c'' tr hr hg _ _
+    intro c c'' tr hr hg _
     simp only [runD, Option.some.injEq, Prod.mk.injEq] at hr
     obtain ⟨rfl, rfl⟩ := hr
     exact ⟨rfl, hg, rfl⟩
   | cons e es ih =>
-    intro c c'' tr hr hg hfx hno
+    intro c c'' tr hr hg hno
     simp only [runD] at hr
     split at hr
     · cases hr
@@ -94,15 +94,15 @@ theorem seq_runD (fx : Fix) (D : Conn → Dec) :
         simp only [List.all_cons, Bool.and_eq_true, Bool.not_eq_true'] at hno
         cases e with
         | frame f =>
-          rcases seq_step fx (D c) c f (c', o) hg hfx hs with h1 | ⟨h1, h2, h3⟩
+          rcases seq_step (D c) c f (c', o) hg hs with h1 | ⟨h1, h2, h3⟩
           · rw [h1] at hno; cases hno.1
-          · have := ih c' c3 tr' hr' (h2.trans hg) (by rw [h3]; exact hfx) hno.2
+          · have := ih c' c3 tr' hr' (h2.trans hg) hno.2
             refine ⟨?_, this.2.1, this.2.2.trans h3⟩
             rw [this.1]; simp only [framesOf, rrun]; rw [← h1]
         | _ =>
-          have hb : HB c c' := hb_local fx (D c) c _ (c', o) (by intro f hf; cases hf) hs
+          have hb : HB c c' := hb_local (D c) c _ (c', o) (by intro f hf; cases hf) hs
           have hp : pendOf c' = pendOf c := by simp [pendOf, hb.2.1, hb.2.2.1]
-          have := ih c' c3 tr' hr' (hb.2.2.2.1.trans hg) (by rw [hb.2.2.2.2]; exact hfx) hno.2
+          have := ih c' c3 tr' hr' (hb.2.2.2.1.trans hg) hno.2
           refine ⟨?_, this.2.1, this.2.2.trans hb.2.2.2.2⟩
           rw [this.1, hp, hb.1]; rfl
 
@@ -206,32 +206,30 @@ theorem decAt_ok (C : Codec) (budget : Nat) (c : Conn) (b : Bytes) (hs : List En
     | error e => rw [hd] at h; cases e <;> cases h
 
 /-- A failed decode is a GOAWAY(COMPRESSION_ERROR) (state.mojo:781-800). -/
-theorem commit_fail (fx : Fix) (dec : Dec) (c : Conn) (k : Nat) (h : dec c.block = .fail)
-    (hg : c.goawaySent = false) : IsConnError (commit fx dec c k).2 eCOMPRESSION := by
+theorem commit_fail (dec : Dec) (c : Conn) (k : Nat) (h : dec c.block = .fail)
+    (hg : c.goawaySent = false) : IsConnError (commit dec c k).2 eCOMPRESSION := by
   simp [commit, h, connErr, hg, IsConnError]
 
 /-- **No wrong header, across the whole connection.** Run the connection
 with its stateful decoder against a peer that sends the blocks `rss`
 (possibly Huffman-coded, fragmented over HEADERS / PUSH_PROMISE /
-CONTINUATION). While no GOAWAY is emitted — in server role, or client role
-with the H2-17 fix — the decoder has been handed exactly the peer's
-blocks, in order, and every header list it returned is the peer's field
-list for that block (each octet string verbatim or through
+CONTINUATION). While no GOAWAY is emitted, in either role, the decoder
+has been handed exactly the peer's blocks, in order, and every header
+list it returned is the peer's field list for that block (each octet string verbatim or through
 `_octets_to_string`). -/
-theorem lookup_sound_conn (fx : Fix) (C : Codec) (hC : C.Correct) (henc : Bytes → Bytes)
+theorem lookup_sound_conn (C : Codec) (hC : C.Correct) (henc : Bytes → Bytes)
     (hH : ∀ s, C.huff (henc s) = some s) (budget : Nat) (es : List Ev) (c0 c'' : Conn)
     (tr : List (Ev × List Out)) (rss : List (List Rep)) (pd : Option (Nat × Bytes)) (p' : Peer)
     (fss : List (List Entry))
-    (hr : runD fx (decAt C budget) c0 es = some (c'', tr))
+    (hr : runD (decAt C budget) c0 es = some (c'', tr))
     (hg : c0.goawaySent = false) (hd : c0.decLog = []) (hc : c0.continuing = 0)
-    (hfx : fx.h2_17 = true ∨ c0.isClient = false)
     (hno : tr.all (fun p => !hasGoaway p.2) = true)
     (hfr : rrun (none, []) (framesOf es) = (pd, rss.map (encBlock C henc)))
     (hpeer : pblocks Peer.init rss = some (p', fss))
     (hv : ∀ rs ∈ rss, ∀ r ∈ rs, RepOK henc r) :
     c''.decLog = rss.map (encBlock C henc) ∧
     Sound fss (decFold C budget Table.init c''.decLog).2 := by
-  have hs := seq_runD fx (decAt C budget) es c0 c'' tr hr hg hfx hno
+  have hs := seq_runD (decAt C budget) es c0 c'' tr hr hg hno
   have hp0 : pendOf c0 = none := by simp [pendOf, hc]
   rw [hp0, hd, hfr] at hs
   have hlog : c''.decLog = rss.map (encBlock C henc) := (Prod.mk.inj hs.1).2

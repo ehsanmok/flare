@@ -9,7 +9,7 @@ not credited back to the peer when the frame arrives (state.mojo:1450-1455)
 but when the application takes them with `drain_body`
 (client.mojo:1160-1187), which also hands over the buffered octets.
 
-Results, for every fix set (the shipped code included) and every step:
+Results, for every step:
 
 * `step_rel`: each step keeps every stream's flow fields (`recvW`,
   `pendingCredit`, `buf`), creates it fresh, or (DATA on `k`, `drain k`)
@@ -190,8 +190,8 @@ theorem hw_rstCloseX (c : Conn) (k e : Nat) (s s' : Stream) (x : List Out) (h : 
 theorem hw_put (c : Conn) (k : Nat) (s s' : Stream) (o : List Out) (h : Src c k s) (hf : Flow s' = Flow s)
     (ho : NoDr o) : HW c (put c k s', o) := ⟨sr_put c k s s' h hf, ho⟩
 
-theorem hw_commitTail (fx : Fix) (c : Conn) (k : Nat) (s0 s : Stream) (isTr es : Bool) (hdrs : List Flare.L3.H2.Validate.Header)
-    (hs : Src c k s0) (hf : Flow s = Flow s0) : HW c (commitTail fx c k s isTr es hdrs) := by
+theorem hw_commitTail (c : Conn) (k : Nat) (s0 s : Stream) (isTr es : Bool) (hdrs : List Flare.L3.H2.Validate.Header)
+    (hs : Src c k s0) (hf : Flow s = Flow s0) : HW c (commitTail c k s isTr es hdrs) := by
   unfold commitTail rstClose
   simp only []
   repeat' split
@@ -199,7 +199,7 @@ theorem hw_commitTail (fx : Fix) (c : Conn) (k : Nat) (s0 s : Stream) (isTr es :
     | exact hw_rstCloseX c k _ s0 _ [] hs hf noDr_nil
     | exact hw_put c k s0 _ [] hs hf noDr_nil
 
-theorem hw_commit (fx : Fix) (dec : Dec) (c : Conn) (k : Nat) : HW c (commit fx dec c k) := by
+theorem hw_commit (dec : Dec) (c : Conn) (k : Nat) : HW c (commit dec c k) := by
   unfold commit
   simp only []
   have h1 : SR c { c with block := [], blockES := false, decLog := c.decLog ++ [c.block], blockRefuse := 0 } :=
@@ -215,10 +215,10 @@ theorem hw_commit (fx : Fix) (dec : Dec) (c : Conn) (k : Nat) : HW c (commit fx 
       repeat' split
       all_goals first
         | exact hw_trans h2 (hw_rstCloseX _ k _ _ _ [] he.2 rfl noDr_nil)
-        | exact hw_trans h2 (hw_commitTail _ _ k _ _ _ _ _ he.2 rfl)
+        | exact hw_trans h2 (hw_commitTail _ k _ _ _ _ _ he.2 rfl)
         | exact hw_trans h2 (hw_put _ k _ _ [] he.2 rfl noDr_nil)
 
-theorem hw_contBranch (fx : Fix) (dec : Dec) (c : Conn) (f : Fr) : HW c (contBranch fx dec c f) := by
+theorem hw_contBranch (dec : Dec) (c : Conn) (f : Fr) : HW c (contBranch dec c f) := by
   unfold contBranch
   split
   · exact hw_connErr _ _
@@ -227,13 +227,13 @@ theorem hw_contBranch (fx : Fix) (dec : Dec) (c : Conn) (f : Fr) : HW c (contBra
     all_goals first
       | exact hw_trans (sr_streams rfl rfl) (hw_connErr _ _)
       | exact hw_streams rfl rfl noDr_nil
-      | exact hw_trans (sr_streams rfl rfl) (hw_commit _ _ _ _)
+      | exact hw_trans (sr_streams rfl rfl) (hw_commit _ _ _)
 
 def HWO (c : Conn) : Option (Conn × List Out) → Prop
   | none => True
   | some r => HW c r
 
-theorem hw_shapeCheck (fx : Fix) (c : Conn) (f : Fr) : HWO c (shapeCheck fx c f) := by
+theorem hw_shapeCheck (c : Conn) (f : Fr) : HWO c (shapeCheck c f) := by
   unfold shapeCheck
   repeat' split
   all_goals first
@@ -245,7 +245,7 @@ def HWS (c : Conn) : (Conn × List Out) ⊕ Conn → Prop
   | .inl r => HW c r
   | .inr c' => SR c c'
 
-theorem hw_idCheck (fx : Fix) (c : Conn) (f : Fr) : HWS c (idCheck fx c f) := by
+theorem hw_idCheck (c : Conn) (f : Fr) : HWS c (idCheck c f) := by
   unfold idCheck
   repeat' split
   all_goals first
@@ -328,7 +328,7 @@ theorem hw_settingsH (c : Conn) (f : Fr) : HW c (settingsH c f) := by
       exact ⟨hs, noDr_cons (fun _ _ h => by cases h) noDr_nil⟩
     · rename_i r hr; rw [hr] at hs; exact hs
 
-theorem hw_wuH (fx : Fix) (c : Conn) (f : Fr) : HW c (wuH fx c f) := by
+theorem hw_wuH (c : Conn) (f : Fr) : HW c (wuH c f) := by
   unfold wuH rstClose
   simp only []
   repeat' split
@@ -343,15 +343,15 @@ def HWN (c : Conn) : (Conn × List Out) ⊕ Nat → Prop
   | .inl r => HW c r
   | .inr _ => True
 
-theorem hw_headersPre (fx : Fix) (c : Conn) (f : Fr) : HWN c (headersPre fx c f) := by
+theorem hw_headersPre (c : Conn) (f : Fr) : HWN c (headersPre c f) := by
   unfold headersPre
   repeat' split
   all_goals first
     | exact hw_connErr _ _
     | trivial
 
-theorem hw_headersOpen (fx : Fix) (dec : Dec) (c : Conn) (f : Fr) (refuse : Nat) :
-    HW c (headersOpen fx dec c f refuse) := by
+theorem hw_headersOpen (dec : Dec) (c : Conn) (f : Fr) (refuse : Nat) :
+    HW c (headersOpen dec c f refuse) := by
   unfold headersOpen
   simp only []
   have h1 : SR c { c with block := f.frag, blockES := f.f1, blockRefuse := refuse, blockConts := 0 } :=
@@ -366,21 +366,21 @@ theorem hw_headersOpen (fx : Fix) (dec : Dec) (c : Conn) (f : Fr) (refuse : Nat)
     · exact h1
   split
   · exact ⟨sr_trans h2 (sr_streams rfl rfl), noDr_nil⟩
-  · exact hw_trans h2 (hw_commit _ _ _ _)
+  · exact hw_trans h2 (hw_commit _ _ _)
 
 def HWE (c : Conn) : Res → Prop
   | .ok r => HW c r
   | .error _ => True
 
-theorem hw_headersH (fx : Fix) (dec : Dec) (c : Conn) (f : Fr) : HWE c (headersH fx dec c f) := by
-  have hp : ∀ r, headersPre fx c f = .inl r → HW c r := by
-    intro r hr; have := hw_headersPre fx c f; rw [hr] at this; exact this
+theorem hw_headersH (dec : Dec) (c : Conn) (f : Fr) : HWE c (headersH dec c f) := by
+  have hp : ∀ r, headersPre c f = .inl r → HW c r := by
+    intro r hr; have := hw_headersPre c f; rw [hr] at this; exact this
   unfold headersH
   repeat' split
   all_goals first
     | exact hw_connErr _ _
     | trivial
-    | exact hw_headersOpen _ _ _ _ _
+    | exact hw_headersOpen _ _ _ _
     | (apply hp; assumption)
 
 theorem hw_rstH (c : Conn) (f : Fr) : HW c (rstH c f) := by
@@ -513,24 +513,24 @@ theorem dataCredit_streams (c : Conn) (f : Fr) (cr : Nat) :
   repeat' split
   all_goals exact ⟨rfl, rfl, fun j b h => by simp at h⟩
 
-theorem gw_dataFinish (fx : Fix) (c : Conn) (f : Fr) (s0 s : Stream) (cr : Nat) (fr : Nat → Option Bytes)
-    (hs0 : (f.sid, s0) ∈ c.streams) (hst : SStep c.initW (fr f.sid) s0 s) : GW c (dataFinish fx c f s cr) fr := by
+theorem gw_dataFinish (c : Conn) (f : Fr) (s0 s : Stream) (cr : Nat) (fr : Nat → Option Bytes)
+    (hs0 : (f.sid, s0) ∈ c.streams) (hst : SStep c.initW (fr f.sid) s0 s) : GW c (dataFinish c f s cr) fr := by
   unfold dataFinish
   split
-  · exact gw_rstCloseX c f.sid _ s0 s _ fr hs0 hst (noDr_ite (noDr_wu0If _) noDr_nil)
+  · exact gw_rstCloseX c f.sid _ s0 s _ fr hs0 hst (noDr_wu0If _)
   · obtain ⟨h1, h2, h3⟩ := dataCredit_streams (put c f.sid (if f.f1 then
       { s with dataComplete := true,
                state := if c.isClient && s.state == .hcl then .closed else .hcr } else s)) f
-      (if fx.h2_19 && f.f1 && c.isClient && s.state == .hcl then 0 else cr)
+      (if f.f1 && c.isClient && s.state == .hcl then 0 else cr)
     refine ⟨gr_streams_right (gr_put c f.sid s0 _ fr hs0 (sstep_congr (by split <;> rfl) hst)) h1 h2, h3⟩
 
 theorem deferOf_le (s : Stream) (body : Nat) : deferOf s body ≤ body := by
   unfold deferOf; split <;> omega
 
-theorem gw_dataAccept (fx : Fix) (c : Conn) (f : Fr) (s0 s : Stream) (body : Nat) (fr : Nat → Option Bytes)
+theorem gw_dataAccept (c : Conn) (f : Fr) (s0 s : Stream) (body : Nat) (fr : Nat → Option Bytes)
     (hs0 : (f.sid, s0) ∈ c.streams) (hfr : fr f.sid = some f.frag) (hr : s.recvW = s0.recvW - f.plen)
     (hp : s.pendingCredit = s0.pendingCredit) (hb : s.buf = s0.buf ++ f.frag) (hnn : 0 ≤ s.recvW)
-    (hbody : body ≤ f.plen) : GW c (dataAccept fx c f s body) fr := by
+    (hbody : body ≤ f.plen) : GW c (dataAccept c f s body) fr := by
   unfold dataAccept
   split
   · refine gw_rstCloseX c f.sid _ s0 _ _ fr hs0 ⟨fun ht => ?_, Or.inr (Or.inl rfl)⟩ (noDr_wu0If _)
@@ -539,7 +539,7 @@ theorem gw_dataAccept (fx : Fix) (c : Conn) (f : Fr) (s0 s : Stream) (body : Nat
     generalize hc1 : (if !c.isClient then { c with buffered := c.buffered + body } else c) = c1
     have hs1 : c1.streams = c.streams := by rw [← hc1]; split <;> rfl
     have hi1 : c1.initW = c.initW := by rw [← hc1]; split <;> rfl
-    have hg := gw_dataFinish fx c1 f s0
+    have hg := gw_dataFinish c1 f s0
       { s with recvW := s.recvW + ((f.plen : Int) - (deferOf s body : Int)),
                pendingCredit := s.pendingCredit + deferOf s body } (f.plen - deferOf s body) fr
       (hs1 ▸ hs0)
@@ -554,25 +554,25 @@ theorem gw_dataAccept (fx : Fix) (c : Conn) (f : Fr) (s0 s : Stream) (body : Nat
         constructor <;> push_cast <;> omega)
     exact ⟨gr_congr hs1 hi1 hg.1, hg.2⟩
 
-theorem gw_dataBody (fx : Fix) (c : Conn) (f : Fr) (s0 s : Stream) (body : Nat) (fr : Nat → Option Bytes)
+theorem gw_dataBody (c : Conn) (f : Fr) (s0 s : Stream) (body : Nat) (fr : Nat → Option Bytes)
     (hs0 : (f.sid, s0) ∈ c.streams) (hfr : fr f.sid = some f.frag) (hr : s.recvW = s0.recvW - f.plen)
     (hp : s.pendingCredit = s0.pendingCredit) (hb : s.buf = s0.buf) (hbody : body ≤ f.plen) :
-    GW c (dataBody fx c f s body) fr := by
+    GW c (dataBody c f s body) fr := by
   have tis_le : ∀ s' : Stream, s'.recvW = s.recvW → s'.pendingCredit = s.pendingCredit →
       TIs c.initW s0 → TIs c.initW s' := by
     intro s' h1 h2 ht; unfold TIs at *; rw [h1, h2, hr, hp]; omega
   unfold dataBody
   split
-  · exact gw_rstCloseX c f.sid _ s0 s _ fr hs0 ⟨tis_le s rfl rfl, Or.inl hb⟩ (noDr_ite (noDr_wu0If _) noDr_nil)
+  · exact gw_rstCloseX c f.sid _ s0 s _ fr hs0 ⟨tis_le s rfl rfl, Or.inl hb⟩ (noDr_wu0If _)
   · split
     · exact gw_rstCloseX c f.sid _ s0 _ _ fr hs0 ⟨tis_le _ rfl rfl, Or.inr (Or.inl rfl)⟩ (noDr_wu0If _)
     · split
       · exact gw_rstCloseX c f.sid _ s0 _ _ fr hs0 ⟨tis_le _ rfl rfl, Or.inr (Or.inl rfl)⟩ (noDr_wu0If _)
       · rename_i hneg _ _
-        exact gw_dataAccept fx c f s0 _ body fr hs0 hfr hr hp (by simp only []; rw [hb]) (by simp only []; omega) hbody
+        exact gw_dataAccept c f s0 _ body fr hs0 hfr hr hp (by simp only []; rw [hb]) (by simp only []; omega) hbody
 
-theorem gw_dataH (fx : Fix) (c : Conn) (f : Fr) (fr : Nat → Option Bytes) (hfr : fr f.sid = some f.frag) :
-    GW c (dataH fx c f) fr := by
+theorem gw_dataH (c : Conn) (f : Fr) (fr : Nat → Option Bytes) (hfr : fr f.sid = some f.frag) :
+    GW c (dataH c f) fr := by
   unfold dataH
   split
   · exact gw_of_hw fr (hw_streams rfl rfl (noDr_wu0If _))
@@ -584,7 +584,7 @@ theorem gw_dataH (fx : Fix) (c : Conn) (f : Fr) (fr : Nat → Option Bytes) (hfr
         | exact gw_of_hw fr (hw_connErr _ _)
         | exact gw_rstCloseX c f.sid _ s _ _ fr (mem_of_get hg) ⟨fun ht => ht, Or.inr (Or.inl rfl)⟩ (noDr_wu0If _)
         | (rename_i body hbody
-           exact gw_dataBody fx c f s _ body fr (mem_of_get hg) hfr rfl rfl rfl (stripLen_le f false body hbody))
+           exact gw_dataBody c f s _ body fr (mem_of_get hg) hfr rfl rfl rfl (stripLen_le f false body hbody))
 
 /-! ### Frames -/
 
@@ -598,8 +598,8 @@ theorem gwe_hwe {c : Conn} {r : Res} (fr : Nat → Option Bytes) (h : HWE c r) :
   | ok r => exact gw_of_hw fr h
   | error _ => trivial
 
-theorem gw_dispatch (fx : Fix) (dec : Dec) (c : Conn) (f : Fr) (fr : Nat → Option Bytes)
-    (hfr : f.ty = tDATA → fr f.sid = some f.frag) : GWE c (dispatch fx dec c f) fr := by
+theorem gw_dispatch (dec : Dec) (c : Conn) (f : Fr) (fr : Nat → Option Bytes)
+    (hfr : f.ty = tDATA → fr f.sid = some f.frag) : GWE c (dispatch dec c f) fr := by
   unfold dispatch
   split
   · exact gw_of_hw fr (hw_settingsH c f)
@@ -608,85 +608,79 @@ theorem gw_dispatch (fx : Fix) (dec : Dec) (c : Conn) (f : Fr) (fr : Nat → Opt
     · exact gw_of_hw fr (hw_streams rfl rfl noDr_nil)
     · exact gw_of_hw fr (hw_streams rfl rfl (noDr_cons (fun _ _ h => by cases h) noDr_nil))
   split
-  · exact gw_of_hw fr (hw_wuH fx c f)
+  · exact gw_of_hw fr (hw_wuH c f)
   split
-  · exact gwe_hwe fr (hw_headersH fx dec c f)
+  · exact gwe_hwe fr (hw_headersH dec c f)
   split
   · exact gw_of_hw fr (hw_connErr _ _)
   split
-  · rename_i h; exact gw_dataH fx c f fr (hfr h)
+  · rename_i h; exact gw_dataH c f fr (hfr h)
   split
   · exact gw_of_hw fr (hw_streams rfl rfl noDr_nil)
   split
   · exact gw_of_hw fr (hw_rstH c f)
   · exact gw_of_hw fr (hw_streams rfl rfl noDr_nil)
 
-theorem gw_handle (fx : Fix) (dec : Dec) (c : Conn) (f : Fr) (fr : Nat → Option Bytes)
-    (hfr : f.ty = tDATA → fr f.sid = some f.frag) : GWE c (handle fx dec c f) fr := by
+theorem gw_handle (dec : Dec) (c : Conn) (f : Fr) (fr : Nat → Option Bytes)
+    (hfr : f.ty = tDATA → fr f.sid = some f.frag) : GWE c (handle dec c f) fr := by
   unfold handle
   split
-  · exact gw_of_hw fr (hw_contBranch fx dec c f)
-  have hs := hw_shapeCheck fx c f
+  · exact gw_of_hw fr (hw_contBranch dec c f)
+  have hs := hw_shapeCheck c f
   split
   · rename_i r hr; rw [hr] at hs; exact gw_of_hw fr hs
   split
   · exact gw_of_hw fr (hw_connErr _ _)
-  have hi := hw_idCheck fx c f
+  have hi := hw_idCheck c f
   split
   · rename_i r hr; rw [hr] at hi; exact gw_of_hw fr hi
   · rename_i c1 hr; rw [hr] at hi
-    have := gw_dispatch fx dec c1 f fr hfr
-    revert this; generalize dispatch fx dec c1 f = r; intro this
+    have := gw_dispatch dec c1 f fr hfr
+    revert this; generalize dispatch dec c1 f = r; intro this
     cases r with
     | ok r => exact gw_sr_gw hi this
     | error _ => trivial
 
-theorem gw_handleW (fx : Fix) (dec : Dec) (c : Conn) (f : Fr) (fr : Nat → Option Bytes)
-    (hfr : f.ty = tDATA → fr f.sid = some f.frag) : GWE c (handleW fx dec c f) fr := by
-  have h := gw_handle fx dec c f fr hfr
+theorem gw_handleW (dec : Dec) (c : Conn) (f : Fr) (fr : Nat → Option Bytes)
+    (hfr : f.ty = tDATA → fr f.sid = some f.frag) : GWE c (handleW dec c f) fr := by
+  have h := gw_handle dec c f fr hfr
   unfold handleW
   split
   · exact gw_of_hw fr (hw_connErr _ _)
-  · revert h; generalize handle fx dec c f = r; intro h
+  · revert h; generalize handle dec c f = r; intro h
     cases r with
     | ok r => exact ⟨gr_streams_right h.1 rfl rfl, h.2⟩
     | error _ => trivial
 
-theorem gw_prefaceGate (fx : Fix) (dec : Dec) (c : Conn) (f : Fr) (fr : Nat → Option Bytes)
-    (hfr : f.ty = tDATA → fr f.sid = some f.frag) : GWE c (prefaceGate fx dec c f) fr := by
+theorem gw_prefaceGate (dec : Dec) (c : Conn) (f : Fr) (fr : Nat → Option Bytes)
+    (hfr : f.ty = tDATA → fr f.sid = some f.frag) : GWE c (prefaceGate dec c f) fr := by
   unfold prefaceGate
   split
   · split
-    · have h := gw_handleW fx dec { c with peerSettingsSeen := true } f fr hfr
-      revert h; generalize handleW fx dec { c with peerSettingsSeen := true } f = r; intro h
+    · have h := gw_handleW dec { c with peerSettingsSeen := true } f fr hfr
+      revert h; generalize handleW dec { c with peerSettingsSeen := true } f = r; intro h
       cases r with
       | ok r => exact gw_sr_gw (sr_streams rfl rfl) h
       | error _ => trivial
-    · split
-      · exact gw_of_hw fr (hw_connErr _ _)
-      · exact gw_handleW fx dec c f fr hfr
-  · exact gw_handleW fx dec c f fr hfr
+    · exact gw_of_hw fr (hw_connErr _ _)
+  · exact gw_handleW dec c f fr hfr
 
-theorem gw_frame (fx : Fix) (dec : Dec) (c : Conn) (f : Fr) :
-    GWE c (step fx dec c (.frame f)) (fragOf (.frame f)) := by
+theorem gw_frame (dec : Dec) (c : Conn) (f : Fr) :
+    GWE c (step dec c (.frame f)) (fragOf (.frame f)) := by
   have hfr : f.ty = tDATA → fragOf (.frame f) f.sid = some f.frag := by
     intro h; simp [fragOf, h]
-  show GWE c (if c.isClient then driveClient fx dec c f else driveFrame fx dec c f) _
+  show GWE c (if c.isClient then driveClient dec c f else driveFrame dec c f) _
   split
   · unfold driveClient
     split
-    · split
-      · exact gw_of_hw _ (hw_connErr _ _)
-      · trivial
-    split
-    · exact gw_of_hw _ (hw_streams rfl rfl (noDr_ite (noDr_rst _ _) noDr_nil))
-    · exact gw_prefaceGate fx dec c f _ hfr
+    · exact gw_of_hw _ (hw_connErr _ _)
+    · exact gw_prefaceGate dec c f _ hfr
   · unfold driveFrame
     split
     · exact gw_of_hw _ (hw_streams rfl rfl noDr_nil)
     split
     · exact gw_of_hw _ (hw_connErr _ _)
-    · exact gw_prefaceGate fx dec c f _ hfr
+    · exact gw_prefaceGate dec c f _ hfr
 
 /-! ### Local events -/
 
@@ -753,11 +747,11 @@ theorem sr_local_put (c : Conn) (k : Nat) (f : Stream → Stream) (hf : ∀ s, F
 
 /-- Every step: the stream relation for the frame's DATA payload, and
 `drained` output only by emptying the buffer. -/
-theorem step_rel (fx : Fix) (dec : Dec) (c c' : Conn) (e : Ev) (o : List Out)
-    (h : step fx dec c e = .ok (c', o)) : GR c c' (fragOf e) ∧ DrOK c c' o := by
+theorem step_rel (dec : Dec) (c c' : Conn) (e : Ev) (o : List Out)
+    (h : step dec c e = .ok (c', o)) : GR c c' (fragOf e) ∧ DrOK c c' o := by
   cases e with
   | frame f =>
-    have hg := gw_frame fx dec c f
+    have hg := gw_frame dec c f
     rw [h] at hg
     exact ⟨hg.1, drOK_noDr hg.2⟩
   | drain k =>
@@ -765,7 +759,7 @@ theorem step_rel (fx : Fix) (dec : Dec) (c c' : Conn) (e : Ev) (o : List Out)
     have := gw_drain c k (fragOf (.drain k)); rw [h] at this; exact this
   | release n =>
     simp only [step, Except.ok.injEq] at h
-    have : HW c (release fx c n) := by
+    have : HW c (release c n) := by
       unfold release; simp only []; split
       · exact hw_streams rfl rfl (noDr_wu _ _)
       · exact hw_streams rfl rfl noDr_nil
@@ -798,7 +792,7 @@ theorem step_rel (fx : Fix) (dec : Dec) (c c' : Conn) (e : Ev) (o : List Out)
     simp only [step, Except.ok.injEq] at h
     obtain ⟨rfl, rfl⟩ := h
     exact ⟨gr_of_sr _ (sr_filter c _), drOK_noDr noDr_nil⟩
-  | endLocal k em =>
+  | endLocal k =>
     simp only [step, Except.ok.injEq] at h
     obtain ⟨rfl, rfl⟩ := h
     refine ⟨gr_of_sr _ ?_, drOK_noDr noDr_nil⟩
@@ -824,13 +818,13 @@ theorem ti_gr {c c' : Conn} {fr : Nat → Option Bytes} (h : GR c c' fr) (hi : T
   · exact h1.1 hi.1
   · exact h3.1 (hi.2 _ h2)
 
-/-- The credit bound is invariant under every step, for every fix set. -/
-theorem ti_step (fx : Fix) (dec : Dec) (c c' : Conn) (e : Ev) (o : List Out)
-    (h : step fx dec c e = .ok (c', o)) (hi : TI c) : TI c' :=
-  ti_gr (step_rel fx dec c c' e o h).1 hi
+/-- The credit bound is invariant under every step. -/
+theorem ti_step (dec : Dec) (c c' : Conn) (e : Ev) (o : List Out)
+    (h : step dec c e = .ok (c', o)) (hi : TI c) : TI c' :=
+  ti_gr (step_rel dec c c' e o h).1 hi
 
-theorem ti_run (fx : Fix) (dec : Dec) (c c' : Conn) (es : List Ev) (tr : List (Ev × List Out))
-    (h : run fx dec c es = some (c', tr)) (hi : TI c) : TI c' := by
+theorem ti_run (dec : Dec) (c c' : Conn) (es : List Ev) (tr : List (Ev × List Out))
+    (h : run dec c es = some (c', tr)) (hi : TI c) : TI c' := by
   induction es generalizing c tr with
   | nil => simp only [run, Option.some.injEq, Prod.mk.injEq] at h; obtain ⟨rfl, -⟩ := h; exact hi
   | cons e es ih =>
@@ -842,7 +836,7 @@ theorem ti_run (fx : Fix) (dec : Dec) (c c' : Conn) (es : List Ev) (tr : List (E
       · cases h
       · rename_i c2 tr2 hr
         simp only [Option.some.injEq, Prod.mk.injEq] at h; obtain ⟨rfl, -⟩ := h
-        exact ih c1 tr2 hr (ti_step fx dec c c1 e o hs hi)
+        exact ih c1 tr2 hr (ti_step dec c c1 e o hs hi)
 
 /-- A fresh table (no streams) satisfies the credit bound when the
 advertised window is non-negative. -/
@@ -885,9 +879,9 @@ theorem buf_key {c c' : Conn} {fr : Nat → Option Bytes} (h : GR c c' fr) (hn :
       · exact Or.inl h5
       · exact Or.inr (Or.inr ⟨x, hx, Or.inl h6⟩)
 
-theorem fifo_gen (fx : Fix) (dec : Dec) (k : Nat) (es : List Ev) :
+theorem fifo_gen (dec : Dec) (k : Nat) (es : List Ev) :
     ∀ (c c' : Conn) (tr : List (Ev × List Out)) (R s1 s2 : List Bytes),
-    run fx dec c es = some (c', tr) → NoDupK c.streams → (s1 ++ s2).Sublist R → bufOf c k = s2.flatten →
+    run dec c es = some (c', tr) → NoDupK c.streams → (s1 ++ s2).Sublist R → bufOf c k = s2.flatten →
     ∃ t1 t2 : List Bytes, (t1 ++ t2).Sublist (R ++ chunks k es) ∧ s1.flatten ++ delivered k tr = t1.flatten ∧
       bufOf c' k = t2.flatten := by
   induction es with
@@ -905,7 +899,7 @@ theorem fifo_gen (fx : Fix) (dec : Dec) (k : Nat) (es : List Ev) :
       · cases h
       · rename_i c2 tr2 hr
         simp only [Option.some.injEq, Prod.mk.injEq] at h; obtain ⟨rfl, rfl⟩ := h
-        obtain ⟨hgr, hdr⟩ := step_rel fx dec c c1 e o hstep
+        obtain ⟨hgr, hdr⟩ := step_rel dec c c1 e o hstep
         have hn1 := hgr.2.1 hn
         have hchunks : chunks k (e :: es) = (fragOf e k).toList ++ chunks k es := by
           simp only [chunks, List.filterMap_cons]; cases fragOf e k <;> rfl
@@ -934,11 +928,11 @@ theorem fifo_gen (fx : Fix) (dec : Dec) (k : Nat) (es : List Ev) :
 /-- FIFO delivery: what `drain_body` handed over on stream `k`, followed by
 what is still buffered, is the concatenation of a subsequence of the
 initial buffer and the DATA payloads received on `k`, in arrival order. -/
-theorem fifo_run (fx : Fix) (dec : Dec) (k : Nat) (c c' : Conn) (es : List Ev) (tr : List (Ev × List Out))
-    (h : run fx dec c es = some (c', tr)) (hn : NoDupK c.streams) :
+theorem fifo_run (dec : Dec) (k : Nat) (c c' : Conn) (es : List Ev) (tr : List (Ev × List Out))
+    (h : run dec c es = some (c', tr)) (hn : NoDupK c.streams) :
     ∃ t1 t2 : List Bytes, (t1 ++ t2).Sublist (bufOf c k :: chunks k es) ∧ delivered k tr = t1.flatten ∧
       bufOf c' k = t2.flatten := by
-  obtain ⟨t1, t2, ht, h1, h2⟩ := fifo_gen fx dec k es c c' tr [bufOf c k] [] [bufOf c k] h hn
+  obtain ⟨t1, t2, ht, h1, h2⟩ := fifo_gen dec k es c c' tr [bufOf c k] [] [bufOf c k] h hn
     (by simp) (by simp)
   exact ⟨t1, t2, ht, by simpa using h1, h2⟩
 
@@ -964,10 +958,10 @@ theorem dataCredit_wu (c : Conn) (f : Fr) (cr n : Nat) (hsid : f.sid ≠ 0)
   repeat' split at h
   all_goals simp_all
 
-theorem dataFinish_ok (fx : Fix) (c : Conn) (f : Fr) (s : Stream) (cr : Nat) (hsid : f.sid ≠ 0)
+theorem dataFinish_ok (c : Conn) (f : Fr) (s : Stream) (cr : Nat) (hsid : f.sid ≠ 0)
     (hcl : ¬(f.f1 && (0 : Int) ≤ s.contentLength && (s.received : Int) ≠ s.contentLength) = true) :
-    ∃ s4, get (dataFinish fx c f s cr).1 f.sid = some s4 ∧ Flow s4 = Flow s ∧
-      ∀ n, Out.wu f.sid n ∈ (dataFinish fx c f s cr).2 → n = cr := by
+    ∃ s4, get (dataFinish c f s cr).1 f.sid = some s4 ∧ Flow s4 = Flow s ∧
+      ∀ n, Out.wu f.sid n ∈ (dataFinish c f s cr).2 → n = cr := by
   unfold dataFinish
   rw [if_neg hcl]
   refine ⟨_, by rw [dataCredit_get, get_put, if_pos rfl], by split <;> rfl, fun n hn => ?_⟩
@@ -978,16 +972,16 @@ theorem dataFinish_ok (fx : Fix) (c : Conn) (f : Fr) (s : Stream) (cr : Nat) (hs
 mismatch) leaves `recvW + pendingCredit` of its stream where it was before
 the frame was debited, holds back exactly the deferred body octets, and
 credits the stream with no other amount than the rest of the frame. -/
-theorem data_credit (fx : Fix) (c : Conn) (f : Fr) (s : Stream) (body : Nat) (hsid : f.sid ≠ 0)
+theorem data_credit (c : Conn) (f : Fr) (s : Stream) (body : Nat) (hsid : f.sid ≠ 0)
     (hacc : ¬(!c.isClient && (0 : Int) ≤ s.contentLength && (s.received : Int) > s.contentLength) = true)
     (hcl : ¬(f.f1 && (0 : Int) ≤ s.contentLength && (s.received : Int) ≠ s.contentLength) = true) :
-    ∃ s', get (dataAccept fx c f s body).1 f.sid = some s' ∧
+    ∃ s', get (dataAccept c f s body).1 f.sid = some s' ∧
       s'.recvW + s'.pendingCredit = s.recvW + s.pendingCredit + f.plen ∧
       s'.pendingCredit = s.pendingCredit + deferOf s body ∧
-      ∀ n, Out.wu f.sid n ∈ (dataAccept fx c f s body).2 → n = f.plen - deferOf s body := by
+      ∀ n, Out.wu f.sid n ∈ (dataAccept c f s body).2 → n = f.plen - deferOf s body := by
   unfold dataAccept
   rw [if_neg hacc]
-  obtain ⟨s4, hg, hf, hw⟩ := dataFinish_ok fx (if !c.isClient then { c with buffered := c.buffered + body } else c) f
+  obtain ⟨s4, hg, hf, hw⟩ := dataFinish_ok (if !c.isClient then { c with buffered := c.buffered + body } else c) f
     { s with recvW := s.recvW + ((f.plen : Int) - (deferOf s body : Int)),
              pendingCredit := s.pendingCredit + deferOf s body } (f.plen - deferOf s body) hsid hcl
   simp only [Flow, Prod.mk.injEq] at hf

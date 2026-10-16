@@ -28,29 +28,29 @@ Bytes after the encoding (`rest`) never matter, so pipelined data is safe.
 namespace Flare.L3.H1.ChunkedEncode
 open Flare Flare.L3.H1.Chunked Flare.L3.H1.ClientChunked
 
-/-- mirrors flare/http/streaming_serialize.mojo:116-122 @59bda50 -/
+/-- mirrors flare/http/streaming_serialize.mojo#_hex_digit sha=5487cc8bd0bc at=59bda50f -/
 def hexDigit (d : Nat) : UInt8 := if d < 10 then (48 + d).toUInt8 else (87 + d).toUInt8
 
 /-- Lowercase hex, most significant digit first, no leading zeros.
-mirrors flare/http/streaming_serialize.mojo:126-140 @59bda50
-(and flare/http/client.mojo:121-135 @59bda50 for `n > 0`) -/
+mirrors flare/http/streaming_serialize.mojo#_hex_lower sha=a66db31abe33 at=59bda50f
+(and flare/http/client.mojo#_chunk_frame_prefix sha=4249a3de2aad at=59bda50f for `n > 0`) -/
 def hexLower (n : Nat) : Bytes :=
   if n < 16 then [hexDigit n] else hexLower (n / 16) ++ [hexDigit (n % 16)]
 termination_by n
 decreasing_by omega
 
 /-- One framed chunk.
-mirrors flare/http/streaming_serialize.mojo:268-282 @59bda50 -/
+mirrors flare/http/streaming_serialize.mojo#serialize_streaming_response sha=ecb91a9d6bf1 at=59bda50f -/
 def encChunk (c : Bytes) : Bytes := hexLower c.length ++ 13 :: 10 :: (c ++ [13, 10])
 
 /-- The chunk loop; an empty write is skipped.
-mirrors flare/http/streaming_serialize.mojo:258-288 @59bda50 -/
+mirrors flare/http/streaming_serialize.mojo#serialize_streaming_response sha=ecb91a9d6bf1 at=59bda50f -/
 def encChunks : List Bytes → Bytes
   | [] => []
   | c :: cs => (if c = [] then [] else encChunk c) ++ encChunks cs
 
 /-- `_write_header_line` without its CRLF.
-mirrors flare/http/streaming_serialize.mojo:162-166 @59bda50 -/
+mirrors flare/http/streaming_serialize.mojo#_write_header_line sha=29dc9d7cc897 at=59bda50f -/
 def trailerLine (kv : Bytes × Bytes) : Bytes := kv.1 ++ 58 :: 32 :: kv.2
 
 def encTrailers : List (Bytes × Bytes) → Bytes
@@ -58,12 +58,12 @@ def encTrailers : List (Bytes × Bytes) → Bytes
   | kv :: tr => trailerLine kv ++ 13 :: 10 :: encTrailers tr
 
 /-- The whole body: chunks, `0 CRLF`, trailers, `CRLF`.
-mirrors flare/http/streaming_serialize.mojo:258-300 @59bda50 -/
+mirrors flare/http/streaming_serialize.mojo#serialize_streaming_response sha=ecb91a9d6bf1 at=59bda50f -/
 def encodeBody (cs : List Bytes) (tr : List (Bytes × Bytes)) : Bytes :=
   encChunks cs ++ 48 :: 13 :: 10 :: (encTrailers tr ++ [13, 10])
 
 /-- The client upload: no trailers, `0\r\n\r\n`.
-mirrors flare/http/client.mojo:1420-1445 @59bda50 -/
+mirrors flare/http/client.mojo#HttpClient._send_chunked_tcp sha=177fb387dc76 at=59bda50f -/
 abbrev encodeUpload (cs : List Bytes) : Bytes := encodeBody cs []
 
 /-! ## Hex digits -/
@@ -299,10 +299,9 @@ theorem SRes.shift_zero (r : SRes) : r.shift 0 = r := by cases r <;> rfl
 theorem SRes.shift_shift (r : SRes) (a b : Nat) : (r.shift a).shift b = r.shift (a + b) := by
   cases r <;> simp [SRes.shift]; omega
 
-theorem scanTr_line (P : Policy) (hP : P = implP) (L X : Bytes) (h13 : 13 ∉ L) (h10 : 10 ∉ L)
+theorem scanTr_line (L X : Bytes) (h13 : 13 ∉ L) (h10 : 10 ∉ L)
     (h2 : 2 ≤ L.length) (hcap : L.length ≤ CAP) :
-    scanTr P (L ++ 13 :: 10 :: X) = (scanTr P X).shift (L.length + 2) := by
-  subst hP
+    scanTr (L ++ 13 :: 10 :: X) = (scanTr X).shift (L.length + 2) := by
   obtain ⟨a, b, t, rfl⟩ : ∃ a b t, L = a :: b :: t := by
     match L, h2 with
     | a :: b :: t, _ => exact ⟨a, b, t, rfl⟩
@@ -313,7 +312,7 @@ theorem scanTr_line (P : Policy) (hP : P = implP) (L X : Bytes) (h13 : 13 ∉ L)
   split
   · simp_all
   · rename_i k2 hk2; rw [hk] at hk2; cases hk2
-    simp [implP, CAP, List.take_left' rfl, h10]
+    simp [CAP, List.take_left' rfl, h10]
     intro h
     simp only [List.length_cons, CAP] at hcap
     omega
@@ -322,21 +321,21 @@ theorem scanTr_line (P : Policy) (hP : P = implP) (L X : Bytes) (h13 : 13 ∉ L)
 def TrailersCapped (tr : List (Bytes × Bytes)) : Prop := ∀ kv ∈ tr, (trailerLine kv).length ≤ CAP
 
 theorem scanTr_trailers : ∀ (tr : List (Bytes × Bytes)) (X : Bytes), TrailersOK tr → TrailersCapped tr →
-    scanTr implP (encTrailers tr ++ 13 :: 10 :: X) = .done ((encTrailers tr).length + 2)
+    scanTr (encTrailers tr ++ 13 :: 10 :: X) = .done ((encTrailers tr).length + 2)
   | [], X, _, _ => by simp [encTrailers]; rw [scanTr, if_pos ⟨rfl, rfl⟩]
   | kv :: tr, X, h, hc => by
     have e : encTrailers (kv :: tr) ++ 13 :: 10 :: X = trailerLine kv ++ 13 :: 10 :: (encTrailers tr ++ 13 :: 10 :: X) := by
       simp [encTrailers]
-    rw [e, scanTr_line implP rfl _ _ (h kv (by simp)).1 (h kv (by simp)).2 (trailerLine_len kv)
+    rw [e, scanTr_line _ _ (h kv (by simp)).1 (h kv (by simp)).2 (trailerLine_len kv)
         (hc kv (by simp)),
       scanTr_trailers tr X (fun x hx => h x (by simp [hx])) (fun x hx => hc x (by simp [hx]))]
     simp [SRes.shift, encTrailers]; omega
 
 theorem scan_chunk (mb tot : Nat) (c R : Bytes) (hc : c ≠ []) (hsz : c.length < 2 ^ 60) (hmb : tot + c.length ≤ mb) :
-    scanL implP mb (encChunk c ++ R) tot =
-      ((scanL implP mb R (tot + c.length)).1.shift (encChunk c).length,
-       (scanL implP mb R (tot + c.length)).2.1 + (encChunk c).length,
-       (scanL implP mb R (tot + c.length)).2.2) := by
+    scanL mb (encChunk c ++ R) tot =
+      ((scanL mb R (tot + c.length)).1.shift (encChunk c).length,
+       (scanL mb R (tot + c.length)).2.1 + (encChunk c).length,
+       (scanL mb R (tot + c.length)).2.2) := by
   have hn : 0 < c.length := List.length_pos_iff.mpr hc
   have hlen : (hexLower c.length).length ≤ 15 :=
     hexLower_len _ 15 (by have : (2 : Nat) ^ 60 = 16 ^ 15 := by decide
@@ -347,18 +346,18 @@ theorem scan_chunk (mb tot : Nat) (c R : Bytes) (hc : c ≠ []) (hsz : c.length 
   rw [scanL_some hk, chunk_take,
     parseSize_eq mb _ 0 0 c.length (hexLower_no59 _) (hexAcc_hexLower _) (by omega)]
   have hcr := chunk_crlf (hexLower c.length) c R
-  simp only [CAP, implP, show ¬ (hexLower c.length).length > 4096 by omega, if_false, Bool.false_eq_true,
-    false_and, Nat.zero_add, show (hexLower c.length).length ≠ 0 by omega, show c.length ≠ 0 by omega,
+  simp only [CAP, show ¬ (hexLower c.length).length > 4096 by omega, if_false,
+    Nat.zero_add, show (hexLower c.length).length ≠ 0 by omega, show c.length ≠ 0 by omega,
     show ¬ tot + c.length > mb by omega, hcr, ne_eq, not_true_eq_false, or_self,
-    hexLower_no10, not_false_eq_true, and_false]
+    hexLower_no10]
   rw [if_neg (by rw [chunk_len]; omega), chunk_rest, encChunk_length]
 
 theorem scan_encChunks (mb : Nat) : ∀ (cs : List Bytes) (T : Bytes) (tot : Nat),
     (∀ c ∈ cs, c.length < 2 ^ 60) → tot + cs.flatten.length ≤ mb →
-    scanL implP mb (encChunks cs ++ T) tot =
-      ((scanL implP mb T (tot + cs.flatten.length)).1.shift (encChunks cs).length,
-       (scanL implP mb T (tot + cs.flatten.length)).2.1 + (encChunks cs).length,
-       (scanL implP mb T (tot + cs.flatten.length)).2.2)
+    scanL mb (encChunks cs ++ T) tot =
+      ((scanL mb T (tot + cs.flatten.length)).1.shift (encChunks cs).length,
+       (scanL mb T (tot + cs.flatten.length)).2.1 + (encChunks cs).length,
+       (scanL mb T (tot + cs.flatten.length)).2.2)
   | [], T, tot, _, _ => by simp [encChunks, SRes.shift_zero]
   | c :: cs, T, tot, hs, hmb => by
     by_cases hc : c = []
@@ -380,12 +379,12 @@ theorem scan_encChunks (mb : Nat) : ∀ (cs : List Bytes) (T : Bytes) (tot : Nat
         omega
 
 theorem scan_zero (mb tot : Nat) (Y : Bytes) :
-    scanL implP mb (48 :: 13 :: 10 :: Y) tot = ((scanTr implP Y).shift 3, 0, tot) := by
+    scanL mb (48 :: 13 :: 10 :: Y) tot = ((scanTr Y).shift 3, 0, tot) := by
   have hk : findCRLF (48 :: 13 :: 10 :: Y) = some 1 := findCRLF_app [48] Y (by decide)
   rw [scanL_some hk]
   have : parseSize mb ((48 :: 13 :: 10 :: Y).take 1) 0 0 = some (0, 1) := by
     simp [parseSize, hexVal]
-  simp only [this, CAP, implP]
+  simp only [this, CAP]
   simp
 
 /-- **The shipped scanner accepts every encoding**, ending exactly at its

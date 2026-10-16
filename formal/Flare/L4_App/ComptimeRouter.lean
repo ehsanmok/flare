@@ -8,18 +8,15 @@ import Flare.L4_App.Router
 mounts and no fallback. This module proves it routes exactly like the runtime
 `Router` built from the same table, and isolates the one difference: the
 runtime router rejects a non-final `*` at registration (`_compile_segments`
-raises); the comptime router accepts the table, and since the APP-10 fix
-`_match_one` makes such a pattern match nothing (before the fix it treated the
-middle `*` as a tail wildcard, silently ignoring every pattern segment after
-it, `Flare.Bugs.APP_10`). `matchOneOld` / `scanCTOld` / `serveCTOld` are the
-pre-fix functions.
+raises); the comptime router accepts the table, and `_match_one` makes such
+a pattern match nothing (`matchOne_nonfinal_wild`).
 -/
 namespace Flare.L4.ComptimeRouter
 
 open Flare.L4.Router
 
 /-- `ComptimeRoute`: (method, pattern, handler); the handler is an id here.
-mirrors flare/http/routes.mojo:66-78 @59bda50 -/
+mirrors flare/http/routes.mojo#ComptimeRoute sha=df08d8994867 at=59bda50f -/
 structure CRoute where
   method : Str
   pattern : Str
@@ -29,39 +26,24 @@ structure CRoute where
 /-- `_split_static`, `_split_path` and `_path_only` in routes.mojo are
 byte-for-byte copies of the router.mojo helpers, so the router model's
 `splitPath` / `pathOnly` are reused.
-mirrors flare/http/routes.mojo:91-151 @59bda50 -/
+mirrors flare/http/routes.mojo#_split_static+_path_only+_split_path sha=31186912767f at=59bda50f -/
 abbrev splitStatic := splitPath
 
-/-- mirrors flare/http/routes.mojo:157-162 @59bda50 -/
+/-- mirrors flare/http/routes.mojo#_seg_is_param sha=95b490d4ddec at=59bda50f -/
 def isParam (s : Str) : Bool :=
   match s with
   | ':' :: _ :: _ => true
   | _ => false
 
-/-- mirrors flare/http/routes.mojo:165-168 @59bda50 -/
+/-- mirrors flare/http/routes.mojo#_seg_is_wildcard sha=8aecd07c80ea at=59bda50f -/
 def isWild (s : Str) : Bool := s == ['*']
 
-/-- mirrors flare/http/routes.mojo:171-174 @59bda50 -/
+/-- mirrors flare/http/routes.mojo#_param_name sha=37a245974b54 at=59bda50f -/
 def paramName (s : Str) : Str := s.drop 1
-
-/-- `_match_one` before the APP-10 fix: a `*` captures the rest wherever it
-appears.
-mirrors flare/http/routes.mojo:250-284 @59bda50 -/
-def matchOneOld : List Str → List Str → Option Binds
-  | us, [] => if us.isEmpty then some [] else none
-  | us, seg :: ps =>
-    if isWild seg then
-      (if us.isEmpty then none else some [(['*'], joinTail [] us)])
-    else
-      match us with
-      | [] => none
-      | u :: us =>
-        if isParam seg then (matchOneOld us ps).map ((paramName seg, u) :: ·)
-        else if u = seg then matchOneOld us ps else none
 
 /-- `_match_one` as shipped (fixed, APP-10): a `*` that is not the last pattern
 segment never matches (`if j != len(pat_segs) - 1: return False`).
-mirrors flare/http/routes.mojo:250-290 (fixed, APP-10) -/
+mirrors flare/http/routes.mojo#_match_one sha=840edf3659db at=a4759448 (fixed, APP-10) -/
 def matchOne : List Str → List Str → Option Binds
   | us, [] => if us.isEmpty then some [] else none
   | us, seg :: ps =>
@@ -79,19 +61,8 @@ inductive CScan where
   | hit (hid : Nat) (ps : Binds)
   | miss (allowed : List Str)
 
-/-- The unrolled route loop before the APP-10 fix (uses `matchOneOld`).
-mirrors flare/http/routes.mojo:214-240 @59bda50 -/
-def scanCTOld (segsIn : List Str) (method : Str) : List CRoute → List Str → CScan
-  | [], allowed => .miss allowed
-  | c :: cs, allowed =>
-    match matchOneOld segsIn (splitStatic c.pattern) with
-    | none => scanCTOld segsIn method cs allowed
-    | some ps =>
-      if c.method = method then .hit c.hid ps
-      else scanCTOld segsIn method cs (if allowed.contains c.method then allowed else allowed ++ [c.method])
-
 /-- The unrolled route loop of `ComptimeRouter.serve`.
-mirrors flare/http/routes.mojo:214-240 @59bda50 (unchanged by APP-10; the
+mirrors flare/http/routes.mojo#ComptimeRouter.serve+_match_one sha=26f3e3614931 at=59bda50f (unchanged by APP-10; the
 fix is in `_match_one`) -/
 def scanCT (segsIn : List Str) (method : Str) : List CRoute → List Str → CScan
   | [], allowed => .miss allowed
@@ -105,17 +76,10 @@ def scanCT (segsIn : List Str) (method : Str) : List CRoute → List Str → CSc
 /-- `ComptimeRouter.serve`. `_not_found` / `_method_not_allowed` in
 routes.mojo build the same responses as `not_found` / router
 `_method_not_allowed`, so the router's `Outcome` is reused.
-mirrors flare/http/routes.mojo:199-244 @59bda50 -/
+mirrors flare/http/routes.mojo#ComptimeRouter.serve sha=a9e60d15faf1 at=59bda50f -/
 def serveCT (routes : List CRoute) (req : Req) : Outcome :=
   let segsIn := splitPath (pathOnly req.url)
   match scanCT segsIn req.method routes [] with
-  | .hit hid ps => .handler hid { req with params := req.params ++ ps }
-  | .miss allowed => if allowed.isEmpty then .notFound req.url else .notAllowed allowed
-
-/-- `ComptimeRouter.serve` before the APP-10 fix. -/
-def serveCTOld (routes : List CRoute) (req : Req) : Outcome :=
-  let segsIn := splitPath (pathOnly req.url)
-  match scanCTOld segsIn req.method routes [] with
   | .hit hid ps => .handler hid { req with params := req.params ++ ps }
   | .miss allowed => if allowed.isEmpty then .notFound req.url else .notAllowed allowed
 
@@ -142,26 +106,6 @@ theorem classify_of_lit (s : Str) (hw : isWild s = false) (hp : isParam s = fals
     | nil => simp
     | cons c cs => simp [isParam] at hp
   · rfl
-
-/-- The pre-fix `_match_one` on raw segments is `_match` on the classified
-segments, for every pattern (well formed or not). -/
-theorem matchOneOld_eq (us raw : List Str) :
-    matchOneOld us raw = matchSegs us (raw.map classify) := by
-  induction raw generalizing us with
-  | nil => cases us <;> simp [matchOneOld, matchSegs]
-  | cons s ps ih =>
-    cases hw : isWild s
-    · cases hp : isParam s
-      · rw [List.map_cons, classify_of_lit s hw hp]
-        cases us with
-        | nil => simp [matchOneOld, matchSegs, hw]
-        | cons u us => simp [matchOneOld, matchSegs, ih, hw, hp]
-      · rw [List.map_cons, classify_of_param s hp]
-        cases us with
-        | nil => simp [matchOneOld, matchSegs, hw]
-        | cons u us => simp [matchOneOld, matchSegs, ih, hw, hp]
-    · rw [List.map_cons, (isWild_iff s).1 hw]
-      cases us <;> simp [matchOneOld, matchSegs, hw]
 
 /-- **Shipped `_match_one` meets the matching spec** on every pattern, valid or
 not, for normalised request segments (fixed, APP-10). -/
@@ -243,27 +187,6 @@ theorem serveCT_eq_serve (routes : List CRoute)
   | hit r ps => rfl
   | miss a =>
     simp only [serveMounts]
-
-/-- The pre-fix router was equivalent to the runtime router on every table,
-valid or not, because it copied the runtime matcher's tail-wildcard step. -/
-theorem scanCTOld_eq (segsIn : List Str) (method : Str) :
-    ∀ (cs : List CRoute) (acc : List Str),
-      scanCTOld segsIn method cs acc =
-        match scan segsIn method (cs.map toRoute) acc with
-        | .hit r ps => .hit r.hid ps
-        | .miss a => .miss a
-  | [], acc => rfl
-  | c :: cs, acc => by
-    simp only [scanCTOld, List.map_cons, scan, matchOneOld_eq]
-    have ih := scanCTOld_eq segsIn method cs
-    simp only [toRoute]
-    cases matchSegs segsIn (List.map classify (splitPath c.pattern)) with
-    | none => exact ih acc
-    | some ps =>
-      simp only
-      by_cases he : c.method = method
-      · simp [he]
-      · simp only [he, if_false]; exact ih _
 
 /-- Registering a table on a fresh `Router`, route by route. -/
 def registerAll : Router → List CRoute → Except String Router

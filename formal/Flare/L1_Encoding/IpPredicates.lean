@@ -34,15 +34,15 @@ def findCharFrom (s : Bytes) (ch : UInt8) (start : Nat) : Int :=
 def octetLoop (bs : Bytes) : Int64 :=
   bs.foldl (fun o c => o * 10 + Int64.ofNat c.toNat - 48) 0
 
-/-- mirrors flare/net/address.mojo:198-206 @59bda50 -/
+/-- mirrors flare/net/address.mojo#IpAddr.is_loopback+IpAddr.is_unspecified sha=df267ce7fb05 at=59bda50f -/
 def isLoopback (ip : IpAddr) : Bool :=
   if ip.v6 then ip.addr == str "::1" else startsWith ip.addr (str "127.")
 
-/-- mirrors flare/net/address.mojo:208-216 @59bda50 -/
+/-- mirrors flare/net/address.mojo#IpAddr.is_unspecified+IpAddr.is_private sha=d09df47f406a at=59bda50f -/
 def isUnspecified (ip : IpAddr) : Bool :=
   if ip.v6 then ip.addr == str "::" else ip.addr == str "0.0.0.0"
 
-/-- mirrors flare/net/address.mojo:288-302 @59bda50 -/
+/-- mirrors flare/net/address.mojo#_is_172_private+_find_char sha=c7bdfbe64cd1 at=59bda50f -/
 def is172Private (addr : Bytes) : Bool :=
   let dot := findCharFrom addr 46 4
   if dot < 0 then false
@@ -50,14 +50,14 @@ def is172Private (addr : Bytes) : Bool :=
     let o := octetLoop ((addr.drop 4).take (dot.toNat - 4))
     decide (16 ≤ o) && decide (o ≤ 31)
 
-/-- mirrors flare/net/address.mojo:218-230 @59bda50 -/
+/-- mirrors flare/net/address.mojo#IpAddr.is_private+IpAddr.is_multicast sha=af4f022bbbe8 at=59bda50f -/
 def isPrivate (ip : IpAddr) : Bool :=
   if ip.v6 then false
   else if startsWith ip.addr (str "10.") || startsWith ip.addr (str "192.168.") then true
   else if startsWith ip.addr (str "172.") then is172Private ip.addr
   else false
 
-/-- mirrors flare/net/address.mojo:229-253 (fixed, ENC-01): an IPv6 address is
+/-- mirrors flare/net/address.mojo#IpAddr.is_multicast sha=b9e0aea32357 at=144ed0a1 (fixed, ENC-01): an IPv6 address is
 multicast iff its text starts with `ff` and the first group has four digits
 (first `:` at index 4), i.e. the first byte is `0xff` (RFC 4291 §2.7). -/
 def isMulticast (ip : IpAddr) : Bool :=
@@ -264,5 +264,107 @@ theorem isUnspecified_dotted (ha : a < 256) (hb : b < 256) (hc : c < 256) (hd : 
       have := dotted_inj e; omega
     rw [this]
     simp only [Bool.false_eq, Bool.and_eq_false_iff, decide_eq_false_iff_not]; omega
+
+/-! ## IPv6 multicast (ENC-01)
+
+`inet_ntop` prints RFC 5952 text: lowercase hex groups without leading
+zeros, separated by `:`. The IPv6 branch of `is_multicast` is
+`startswith("ff") and _find_char(addr, ':') == 4`. -/
+
+def hexDigit (d : Nat) : UInt8 := if d < 10 then UInt8.ofNat (48 + d) else UInt8.ofNat (87 + d)
+
+/-- Lowercase hex, no leading zeros (RFC 5952 §4.1, §4.3). -/
+def hex (n : Nat) : Bytes :=
+  if n < 16 then [hexDigit n] else hex (n / 16) ++ [hexDigit (n % 16)]
+termination_by n
+decreasing_by omega
+
+/-- The IPv6 branch of `is_multicast`, as a function of the text. -/
+def isMulticast6 (addr : Bytes) : Bool :=
+  startsWith addr (str "ff") && findChar addr 58 == 4
+
+theorem isMulticast_v6 (addr : Bytes) : isMulticast ⟨addr, true⟩ = isMulticast6 addr := rfl
+
+theorem hexDigit_toNat (d : Nat) (h : d < 16) :
+    (hexDigit d).toNat = if d < 10 then 48 + d else 87 + d := by
+  unfold hexDigit; split <;> (rw [UInt8.toNat_ofNat']; omega)
+
+theorem hexDigit_ne_colon (d : Nat) (h : d < 16) : hexDigit d ≠ 58 := by
+  intro e; have := hexDigit_toNat d h; rw [e] at this
+  by_cases hd : d < 10
+  · rw [if_pos hd] at this; simp at this; omega
+  · rw [if_neg hd] at this; simp at this; omega
+
+theorem hex_no_colon (n : Nat) : ∀ c ∈ hex n, c ≠ 58 := by
+  induction n using Nat.strongRecOn with
+  | ind n ih =>
+    rw [hex]; split
+    · intro c hc; simp at hc; subst hc; exact hexDigit_ne_colon n (by omega)
+    · intro c hc; simp at hc
+      rcases hc with hc | hc
+      · exact ih _ (by omega) c hc
+      · subst hc; exact hexDigit_ne_colon _ (Nat.mod_lt _ (by decide))
+
+theorem hex_lt16 (n : Nat) (h : n < 16) : hex n = [hexDigit n] := by
+  rw [hex, if_pos h]
+
+theorem hex_length_lt4 (n : Nat) (h : n < 4096) : (hex n).length < 4 := by
+  by_cases h1 : n < 16
+  · rw [hex_lt16 n h1]; simp
+  · rw [hex, if_neg h1]
+    by_cases h2 : n / 16 < 16
+    · rw [hex_lt16 _ h2]; simp
+    · rw [hex, if_neg h2, hex_lt16 _ (by omega)]; simp
+
+theorem hex4 (n : Nat) (h1 : 4096 ≤ n) (h2 : n < 65536) :
+    hex n = [hexDigit (n / 4096), hexDigit (n / 256 % 16), hexDigit (n / 16 % 16), hexDigit (n % 16)] := by
+  rw [hex, if_neg (by omega), hex, if_neg (by omega), hex, if_neg (by omega), hex, if_pos (by omega)]
+  have a1 : n / 16 / 16 / 16 = n / 4096 := by omega
+  have a2 : n / 16 / 16 % 16 = n / 256 % 16 := by omega
+  rw [a1, a2]; rfl
+
+theorem hexDigit_eq_f (d : Nat) (h : d < 16) : hexDigit d = 102 ↔ d = 15 := by
+  constructor
+  · intro e; have := hexDigit_toNat d h; rw [e] at this
+    by_cases hd : d < 10
+    · rw [if_pos hd] at this; simp at this; omega
+    · rw [if_neg hd] at this; simp at this; omega
+  · intro e; subst e; decide
+
+/-- For every first group `g` followed by `:` (every RFC 5952 text whose
+first group is not part of the `::` run), the predicate is RFC 4291 §2.7:
+the first byte is `0xff`. -/
+theorem isMulticast6_correct (g : Nat) (hg : g < 65536) (rest : Bytes) :
+    isMulticast6 (hex g ++ 58 :: rest) = decide (g / 256 = 255) := by
+  unfold isMulticast6
+  have hf : findChar (hex g ++ 58 :: rest) 58 = (hex g).length :=
+    findChar_append _ _ _ (hex_no_colon g)
+  rw [hf]
+  by_cases h4 : 4096 ≤ g
+  · rw [hex4 g h4 hg]
+    have hs : str "ff" = [102, 102] := by decide
+    rw [hs]
+    simp only [startsWith, List.cons_append, List.isPrefixOf]
+    have e1 := hexDigit_eq_f (g / 4096) (by omega)
+    have e2 := hexDigit_eq_f (g / 256 % 16) (by omega)
+    rw [Bool.eq_iff_iff]
+    simp only [Bool.and_eq_true, beq_iff_eq, Bool.and_true, List.length_cons, List.length_nil,
+      decide_eq_true_eq]
+    rw [eq_comm (a := (102 : UInt8)), eq_comm (a := (102 : UInt8)), e1, e2]
+    constructor
+    · rintro ⟨⟨h1, h2⟩, -⟩; omega
+    · intro h; exact ⟨⟨by omega, by omega⟩, rfl⟩
+  · have := hex_length_lt4 g (by omega)
+    have e : (((hex g).length : Int) == 4) = false := by
+      simp only [beq_eq_false_iff_ne, ne_eq]; omega
+    rw [e, Bool.and_false]
+    have : g / 256 ≠ 255 := by omega
+    simp [this]
+
+/-- When the first group is inside the `::` run the text starts with `::`
+and the predicate says "not multicast", as RFC 4291 does. -/
+theorem isMulticast6_compressed (rest : Bytes) :
+    isMulticast6 (58 :: 58 :: rest) = false := by
+  simp [isMulticast6, startsWith, str, b, List.isPrefixOf]
 
 end Flare.L1.IpPredicates

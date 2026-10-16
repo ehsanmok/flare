@@ -88,7 +88,7 @@ def renderAll (p : Params) (l : List Poll) : Bytes := (l.map (render p)).flatten
 /-- The batch loop of `_stream_refill`, from `framed` chunks and buffer
 `buf`: `none` when the source raises, else the new buffer, the rest of the
 source, whether the source is still attached, and the polls consumed.
-mirrors flare/http/_reactor/conn_handle.mojo:1621-1642 @59bda50 -/
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._stream_refill sha=5cc9d0e1cc3c at=59bda50f -/
 def batch (p : Params) : Nat → Bytes → List Poll → Option (Bytes × List Poll × Bool × List Poll)
   | _, buf, [] => some (buf, [], true, [])
   | framed, buf, q :: rest =>
@@ -157,14 +157,14 @@ structure Res where
   done : Bool
 
 /-- Flush complete and no source: close or back to keep-alive reading.
-mirrors flare/http/_reactor/conn_handle.mojo:1364-1375 @59bda50 -/
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle.on_writable sha=97ab3b583fa2 at=59bda50f -/
 def finish (s : St) : St × Res :=
   if s.shouldClose then ({ s with phase := .closing, done := true }, ⟨false, false, true⟩)
   else ({ s with phase := .reading }, ⟨true, false, false⟩)
 
 /-- The flush/refill loop of `on_writable` with `fuel` refills left in this
 edge and `budget` bytes the kernel still accepts.
-mirrors flare/http/_reactor/conn_handle.mojo:1286-1351 @59bda50 -/
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle.on_writable sha=97ab3b583fa2 at=59bda50f -/
 def wloop (p : Params) : Nat → Nat → St → St × Res
   | fuel, budget, s =>
     let x := min budget (s.wbuf.length - s.wpos)
@@ -186,7 +186,7 @@ def wloop (p : Params) : Nat → Nat → St → St × Res
             else wloop p f (budget - x) s3
 
 /-- `on_writable` (cleartext) with a possibly attached chunk source.
-mirrors flare/http/_reactor/conn_handle.mojo:1262-1375 @59bda50 -/
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle.on_writable sha=97ab3b583fa2 at=59bda50f -/
 def onWritable (p : Params) (k : Nat) (s : St) : St × Res :=
   if s.phase ≠ .writing then (s, ⟨decide (s.phase = .reading), false, false⟩)
   else wloop p (p.passes - 1) k s
@@ -409,7 +409,7 @@ structure St where
 
 /-- `_drain_recv_tls`: append the plaintext; on WANT_WRITE set the flag and
 arm both; on close_notify finish (the half-close rule is in `ConnSM`).
-mirrors flare/http/_reactor/conn_handle.mojo:479-520 @59bda50 -/
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._drain_recv_tls sha=fd8b067824b0 at=59bda50f -/
 def drain (s : St) (e : Edge) : St :=
   let s1 := { s with rbuf := s.rbuf ++ e.plain, inp := s.inp ++ e.plain }
   match e.rstop with
@@ -419,7 +419,7 @@ def drain (s : St) (e : Edge) : St :=
 
 /-- `_flush_write_buf_tls` plus the partial / flushed handling of
 `on_writable`: on WANT_READ set the flag and arm both.
-mirrors flare/http/_reactor/conn_handle.mojo:1213-1240,1314-1375 @59bda50 -/
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._flush_write_buf_tls+ConnHandle.on_writable sha=5e86ac79edb0 at=59bda50f -/
 def flush (s : St) (e : Edge) : St :=
   let x := min e.sent (s.wbuf.length - s.wpos)
   let s1 := { s with wpos := s.wpos + x, wire := s.wire ++ (s.wbuf.drop s.wpos).take x }
@@ -431,8 +431,8 @@ def flush (s : St) (e : Edge) : St :=
 
 /-- `_drive_h1`: `on_readable` drains while reading; while writing it
 returns `want_write` and the inline cycle runs `on_writable`.
-mirrors flare/http/_unified_reactor_impl.mojo:174-190 @59bda50,
-flare/http/_reactor/conn_handle.mojo:776-779 @59bda50 -/
+mirrors flare/http/_unified_reactor_impl.mojo#_drive_h1 sha=6001dd107a8a at=59bda50f,
+flare/http/_reactor/conn_handle.mojo#ConnHandle.on_readable sha=8aa82715ce9e at=59bda50f -/
 def readDriver (s : St) (e : Edge) : St :=
   match s.phase with
   | .reading => drain s e
@@ -441,7 +441,7 @@ def readDriver (s : St) (e : Edge) : St :=
 
 /-- `_drive_h1_writable`: `on_writable`; outside STATE_WRITING it only
 re-arms read.
-mirrors flare/http/_unified_reactor_impl.mojo:243-258 @59bda50 -/
+mirrors flare/http/_unified_reactor_impl.mojo#_drive_h1_writable sha=2454d2dd98b9 at=59bda50f -/
 def writeDriver (s : St) (e : Edge) : St :=
   match s.phase with
   | .writing => flush s e
@@ -450,7 +450,7 @@ def writeDriver (s : St) (e : Edge) : St :=
 /-- The reactor's KIND_H1 dispatch: clear the flag, then the read driver on
 a readable edge or on a writable edge with the flag set, else the write
 driver on a writable edge.
-mirrors flare/http/_unified_reactor_impl.mojo:812-831 @59bda50 -/
+mirrors flare/http/_unified_reactor_impl.mojo#_unified_handle_conn_event sha=00929b6ecdff at=59bda50f -/
 def route (s : St) (e : Edge) : St :=
   if s.done then s
   else

@@ -22,12 +22,10 @@ Model of `flare/udp/batch.mojo` (Linux only: `recvmmsg`, `sendmmsg`,
 * **Receiver buffers** (batch.mojo:176-218). Slot `i` of the data region is
   `[i*max_payload, (i+1)*max_payload)`; with exact arithmetic every slot
   lies inside the `capacity*max_payload` allocation and slots are disjoint
-  (`slot_in_bounds`, `slots_disjoint`). The size is a 64-bit `Int` product.
-  Before the fix (NET-11) only `> 0` was asserted, so the product could wrap
-  to a tiny allocation while each iovec still announced `max_payload` bytes
-  (`acceptsOld`, `allocSize_wraps`); the shipped constructor refuses
-  arguments whose product overflows (`accepts`), which makes the size exact
-  (`allocSize_fixed`) and covering (`covers_fixed`).
+  (`slot_in_bounds`, `slots_disjoint`). The size is a 64-bit `Int` product;
+  the constructor refuses arguments whose product overflows (`accepts`),
+  which makes the size exact (`allocSize_fixed`) and covering
+  (`covers_fixed`).
 -/
 namespace Flare.L2.UdpBatch
 
@@ -59,7 +57,7 @@ def mmsghdrF : List (Nat × Nat) := [(sizeOf msghdrF, 8), (4, 4)]
 def cmsghdrF : List (Nat × Nat) := [(8, 8), (4, 4), (4, 4)]
 
 /-- flare's comptime constants.
-mirrors flare/udp/batch.mojo:67-92 @59bda50 -/
+mirrors flare/udp/batch.mojo#_IOVEC+_MSGHDR+_MMSGHDR+_NAME+_OFF_NAME+_OFF_NAMELEN+_OFF_IOV+_OFF_IOVLEN+_OFF_CONTROL+_OFF_CONTROLLEN+_OFF_FLAGS+_OFF_MSGLEN+SOL_UDP+UDP_SEGMENT+_CMSG_HDR+_CMSG_DATA_OFF+_CMSG_LEN_GSO+_CMSG_SPACE_GSO sha=6d1470467cad at=59bda50f -/
 def IOVEC := 16
 def MSGHDR := 56
 def MMSGHDR := 64
@@ -95,7 +93,7 @@ def rd (buf : Bytes) (off k : Nat) : Nat := Flare.Bytes.leNat ((buf.drop off).ta
 /-- the 24 zeroed bytes after `_poke_u64(ctrl, 0, 18)`,
 `_poke_u32(ctrl, 8, 17)`, `_poke_u32(ctrl, 12, 103)`,
 `_poke_u16(ctrl, 16, seg)`.
-mirrors flare/udp/batch.mojo:412-420 -/
+mirrors flare/udp/batch.mojo#send_segmented sha=20195fd7a58a at=987ddc0f -/
 def gsoCtrl (seg : Nat) : Bytes :=
   [18, 0, 0, 0, 0, 0, 0, 0, 17, 0, 0, 0, 103, 0, 0, 0,
    UInt8.ofNat (seg % 256), UInt8.ofNat (seg / 256 % 256), 0, 0, 0, 0, 0, 0]
@@ -147,27 +145,18 @@ theorem slots_disjoint (mp i j : Nat) (hij : i < j) : i * mp + mp ≤ j * mp := 
 
 /-- the byte count passed to `_alloc_zeroed` for the data region: the Mojo
 `Int` (64-bit) product `capacity * max_payload`.
-mirrors flare/udp/batch.mojo:207 (fixed, NET-11) -/
+mirrors flare/udp/batch.mojo#BatchReceiver.__init__ sha=098e7df0712e at=987ddc0f (fixed, NET-11) -/
 def allocSize (cap mp : Int) : Int := (Int64.ofInt cap * Int64.ofInt mp).toInt
-
-/-- what flare checked before allocating, before the fix
-(flare/udp/batch.mojo:185-195 @59bda50) -/
-def acceptsOld (cap mp : Int) : Prop := 0 < cap ∧ 0 < mp
 
 /-- Spec: the region covers every slot `[i*mp, (i+1)*mp)`, `i < cap`. -/
 def Covers (cap mp : Int) : Prop := ∀ i : Int, 0 ≤ i → i < cap → (i + 1) * mp ≤ allocSize cap mp
-
-/-- **Overflow** (pre-fix check): `capacity = 16`, `max_payload = 2^60`
-passed `acceptsOld`, but the product wraps to 0. -/
-theorem allocSize_wraps : acceptsOld 16 (2 ^ 60) ∧ allocSize 16 (2 ^ 60) = 0 := by
-  refine ⟨⟨by decide, by decide⟩, by decide⟩
 
 def I64MAX : Int := 2 ^ 63 - 1
 
 /-- the shipped constructor checks: both arguments positive,
 `capacity <= Int.MAX // max_payload` and `capacity <= Int.MAX // 64`
 (`_MMSGHDR`, the largest per-slot array).
-mirrors flare/udp/batch.mojo:189-200 (fixed, NET-11) -/
+mirrors flare/udp/batch.mojo#BatchReceiver.__init__ sha=098e7df0712e at=987ddc0f (fixed, NET-11) -/
 def accepts (cap mp : Int) : Prop :=
   0 < cap ∧ 0 < mp ∧ cap ≤ I64MAX / mp ∧ cap ≤ I64MAX / 64
 

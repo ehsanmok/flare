@@ -14,7 +14,7 @@ Wire frame (big-endian): `| u32 payload_len | u64 request_id | u8 kind | payload
   an *incomplete* residual (`Incomplete`). `drain_sound` / `drain_complete`
   show `drain` computes exactly that decomposition, and `feed_chunking`
   is chunking independence in the `Flare.ChunkingIndependent` shape.
-* `feedMOld`: the real post-state when `feed` raises (used by `Flare.Bugs.NET_04`).
+* `feedM`: the real post-state when `feed` raises; `feedM_no_duplicates`.
 -/
 namespace Flare.L2.FrameMux
 open Flare
@@ -49,7 +49,7 @@ def enc (f : Frame) : Bytes :=
 theorem enc_length (f : Frame) : (enc f).length = 13 + f.payload.length := by
   simp [enc, be_length]; omega
 
-/-- mirrors flare/uds/frame_mux.mojo:97-111 @59bda50 -/
+/-- mirrors flare/uds/frame_mux.mojo#encode_frame sha=91cd043c8655 at=59bda50f -/
 def encodeFrame (rid : UInt64) (kind : UInt8) (p : Bytes) : Except String Bytes :=
   if p.length > MAX_FRAME_PAYLOAD then .error "encode_frame: payload exceeds MAX_FRAME_PAYLOAD"
   else .ok (enc ⟨rid, kind, p⟩)
@@ -65,7 +65,7 @@ def frameAt (bs : Bytes) (L : Nat) : Frame :=
 inductive DecErr | short | oversize
 deriving DecidableEq, Repr
 
-/-- mirrors flare/uds/frame_mux.mojo:114-130 @59bda50
+/-- mirrors flare/uds/frame_mux.mojo#decode_frame sha=93adf36f0c0d at=59bda50f
 (`ByteReader` raises on a short read; modelled as `DecErr.short`). -/
 def decodeFrame (bs : Bytes) : Except DecErr (Frame × Bytes) :=
   if bs.length < 4 then .error .short
@@ -145,7 +145,7 @@ theorem decode_rejects_oversize (bs : Bytes) (h4 : 4 ≤ bs.length)
 def errOversize : String := "FrameDemux: frame payload exceeds MAX_FRAME_PAYLOAD"
 
 /-- The `while True` loop of `feed`, on the bytes past the parse cursor.
-mirrors flare/uds/frame_mux.mojo:190-214 (fixed, NET-04) -/
+mirrors flare/uds/frame_mux.mojo#FrameDemux.feed sha=977983220a66 at=10a08863 (fixed, NET-04) -/
 def drain (bs : Bytes) (acc : List Frame) : Except String (List Frame × Bytes) :=
   if bs.length < 13 then .ok (acc, bs)
   else if hdrLen bs > MAX_FRAME_PAYLOAD then .error errOversize
@@ -155,12 +155,12 @@ termination_by bs.length
 decreasing_by simp; omega
 
 /-- `_peek_len`: big-endian u32 at offset `at`.
-mirrors flare/uds/frame_mux.mojo:155-163 @59bda50 -/
+mirrors flare/uds/frame_mux.mojo#FrameDemux._peek_len sha=e573e25930e9 at=59bda50f -/
 def peekLen (buf : Bytes) (at_ : Nat) : Nat := beDec ((buf.drop at_).take 4)
 
 /-- The loop over `(buf, consumed)` exactly as in Mojo: returns the final
 `consumed` and the routed frames, or raises.
-mirrors flare/uds/frame_mux.mojo:190-214 (fixed, NET-04) -/
+mirrors flare/uds/frame_mux.mojo#FrameDemux.feed sha=977983220a66 at=10a08863 (fixed, NET-04) -/
 def feedLoop (buf : Bytes) (consumed : Nat) (routed : List Frame) :
     Except String (Nat × List Frame) :=
   let avail := buf.length - consumed
@@ -209,7 +209,7 @@ structure St where
 deriving DecidableEq, Repr
 
 /-- `FrameDemux.feed` (success path compacts; a raise is `Except.error`).
-mirrors flare/uds/frame_mux.mojo:176-216 (fixed, NET-04) -/
+mirrors flare/uds/frame_mux.mojo#FrameDemux.feed sha=977983220a66 at=10a08863 (fixed, NET-04) -/
 def feed (s : St) (data : Bytes) : Except String St :=
   (feedLoop (s.buf ++ data) 0 s.routed).map fun p => ⟨(s.buf ++ data).drop p.1, p.2⟩
 
@@ -351,7 +351,7 @@ theorem drain_complete (fs : List Frame) (r : Bytes) (acc : List Frame)
 /-! ## Per-stream inboxes (`_route`, `poll`) -/
 
 /-- `_route`: append to the frame's own inbox.
-mirrors flare/uds/frame_mux.mojo:165-174 @59bda50 -/
+mirrors flare/uds/frame_mux.mojo#FrameDemux._route sha=24ccfe7e60bf at=59bda50f -/
 def route (m : UInt64 → List Frame) (f : Frame) : UInt64 → List Frame :=
   fun i => if i = f.rid then m i ++ [f] else m i
 
@@ -372,7 +372,7 @@ theorem routeAll_eq (m : UInt64 → List Frame) (fs : List Frame) (i : UInt64) :
     · simp [h, Ne.symm h]
 
 /-- `poll`: pop the oldest frame of a stream.
-mirrors flare/uds/frame_mux.mojo:229-243 -/
+mirrors flare/uds/frame_mux.mojo#FrameDemux.poll sha=9018a8406018 at=10a08863 -/
 def poll (m : UInt64 → List Frame) (i : UInt64) : Option Frame × (UInt64 → List Frame) :=
   match m i with
   | [] => (none, m)
@@ -386,7 +386,7 @@ theorem poll_fifo (m : UInt64 → List Frame) (fs : List Frame) (i : UInt64) (f 
 
 /-! ## `FrameMux.next_id` -/
 
-/-- mirrors flare/uds/frame_mux.mojo:285-289 (counter starts at 1) -/
+/-- mirrors flare/uds/frame_mux.mojo#FrameMux.next_id sha=6e92be452ab9 at=10a08863 (counter starts at 1) -/
 def nextId (n : UInt64) : UInt64 × UInt64 := (n, n + 1)
 
 /-- The `k`-th allocation (0-based) returns `k + 1` mod 2^64. -/
@@ -413,16 +413,14 @@ theorem nextId_injective (i j : Nat) (hi : i < 2 ^ 64 - 1) (hj : j < 2 ^ 64 - 1)
 theorem nextId_wraps : idAfter (2 ^ 64 - 1) 1 = 0 := by
   rw [idAfter_eq]; decide
 
-/-! ## Post-state when `feed` raises (used by `Flare.Bugs.NET_04`)
+/-! ## Post-state when `feed` raises
 
-When `feed` raises, the frames routed before the bad header stay routed. The
-shipped code (fixed, NET-04) drops the consumed prefix first, so `self.buf`
-starts at the bad header (`feedM`). Before the fix the `_compact` after the
-loop never ran and `self.buf = old ++ data` (`feedMOld`), so the next feed
-routed those frames again. -/
+When `feed` raises, the frames routed before the bad header stay routed;
+`feed` drops the consumed prefix first, so `self.buf` starts at the bad
+header (`feedM`) and no frame is routed twice. -/
 
 /-- The loop with the raise made explicit: `(ok?, consumed, routed)`.
-mirrors flare/uds/frame_mux.mojo:190-214 (fixed, NET-04) -/
+mirrors flare/uds/frame_mux.mojo#FrameDemux.feed sha=977983220a66 at=10a08863 (fixed, NET-04) -/
 def feedLoopM (buf : Bytes) (consumed : Nat) (routed : List Frame) :
     Bool × Nat × List Frame :=
   let avail := buf.length - consumed
@@ -439,20 +437,12 @@ decreasing_by omega
 
 /-- `feed` with the observable post-state on both paths: the consumed prefix
 is dropped before the raise too.
-mirrors flare/uds/frame_mux.mojo:176-216 (fixed, NET-04) -/
+mirrors flare/uds/frame_mux.mojo#FrameDemux.feed sha=977983220a66 at=10a08863 (fixed, NET-04) -/
 def feedM (s : St) (data : Bytes) : Bool × St :=
   let buf := s.buf ++ data
   match feedLoopM buf 0 s.routed with
   | (true, c, R) => (true, ⟨buf.drop c, R⟩)
   | (false, c, R) => (false, ⟨buf.drop c, R⟩)
-
-/-- Pre-fix `feed`: on the raise path the whole input stays buffered.
-(flare/uds/frame_mux.mojo:176-207 @59bda50) -/
-def feedMOld (s : St) (data : Bytes) : Bool × St :=
-  let buf := s.buf ++ data
-  match feedLoopM buf 0 s.routed with
-  | (true, c, R) => (true, ⟨buf.drop c, R⟩)
-  | (false, _, R) => (false, ⟨buf, R⟩)
 
 theorem feedLoopM_error (buf : Bytes) (c c' : Nat) (R R' : List Frame)
     (h : feedLoopM buf c R = (false, c', R')) :
@@ -472,15 +462,6 @@ theorem feedLoopM_error (buf : Bytes) (c c' : Nat) (R R' : List Frame)
         · simp [h3] at h
         · simp only [h3, if_false] at h
           exact ih _ (by omega) _ _ h rfl
-
-/-- On the pre-fix path the whole input, routed frames included, stays buffered. -/
-theorem feedMOld_error_keeps_routed (s s' : St) (data : Bytes) (h : feedMOld s data = (false, s')) :
-    s'.buf = s.buf ++ data := by
-  rcases hm : feedLoopM (s.buf ++ data) 0 s.routed with ⟨b, c, R⟩
-  simp only [feedMOld, hm] at h
-  cases b
-  · simp only [Prod.mk.injEq] at h; rw [← h.2]
-  · simp at h
 
 /-- With the shipped code, after a protocol error the buffer starts at the bad header,
 so every later feed raises at once and routes nothing: a frame is never
@@ -503,5 +484,18 @@ theorem feedM_error_stuck (s s' : St) (data d : Bytes) (h : feedM s data = (fals
       rw [if_neg (by omega), if_pos h2]
     simp [hb]
   · simp at h
+
+/-- Once a feed raises, no later feed routes anything, so no wire frame is
+ever routed twice (NET-04). -/
+theorem feedM_no_duplicates (s s' : St) (data : Bytes)
+    (h : feedM s data = (false, s')) (ds : List Bytes) :
+    (ds.foldl (fun st d => (feedM st d).2) s').routed = s'.routed := by
+  induction ds generalizing s s' data with
+  | nil => rfl
+  | cons d ds ih =>
+    simp only [List.foldl_cons]
+    have h2 := feedM_error_stuck s s' data d h
+    rw [h2]
+    exact ih s' _ d h2
 
 end Flare.L2.FrameMux

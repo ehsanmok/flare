@@ -16,7 +16,7 @@ Huffman round trip a peer's Huffman-coded literal relies on
 namespace Flare.L3.H2.Hpack
 open Flare.L1
 
-/-- flare's codecs. mirrors flare/http2/hpack.mojo:101-153 @59bda50 (integers) and
+/-- flare's codecs. mirrors flare/http2/hpack.mojo#decode_integer+encode_integer sha=9265f41d0fab at=59bda50f (integers) and
 flare/http/hpack_huffman_simd.mojo (`huffman_decode_simd`, via `Flare.L1.Huffman`) -/
 def real : Codec where
   encInt p v hi := HpackInt.encode v p hi

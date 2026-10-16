@@ -11,12 +11,10 @@ Byte-level model of flare's HTTP URL parser. Mojo `String`s are modelled as
 Pipeline (mirrors the Mojo control flow, step numbers as in the source):
 
 1. scheme = bytes before the first `"://"`, must be `http` or `https`;
-2. fragment = bytes after the **first** `#` (`_find`; the pre-fix code used the
-   last `#`, `splitFragmentOld`);
-3. authority = bytes before the first `/` or `?`; the rest is path-and-query
-   (pre-fix: only `/`, `splitAuthorityOld`);
+2. fragment = bytes after the **first** `#` (`_find`);
+3. authority = bytes before the first `/` or `?`; the rest is path-and-query;
 4. query = bytes after the first `?` of path-and-query;
-5. userinfo stripped through the **last** `@` (the pre-fix code used the first); then IPv6 `[..]` or
+5. userinfo stripped through the **last** `@`; then IPv6 `[..]` or
    `host[:port]` with the port after the **last** `:`.
 
 Spec side (RFC 3986 §3, §3.2, §3.2.2, §3.2.3), written independently:
@@ -30,11 +28,9 @@ Spec side (RFC 3986 §3, §3.2, §3.2.2, §3.2.3), written independently:
   (`HostNoAt`);
 * port = `*DIGIT` (flare additionally bounds it to `1..65535`).
 
-The `parseWith` combinator is parameterised by the three splitting steps so
-that the buggy pipeline (`parse`) and the fixed ones (`Flare.Bugs.APP_23`,
-`Flare.Bugs.APP_25`) share every other line. After the APP-23 and APP-25
-fixes `parse` uses the first-`#` fragment split, the `/`-or-`?` authority
-split and the last-`@` userinfo strip; `parseOld` is the pre-fix pipeline.
+The `parseWith` combinator is parameterised by the three splitting steps;
+`parse` instantiates it with the first-`#` fragment split, the `/`-or-`?`
+authority split and the last-`@` userinfo strip.
 -/
 namespace Flare.L4.Url
 open Flare
@@ -55,7 +51,7 @@ def sepB : Bytes := [58, 47, 47]
 
 /-! ## Search helpers -/
 
-/-- mirrors flare/http/url.mojo:218-238 @59bda50 (`_find`: first index `i`
+/-- mirrors flare/http/url.mojo#_find sha=e8c5062d5acd at=59bda50f (`_find`: first index `i`
 with `sub` a prefix of `s[i:]`; `-1` ↦ `none`; empty `sub` ↦ `0`). -/
 def find : Bytes → Bytes → Option Nat
   | [], sub => if sub = [] then some 0 else none
@@ -71,7 +67,7 @@ abbrev idxOf (b : UInt8) (s : Bytes) : Option Nat := idxWhere (· == b) s
 
 theorem idxOf_eq (b : UInt8) (s : Bytes) : idxOf b s = idxWhere (· == b) s := rfl
 
-/-- mirrors flare/http/url.mojo:241-261 @59bda50 (`_rfind`, used only with
+/-- mirrors flare/http/url.mojo#_rfind sha=b1d9a78b8c08 at=59bda50f (`_rfind`, used only with
 one-byte needles `"#"` and `":"`): index of the last occurrence. -/
 def rfindB (b : UInt8) : Bytes → Option Nat
   | [] => none
@@ -92,7 +88,7 @@ theorem find_single (b : UInt8) (s : Bytes) : find s [b] = idxOf b s := by
 
 /-! ## Port and default port -/
 
-/-- mirrors flare/http/url.mojo:264-269 @59bda50 -/
+/-- mirrors flare/http/url.mojo#_default_port sha=09b1173414dd at=59bda50f -/
 def defaultPort (scheme : Bytes) : Nat := if scheme = httpsB then 443 else 80
 
 def isDigit (c : UInt8) : Bool := 48 ≤ c && c ≤ 57
@@ -105,7 +101,7 @@ def digitsAcc : Nat → Bytes → Except String Nat
   | acc, c :: cs =>
     if c < 48 || c > 57 then .error "invalid port" else digitsAcc (acc * 10 + (c.toNat - 48)) cs
 
-/-- mirrors flare/http/url.mojo:272-299 @59bda50 -/
+/-- mirrors flare/http/url.mojo#_parse_port sha=06e203c840cc at=59bda50f -/
 def parsePort (s : Bytes) : Except String Nat :=
   if s.length = 0 then .error "empty port"
   else if s.length > 5 then .error "port too long"
@@ -154,21 +150,6 @@ def hostPort (scheme authority : Bytes) : Except String (Bytes × Nat) :=
     | some c => (parsePort (authority.drop (c + 1))).map (authority.take c, ·)
     | none => .ok (authority, defaultPort scheme)
 
-/-- flare/http/url.mojo:143-148 @59bda50 (pre-fix, APP-25): userinfo stripped
-through the **first** `@`. -/
-def stripUserinfoOld (a : Bytes) : Bytes :=
-  match idxOf cAt a with | some i => a.drop (i + 1) | none => a
-
-/-- flare/http/url.mojo:101-108 @59bda50 (pre-fix, APP-23): fragment after the
-**last** `#`. -/
-def splitFragmentOld (s : Bytes) : Bytes × Bytes :=
-  match rfindB cHash s with | some p => (s.take p, s.drop (p + 1)) | none => (s, [])
-
-/-- flare/http/url.mojo:110-123 @59bda50 (pre-fix, APP-23): authority ends at
-the first `/`. -/
-def splitAuthorityOld (s : Bytes) : Bytes × Bytes :=
-  match idxOf cSlash s with | none => (s, [cSlash]) | some p => (s.take p, s.drop p)
-
 /-- flare/http/url.mojo:125-140 @59bda50 -/
 def splitQuery (pq : Bytes) : Bytes × Bytes :=
   match idxOf cQ pq with | some q => (pq.take q, pq.drop (q + 1)) | none => (pq, [])
@@ -190,7 +171,7 @@ def parseRestWith (sf sa : Bytes → Bytes × Bytes) (strip : Bytes → Bytes)
     if host = [] then .error "missing host"
     else .ok ⟨scheme, host, port, path, query, fragment⟩
 
-/-- mirrors flare/http/url.mojo:73-197 @59bda50 (step 1, then `parseRestWith`). -/
+/-- mirrors flare/http/url.mojo#Url.parse sha=8f83d2e2e03d at=59bda50f (step 1, then `parseRestWith`). -/
 def parseWith (sf sa : Bytes → Bytes × Bytes) (strip : Bytes → Bytes) (raw : Bytes) :
     Except String Url :=
   match find raw sepB with
@@ -201,12 +182,12 @@ def parseWith (sf sa : Bytes → Bytes × Bytes) (strip : Bytes → Bytes) (raw 
     else parseRestWith sf sa strip scheme (raw.drop (se + 3))
 
 /-- Fragment starts at the **first** `#` (RFC 3986 §3.5, WHATWG).
-mirrors flare/http/url.mojo:101-109 (fixed, APP-23) -/
+mirrors flare/http/url.mojo#Url.parse sha=a7bdc8cf7ee9 at=e7e6d431 (fixed, APP-23) -/
 def splitFragment (s : Bytes) : Bytes × Bytes :=
   match idxOf cHash s with | some p => (s.take p, s.drop (p + 1)) | none => (s, [])
 
 /-- Authority ends at the first `/` **or `?`** (RFC 3986 §3.2).
-mirrors flare/http/url.mojo:111-135 (fixed, APP-23) -/
+mirrors flare/http/url.mojo#Url.parse sha=a7bdc8cf7ee9 at=e7e6d431 (fixed, APP-23) -/
 def splitAuthority (s : Bytes) : Bytes × Bytes :=
   match idxWhere (fun c => c == cSlash || c == cQ) s with
   | none => (s, [cSlash]) | some p => (s.take p, s.drop p)
@@ -215,19 +196,13 @@ def splitAuthority (s : Bytes) : Bytes × Bytes :=
 
 /-- Userinfo stripped through the **last** `@` (WHATWG, curl): `_rfind(authority,
 "@")`.
-mirrors flare/http/url.mojo:155-162 (fixed, APP-25) -/
+mirrors flare/http/url.mojo#Url.parse sha=11eddb276c82 at=4b1c9f56 (fixed, APP-25) -/
 def stripUserinfo (a : Bytes) : Bytes :=
   match rfindB cAt a with | some i => a.drop (i + 1) | none => a
 
-/-- mirrors flare/http/url.mojo:73-205 (fixed, APP-23, APP-25): `Url.parse` as
+/-- mirrors flare/http/url.mojo#Url.__init__+Url.parse sha=f12311797bf9 at=4b1c9f56 (fixed, APP-23, APP-25): `Url.parse` as
 shipped. -/
 def parse : Bytes → Except String Url := parseWith splitFragment splitAuthority stripUserinfo
-
-/-- mirrors flare/http/url.mojo:73-197 @59bda50: `Url.parse` before the
-APP-23 / APP-25 fixes (fragment at the last `#`, authority ends only at `/`,
-userinfo through the first `@`). -/
-def parseOld : Bytes → Except String Url :=
-  parseWith splitFragmentOld splitAuthorityOld stripUserinfoOld
 
 /-! ## Spec (RFC 3986 §3.2) -/
 
@@ -535,11 +510,6 @@ theorem fixed_authority_eq_spec (s : Bytes) :
   unfold specAuthority isAuthEnd
   congr 1; funext c; cases c == cSlash <;> cases c == cQ <;> cases c == cHash <;> rfl
 
-theorem stripUserinfoOld_infix (a : Bytes) : stripUserinfoOld a <:+: a := by
-  unfold stripUserinfoOld; split
-  · exact (List.drop_suffix _ _).isInfix
-  · exact List.infix_refl _
-
 theorem stripUserinfo_infix (a : Bytes) : stripUserinfo a <:+: a := by
   unfold stripUserinfo; split
   · exact (List.drop_suffix _ _).isInfix
@@ -612,68 +582,7 @@ theorem parse_spec (raw : Bytes) (u : Url) (e : parse raw = .ok u) :
   ⟨parseWith_fixedSplit_hostInAuthority _ stripUserinfo_infix raw u e,
    parseWith_fixedStrip_noAt _ _ raw u e⟩
 
-/-! ## The pre-fix parser agrees with the fixed one on clean inputs -/
-
-theorem idxWhere_congr (p q : UInt8 → Bool) (s : Bytes) (h : ∀ c ∈ s, p c = q c) :
-    idxWhere p s = idxWhere q s := by
-  induction s with
-  | nil => rfl
-  | cons c cs ih =>
-    simp only [List.mem_cons, forall_eq_or_imp] at h
-    simp [idxWhere, h.1, ih h.2]
-
-theorem idxWhere_none (p : UInt8 → Bool) (s : Bytes) (h : ∀ c ∈ s, p c = false) :
-    idxWhere p s = none := by
-  induction s with
-  | nil => rfl
-  | cons c cs ih =>
-    simp only [List.mem_cons, forall_eq_or_imp] at h
-    simp [idxWhere, h.1, ih h.2]
-
-theorem idxOf_eq_rfindB_of_count (b : UInt8) (a : Bytes) (h : a.count b ≤ 1) :
-    idxOf b a = rfindB b a := by
-  induction a with
-  | nil => rfl
-  | cons c cs ih =>
-    simp only [idxWhere, rfindB]
-    by_cases hc : c = b
-    · subst hc
-      have h0 : cs.count c = 0 := by simp at h; omega
-      have hn : c ∉ cs := List.count_eq_zero.mp h0
-      simp [(rfindB_none_iff c cs).2 hn]
-    · have h1 : cs.count b ≤ 1 := by
-        simp [List.count_cons] at h; simpa [hc] using h
-      have hcb : (c == b) = false := by simpa using hc
-      have ih' : idxWhere (· == b) cs = rfindB b cs := ih h1
-      rw [hcb, if_neg (by simp), ih']
-      cases rfindB b cs <;> simp [hc]
-
-/-- **Refinement on clean inputs.** If the text after `"://"` has no `?` and
-no `#`, and its RFC authority has at most one `@`, the pre-fix `Url.parse`
-gives exactly the shipped (spec-meeting) result. So the APP-23 / APP-25
-discrepancies need a `?`, a `#`, or two `@`s. -/
-theorem parseOld_eq_parse_of_clean (scheme rest : Bytes)
-    (hq : ∀ c ∈ rest, c ≠ cQ ∧ c ≠ cHash) (ha : (specAuthority rest).count cAt ≤ 1) :
-    parseRestWith splitFragmentOld splitAuthorityOld stripUserinfoOld scheme rest =
-      parseRestWith splitFragment splitAuthority stripUserinfo scheme rest := by
-  have hnh : cHash ∉ rest := fun hm => (hq _ hm).2 rfl
-  have f1 : splitFragmentOld rest = splitFragment rest := by
-    unfold splitFragmentOld splitFragment
-    rw [(rfindB_none_iff _ _).2 hnh, idxOf_eq, idxWhere_none]
-    intro c hc; simpa using (hq c hc).2
-  have f2 : splitAuthorityOld rest = splitAuthority rest := by
-    unfold splitAuthorityOld splitAuthority
-    rw [idxOf_eq, idxWhere_congr (· == cSlash) (fun c => c == cSlash || c == cQ) rest]
-    intro c hc; simp [(hq c hc).1]
-  have f1' : (splitFragment rest).1 = rest := by
-    unfold splitFragment; rw [idxOf_eq, idxWhere_none]; intro c hc; simpa using (hq c hc).2
-  have hauth : (splitAuthority rest).1 = specAuthority rest := by
-    have := fixed_authority_eq_spec rest; rwa [f1'] at this
-  have f3 : stripUserinfoOld (splitAuthority rest).1 = stripUserinfo (splitAuthority rest).1 := by
-    unfold stripUserinfoOld stripUserinfo
-    rw [idxOf_eq_rfindB_of_count _ _ (by rw [hauth]; exact ha)]
-  unfold parseRestWith
-  simp only [f1, f1', f2, f3]
+/-! ## Scheme prefix -/
 
 /-- The scheme prefix: `Url.parse ("http://" ++ rest)` runs the pipeline on
 `rest`. -/

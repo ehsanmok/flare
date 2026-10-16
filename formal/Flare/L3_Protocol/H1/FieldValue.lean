@@ -4,37 +4,31 @@ import Flare.L1_Encoding.Utf8
 /-!
 # Field-value validation and the `String` invariant
 
-`_parse_http_request_bytes` checks every byte of a header value
-(`flare/http/_server/parse.mojo:277-285`) and then keeps the value as a Mojo
+`_parse_http_request_bytes` checks every byte of a header value, and of
+every obs-fold continuation, with `_check_field_value` and then keeps the value as a Mojo
 `String` built by `_ascii_unchecked_string`, whose contract
 (`flare/http/proto/ascii.mojo:63-70`) is "every byte `< 0x80`".
 
 * `strict_value_ascii`, `strict_value_utf8`: in strict mode every accepted
   value is ASCII, so the contract holds and the `String` is valid UTF-8.
-* With `accept_obs_text_in_field_value` it is not (`H1-05`). `valueAccepted`
-  (the shipped check since the H1-05 fix) adds a UTF-8 check:
-  `fixed_value_utf8`. `valueAcceptedOld` is the byte check alone, as it was
-  before the fix.
+* With `accept_obs_text_in_field_value` the byte check alone is not enough;
+  `valueAccepted` adds a UTF-8 check: `fixed_value_utf8`.
 -/
 namespace Flare.L3.H1.FieldValue
 open Flare Flare.L3.H1.Text
 
 /-- One value byte: NUL/LF/CR never; `≥ 0x80` only under obs-text; else
 field-vchar.
-mirrors flare/http/_server/parse.mojo:277-285 @59bda50 -/
+mirrors flare/http/_server/parse.mojo#_check_field_value sha=41e444ac2cbf at=ea1b9282 -/
 def byteOk (obsText : Bool) (c : UInt8) : Bool :=
   !(c == 0 || c == 10 || c == 13) && (if 128 ≤ c then obsText else isFieldVchar c)
 
-/-- mirrors flare/http/_server/parse.mojo:277-285 @59bda50 -/
+/-- mirrors flare/http/_server/parse.mojo#_check_field_value sha=41e444ac2cbf at=ea1b9282 -/
 def valueOk (obsText : Bool) (v : Bytes) : Bool := v.all (byteOk obsText)
-
-/-- The value acceptance before the `H1-05` fix: the byte check alone. Kept
-for the counterexample. -/
-abbrev valueAcceptedOld := valueOk
 
 /-- The shipped value acceptance: the byte check, and a value with an obs-text
 byte must be valid UTF-8 (an ASCII value always is).
-mirrors flare/http/_server/parse.mojo:281-296 (fixed, H1-05) -/
+mirrors flare/http/_server/parse.mojo#_check_field_value+_parse_http_request_bytes sha=3d43fbdb8d2b at=ea1b9282 (fixed, H1-05) -/
 def valueAccepted (obsText : Bool) (v : Bytes) : Bool := valueOk obsText v && Flare.L1.Utf8.isValidUtf8 v
 
 /-- Every accepted value is valid UTF-8. -/

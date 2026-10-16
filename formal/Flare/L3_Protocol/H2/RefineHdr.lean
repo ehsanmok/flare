@@ -4,7 +4,7 @@ import Flare.L3_Protocol.H2.RefineData
 # §5.1 refinement: header blocks
 
 HEADERS (single-frame or opening a block), CONTINUATION, and the commit
-of a completed block (`_commit_header_block`), for the fixed model `F`.
+of a completed block (`_commit_header_block`).
 A block that spans frames is one HEADERS for the spec: `hdrBegin` leaves
 the stream as it was (or, for a new stream that is refused, closed), and
 the CONTINUATION with END_HEADERS performs the transition (`hdrEnd`).
@@ -168,15 +168,18 @@ theorem cgood_commitTail (c c1 : Conn) (k : Nat) (s0 s : Stream) (isTr es : Bool
     (h3 : s0.state = .idle ∨ s0.state = .open_ ∨ s0.state = .hcl)
     (hcli : c.isClient = true → s0.state ≠ .idle) (hsrv : c.isClient = false → s0.state ≠ .hcl)
     (hnr : k ∉ c.resetByUs) :
-    CGood c k es (commitTail F c1 k s isTr es hdrs) := by
+    CGood c k es (commitTail c1 k s isTr es hdrs) := by
   have hcl1 : c1.isClient = c.isClient := by have := congrArg IV.isClient hiv; simpa [iv] using this
   unfold commitTail
-  simp only [F, Bool.false_eq_true, false_and, Bool.false_and, if_false, hcl1]
-  exact cgood_tail_gen c c1 k s0 _ es _ hP h0 hk hiv hs0 hst h3 hcli hsrv hnr
+  simp only [hcl1]
+  by_cases hx : (if isTr = true then s.contentLength
+      else if (c.isClient && !s.bodyAllowed) = true then -1 else declaredCL hdrs) = -2
+  · rw [if_pos hx]; exact cgood_rstClose c c1 k _ _ es hP h0 hk hiv
+  · rw [if_neg hx]; exact cgood_tail_gen c c1 k s0 _ es _ hP h0 hk hiv hs0 hst h3 hcli hsrv hnr
 
 theorem cgood_commit (dec : Dec) (c : Conn) (k : Nat) (hP : Inv { c with continuing := k })
     (h0 : c.continuing = 0) (hk0 : k ≠ 0) (hg : c.goawaySent = false) :
-    CGood c k c.blockES (commit F dec c k) := by
+    CGood c k c.blockES (commit dec c k) := by
   unfold commit
   simp only []
   split
@@ -394,7 +397,7 @@ theorem sgood_hdr_commit (dec : Dec) (c0 Y : Conn) (k : Nat) (es : Bool) (hP : I
     (hstr : strmOK (abs c0 k) (.hdr es) = true)
     (hok : ∀ s s', get Y k = some s → okPost true true (ofSt s.state) (.hdrEnd es) s' = true →
       okPost (pid c0 k) (room c0) (abs c0 k) (.hdr es) s' = true) :
-    SGood c0 k (.hdr es) (commit F dec Y k) := by
+    SGood c0 k (.hdr es) (commit dec Y k) := by
   have := cgood_commit dec Y k hP h0 hk0 hg
   rw [hes] at this
   exact cgood_sgood c0 Y k es _ _ this hk hoth hstr hok
@@ -407,7 +410,7 @@ theorem sgood_headersOpen (dec : Dec) (c0 c1 : Conn) (f : Fr) (refuse : Nat)
         abs c0 f.sid = ofSt p.state ∧ (refuse ≠ 0 → p.state = .open_)) ∨
       (get c1 f.sid = none ∧ abs c0 f.sid = .idle ∧ pid c0 f.sid = true ∧ c1.isClient = false ∧
         f.sid ∉ c1.resetByUs ∧ (refuse = 0 → room c0 = true))) :
-    SGood c0 f.sid (if f.eh then .hdr f.f1 else .hdrBegin) (headersOpen F dec c1 f refuse) := by
+    SGood c0 f.sid (if f.eh then .hdr f.f1 else .hdrBegin) (headersOpen dec c1 f refuse) := by
   have hk0 : f.sid ≠ 0 := by unfold keyOK at hk; omega
   have hI2 : Inv { c1 with block := f.frag, blockES := f.f1, blockRefuse := refuse, blockConts := 0 } :=
     inv_congr (c := { c1 with blockRefuse := refuse }) rfl (inv_setRefuse c1 refuse hI1 h01 hcli)
@@ -493,7 +496,7 @@ theorem sgood_headersOpen (dec : Dec) (c0 c1 : Conn) (f : Fr) (refuse : Nat)
       · have := cgood_commit dec c2 f.sid hP hc02 hk0 hg2
         rw [hes2] at this
         unfold CGood at this; unfold SGood
-        generalize verdict (commit F dec c2 f.sid).2 f.sid = v at this ⊢
+        generalize verdict (commit dec c2 f.sid).2 f.sid = v at this ⊢
         cases v with
         | conn e => unfold CGoodV at this; unfold SGoodV; simp [this]
         | strm e =>
@@ -510,7 +513,7 @@ theorem sgood_headersOpen (dec : Dec) (c0 c1 : Conn) (f : Fr) (refuse : Nat)
 
 theorem sgood_cont (dec : Dec) (c : Conn) (f : Fr) (hI : Inv c) (hg : c.goawaySent = false)
     (hc : c.continuing ≠ 0) (hty : f.ty = tCONT) (hs : f.sid = c.continuing) :
-    SGood c f.sid (if f.eh then .hdrEnd c.blockES else .contMid) (contBranch F dec c f) := by
+    SGood c f.sid (if f.eh then .hdrEnd c.blockES else .contMid) (contBranch dec c f) := by
   have hcond : ¬((decide (f.ty ≠ tCONT) || decide (f.sid ≠ c.continuing)) = true) := by simp [hty, hs]
   have hconn : ∀ (c' : Conn) (e : Nat) (rk : RK), c'.goawaySent = false → connAny e = true →
       SGood c f.sid rk (connErr c' e) := by
@@ -561,17 +564,17 @@ theorem inv_bump (c : Conn) (k : Nat) (hI : Inv c) (h0 : c.continuing = 0) (hs :
   · intro a; exact absurd h0 a
   · intro j hj; have := rbu j hj
     unfold abs at this ⊢
-    show (match get c j with | some s => ofSt s.state | none => if idleAbs { c with lastPeer := k } j then _ else _) = _
+    show (match get c j with | some s => ofSt s.state | none => if isIdleId { c with lastPeer := k } j then _ else _) = _
     cases hg : get c j with
     | some s => rw [hg] at this; exact this
     | none =>
       rw [hg] at this; simp only at this ⊢
-      have e : idleAbs c j = false := by
-        cases h' : idleAbs c j
+      have e : isIdleId c j = false := by
+        cases h' : isIdleId c j
         · rfl
         · rw [h'] at this; cases this
-      have e2 : idleAbs { c with lastPeer := k } j = false := by
-        unfold idleAbs at e ⊢; simp only [hs, Bool.false_eq_true, if_false] at e ⊢
+      have e2 : isIdleId { c with lastPeer := k } j = false := by
+        unfold isIdleId at e ⊢; simp only [hs, Bool.false_eq_true, if_false] at e ⊢
         simp at e ⊢; omega
       rw [e2]; rfl
 
@@ -583,7 +586,7 @@ theorem others_bump (c : Conn) (k : Nat) (hs : c.isClient = false) (hk : k > c.l
   | some s => left; rw [abs_some (c := { c with lastPeer := k }) (by rw [hg', hg]), abs_some hg]
   | none =>
     rw [abs_none (c := { c with lastPeer := k }) (by rw [hg', hg]), abs_none hg]
-    unfold idleAbs; simp only [hs, Bool.false_eq_true, if_false]
+    unfold isIdleId; simp only [hs, Bool.false_eq_true, if_false]
     by_cases h1 : j > k ∨ j % 2 = 0
     · left
       have e1 : (decide (j > k) || j % 2 == 0) = true := by simp; omega
@@ -599,15 +602,15 @@ theorem others_bump (c : Conn) (k : Nat) (hs : c.isClient = false) (hk : k > c.l
         have e2 : (decide (j > c.lastPeer) || j % 2 == 0) = false := by simp; omega
         rw [e1, e2]
 
-theorem dispatch_headers (dec : Dec) (c : Conn) (f : Fr) (fx : Fix) (hty : f.ty = tHEADERS) :
-    dispatch fx dec c f = headersH fx dec c f := by
+theorem dispatch_headers (dec : Dec) (c : Conn) (f : Fr) (hty : f.ty = tHEADERS) :
+    dispatch dec c f = headersH dec c f := by
   unfold dispatch; simp [hty, tSETTINGS, tPING, tWU, tHEADERS]
 
 /-- HEADERS on a stream other than 0 while no block is open, after the
 frame-shape and size checks (which HEADERS passes). -/
 theorem sgood_headers (dec : Dec) (c0 : Conn) (f : Fr) (r : Conn × List Out) (hI : Inv c0)
     (hg : c0.goawaySent = false) (h0 : c0.continuing = 0) (hty : f.ty = tHEADERS) (hk0 : f.sid ≠ 0)
-    (h : (match idCheck F c0 f with | .inl r => Except.ok r | .inr c => dispatch F dec c f) = .ok r) :
+    (h : (match idCheck c0 f with | .inl r => Except.ok r | .inr c => dispatch dec c f) = .ok r) :
     SGood c0 f.sid (if f.eh then .hdr f.f1 else .hdrBegin) r := by
   have hconn : ∀ (c' : Conn) (e : Nat), c'.goawaySent = false →
       (connAny e || connCodes (pid c0 f.sid) (abs c0 f.sid) (if f.eh then .hdr f.f1 else .hdrBegin) e) = true →
@@ -634,7 +637,7 @@ theorem sgood_headers (dec : Dec) (c0 : Conn) (f : Fr) (r : Conn × List Out) (h
       (get c0 f.sid = none → c0.isClient = false → abs c0 f.sid = .idle ∧ pid c0 f.sid = true ∧
         keyOK c1 f.sid ∧ f.sid ∉ c1.resetByUs ∧ activeCount c1 = activeCount c0 ∧
         c1.maxConcurrent = c0.maxConcurrent) →
-      headersH F dec c1 f = .ok r → SGood c0 f.sid (if f.eh then .hdr f.f1 else .hdrBegin) r := by
+      headersH dec c1 f = .ok r → SGood c0 f.sid (if f.eh then .hdr f.f1 else .hdrBegin) r := by
     intro c1 hI1 h01 hg1 hget hcl hk1 hoth hnew hh
     unfold headersH at hh
     rw [if_neg hk0] at hh
@@ -651,11 +654,9 @@ theorem sgood_headers (dec : Dec) (c0 : Conn) (f : Fr) (r : Conn × List Out) (h
         apply hconn _ _ hg1; rw [ha0, hcl0]; cases f.eh <;> rfl
       rw [if_neg hcl0] at hh
       by_cases hcr : p.state = .hcr
-      · have : ((!c1.isClient || F.h2_14) && decide (p.state = St.hcr)) = true := by simp [F, hcr]
-        rw [if_pos this] at hh; simp only [Except.ok.injEq] at hh; subst hh
+      · rw [if_pos hcr] at hh; simp only [Except.ok.injEq] at hh; subst hh
         apply hconn _ _ hg1; rw [ha0, hcr]; cases f.eh <;> rfl
-      have : ¬((!c1.isClient || F.h2_14) && decide (p.state = St.hcr)) = true := by simp [F, hcr]
-      rw [if_neg this] at hh
+      rw [if_neg hcr] at hh
       have hst : p.state = .open_ ∨ p.state = .hcl := by
         cases hps : p.state <;> simp_all
       have hcc' : connCodes (pid c0 f.sid) (abs c0 f.sid) (if f.eh then .hdr f.f1 else .hdrBegin) 1 = true :=
@@ -699,14 +700,14 @@ theorem sgood_headers (dec : Dec) (c0 : Conn) (f : Fr) (r : Conn × List Out) (h
         · right
           refine ⟨hn1, ha0, hpid, hc1, hnr, ?_⟩
           intro hr
-          unfold headersRefuse at hr; simp only [hm, hc1, F] at hr
+          unfold headersRefuse at hr; simp only [hm, hc1] at hr
           unfold room; rw [hc]; simp only [Bool.false_or, decide_eq_true_eq]
           split at hr
           · simp [eREFUSED] at hr
           · rename_i hh; simp at hh; rw [← hact, ← hmax]; omega
       · have hc1 : c1.isClient = true := by rw [hcl, hc]
         have hm : mem c1 f.sid = false := by simp [mem, hget, hp]
-        simp only [hc1, hm, F, Bool.not_false, Bool.and_self, if_true, Except.ok.injEq] at hh
+        simp only [hc1, hm, Bool.not_false, Bool.and_self, if_true, Except.ok.injEq] at hh
         subst hh
         apply hconn _ _ hg1
         rw [abs_none hp]
@@ -715,12 +716,12 @@ theorem sgood_headers (dec : Dec) (c0 : Conn) (f : Fr) (r : Conn × List Out) (h
   -- idCheck
   have hpe : ∀ s, get c0 f.sid = some s → f.sid % 2 = 1 := fun s hs => (hI.keys _ s hs).1
   cases hc : c0.isClient
-  · have hid : idCheck F c0 f =
+  · have hid : idCheck c0 f =
         (if f.sid ≠ 0 && f.sid % 2 = 0 then .inl (connErr c0 ePROTOCOL)
          else if decide (f.sid ≤ c0.lastPeer) && decide (0 < c0.lastPeer) && !mem c0 f.sid then
            .inl (connErr c0 ePROTOCOL)
          else .inr (if f.sid > c0.lastPeer then { c0 with lastPeer := f.sid } else c0)) := by
-      unfold idCheck; simp [hty, hc, F]
+      unfold idCheck; simp [hty, hc]
     rw [hid] at h
     by_cases hev : f.sid % 2 = 0
     · rw [if_pos (by simp [hk0, hev])] at h; simp only [Except.ok.injEq] at h; subst h
@@ -729,29 +730,29 @@ theorem sgood_headers (dec : Dec) (c0 : Conn) (f : Fr) (r : Conn × List Out) (h
         cases hs : get c0 f.sid with
         | none => rfl
         | some s => have := hpe s hs; omega
-      rw [abs_none hn]; unfold idleAbs; rw [hc]; simp [hev]; cases f.eh <;> simp [connCodes]
+      rw [abs_none hn]; unfold isIdleId; rw [hc]; simp [hev]; cases f.eh <;> simp [connCodes]
     rw [if_neg (by simp [hev])] at h
     by_cases hle : f.sid ≤ c0.lastPeer ∧ mem c0 f.sid = false
     · have hlp : 0 < c0.lastPeer := by omega
       rw [if_pos (by simp [hle.1, hle.2, hlp])] at h; simp only [Except.ok.injEq] at h; subst h
       apply hconn _ _ hg
       have hn : get c0 f.sid = none := by simpa [mem] using hle.2
-      rw [abs_none hn]; unfold idleAbs; rw [hc]
+      rw [abs_none hn]; unfold isIdleId; rw [hc]
       have : (decide (f.sid > c0.lastPeer) || f.sid % 2 == 0) = false := by simp; omega
       rw [this]; simp only [Bool.false_eq_true, if_false]; cases f.eh <;> rfl
     rw [if_neg (by intro hb; apply hle; simp at hb; exact ⟨hb.1.1, hb.2⟩)] at h
     simp only [] at h
-    rw [dispatch_headers dec _ f F hty] at h
+    rw [dispatch_headers dec _ f hty] at h
     by_cases hgt : f.sid > c0.lastPeer
     · rw [if_pos hgt] at h
       apply post _ (inv_bump c0 f.sid hI h0 hc hgt) h0 hg rfl rfl _ (others_bump c0 f.sid hc hgt) _ h
       · left; unfold keyOK; simp only [hc, Bool.false_eq_true, if_false]; omega
       · intro hn _
         refine ⟨?_, ?_, ?_, ?_, rfl, rfl⟩
-        · rw [abs_none hn]; unfold idleAbs; rw [hc]; simp; omega
+        · rw [abs_none hn]; unfold isIdleId; rw [hc]; simp; omega
         · simp [pid, peerId, hc]; omega
         · unfold keyOK; simp only [hc, Bool.false_eq_true, if_false]; omega
-        · intro hr; have := hI.rbu _ hr; rw [abs_none hn] at this; unfold idleAbs at this; rw [hc] at this
+        · intro hr; have := hI.rbu _ hr; rw [abs_none hn] at this; unfold isIdleId at this; rw [hc] at this
           simp at this; omega
     · rw [if_neg hgt] at h
       apply post _ hI h0 hg rfl rfl _ (others_refl _ _) _ h
@@ -760,9 +761,9 @@ theorem sgood_headers (dec : Dec) (c0 : Conn) (f : Fr) (r : Conn × List Out) (h
         | some s => left; exact hI.keys _ s hs
       · intro hn _
         exfalso; apply hle; exact ⟨by omega, by simp [mem, hn]⟩
-  · have hid : idCheck F c0 f = .inr c0 := by unfold idCheck; simp [hc]
+  · have hid : idCheck c0 f = .inr c0 := by unfold idCheck; simp [hc]
     rw [hid] at h; simp only [] at h
-    rw [dispatch_headers dec _ f F hty] at h
+    rw [dispatch_headers dec _ f hty] at h
     apply post _ hI h0 hg rfl rfl _ (others_refl _ _) _ h
     · cases hs : get c0 f.sid with
       | none => right; rfl

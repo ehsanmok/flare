@@ -249,6 +249,7 @@ theorem code_inj (s t : Nat) (hs : s < 257) (ht : t < 257) (h : code s = code t)
 
 /-! ## Spec encoder -/
 
+/-- [spec] Concatenated codes of the input symbols. -/
 def encodeBits (input : Bytes) : List Bool := input.flatMap fun b => codeBits b.toNat
 
 /-- Number of 1-bits that complete a bit string of length `n` to a byte. -/
@@ -256,7 +257,7 @@ def padLen (n : Nat) : Nat := (8 - n % 8) % 8
 
 def padBits (r : List Bool) : List Bool := r ++ List.replicate (padLen r.length) true
 
-/-- RFC 7541 §5.2 Huffman encoding of a string literal. -/
+/-- [spec] RFC 7541 §5.2 Huffman encoding of a string literal. -/
 def encode (input : Bytes) : Bytes := pack (padBits (encodeBits input))
 
 theorem padBits_length (r : List Bool) : (padBits r).length % 8 = 0 := by
@@ -427,7 +428,7 @@ theorem matchSym_none_length (r : List Bool) (h : matchSym r = none) : r.length 
     rw [h] at e; cases e
   · omega
 
-/-- RFC 7541 §5.2 decoding of a bit string: emitted bytes, then the error
+/-- [spec] RFC 7541 §5.2 decoding of a bit string: emitted bytes, then the error
 (if any) that stopped decoding. -/
 def decodeBits (r : List Bool) : Bytes × Option Error :=
   match _h : matchSym r with
@@ -445,8 +446,10 @@ decreasing_by
   have := this.2.1
   simp; omega
 
+/-- [spec] Decode a whole string literal. -/
 def decodeFull (input : Bytes) : Bytes × Option Error := decodeBits (unpack input)
 
+/-- [spec] -/
 def decode (input : Bytes) : Option Bytes :=
   match decodeFull input with
   | (out, none) => some out
@@ -686,14 +689,14 @@ theorem mask_val (bits : UInt64) (buf : List Bool) (hb : bits.toNat = val buf) (
 
 /-! ## Impl: table accessors and the canonical decode tables -/
 
-/-- mirrors flare/http/hpack_huffman.mojo:119-641 @59bda50 (`_hpack_table_code`) -/
+/-- mirrors flare/http/hpack_huffman.mojo#_hpack_table_code sha=46fb66ef65d2 at=59bda50f (`_hpack_table_code`) -/
 def tableCode (s : Nat) : Nat := (code s).1
 
-/-- mirrors flare/http/hpack_huffman.mojo:643-667 @59bda50 (`_hpack_table_length`;
+/-- mirrors flare/http/hpack_huffman.mojo#_hpack_table_length sha=a171f00cc8f9 at=59bda50f (`_hpack_table_length`;
 equal to the hex-string decoder `tableLengthImpl` on `0..256` by `tableLengthImpl_eq`) -/
 def tableLength (s : Nat) : Nat := (code s).2
 
-/-- mirrors flare/http/hpack_huffman.mojo:744-764 @59bda50 (`_make_canon_table`) -/
+/-- mirrors flare/http/hpack_huffman.mojo#_make_canon_table sha=44d0832797b0 at=59bda50f (`_make_canon_table`) -/
 def canonTableImpl : List Int :=
   let step (acc : List Int × Int) (L : Nat) : List Int × Int :=
     let fc := (List.range 257).foldl (fun (fc : Int × Int) sym =>
@@ -704,7 +707,7 @@ def canonTableImpl : List Int :=
     (((acc.1.set L (if fc.1 ≥ 0 then fc.1 else 0)).set (31 + L) fc.2).set (62 + L) acc.2, acc.2 + fc.2)
   ((List.range 31).foldl step (List.replicate 93 0, 0)).1
 
-/-- mirrors flare/http/hpack_huffman.mojo:767-776 @59bda50 (`_make_canon_syms`) -/
+/-- mirrors flare/http/hpack_huffman.mojo#_make_canon_syms sha=d377da70e2eb at=59bda50f (`_make_canon_syms`) -/
 def canonSymsImpl : List Int :=
   let t := canonTableImpl
   (List.range 257).foldl (fun out sym =>
@@ -738,7 +741,7 @@ theorem canonTable_eq : canonTableImpl = CT := by decide +kernel
 
 theorem canonSyms_eq : canonSymsImpl = CS := by decide +kernel
 
-/-- mirrors flare/http/hpack_huffman.mojo:783-807 @59bda50 (`_build_decode_lookup`) -/
+/-- mirrors flare/http/hpack_huffman.mojo#_build_decode_lookup sha=0a17218f960a at=59bda50f (`_build_decode_lookup`) -/
 def lookupImpl (c : Int) (L : Nat) : Int :=
   if L < 5 ∨ 30 < L then -1
   else
@@ -788,7 +791,7 @@ theorem lookupImpl_spec (c L : Nat) (h1 : 5 ≤ L) (h2 : L ≤ 30) :
 /-! ## Impl: scalar decoder -/
 
 /-- `for clen in Ls: if nbits < clen: break; ...` returning the first match.
-mirrors flare/http/hpack_huffman.mojo:854-870 @59bda50 -/
+mirrors flare/http/hpack_huffman.mojo#huffman_decode sha=2be33026c518 at=59bda50f -/
 def tryLens (bits : UInt64) (nbits : Nat) : List Nat → Option (Int × Nat)
   | [] => none
   | clen :: rest =>
@@ -828,7 +831,7 @@ theorem tryLens_eq (bits : UInt64) (buf : List Bool) (hb : bits.toNat = val buf)
 theorem lens_bounds : ∀ L ∈ LENS, 5 ≤ L ∧ L ≤ 30 := fun L h => (mem_lens L).mp h
 
 /-- The inner `while True` loop: decode symbols while one matches.
-mirrors flare/http/hpack_huffman.mojo:852-872 @59bda50 -/
+mirrors flare/http/hpack_huffman.mojo#huffman_decode sha=2be33026c518 at=59bda50f -/
 def drain (bits : UInt64) (nbits : Nat) (out : Bytes) : UInt64 × Nat × Bytes × Option Error :=
   match _h : tryLens bits nbits LENS with
   | none => (bits, nbits, out, none)
@@ -935,7 +938,7 @@ theorem drain_spec (buf : List Bool) (bits : UInt64) (out : Bytes) (hb : bits.to
           rw [decodeBits_step buf rest s clen hms hs]; exact ih' rest
 
 /-- The final padding checks.
-mirrors flare/http/hpack_huffman.mojo:873-880 @59bda50 -/
+mirrors flare/http/hpack_huffman.mojo#huffman_decode sha=2be33026c518 at=59bda50f -/
 def finalCheck (bits : UInt64) (nbits : Nat) (out : Bytes) : Bytes × Option Error :=
   if 7 < nbits then (out, some .paddingTooLong)
   else if 0 < nbits ∧ bits ≠ UInt64.ofNat (2 ^ nbits - 1) then (out, some .invalidPadding)
@@ -963,7 +966,7 @@ theorem finalCheck_spec (buf : List Bool) (bits : UInt64) (out : Bytes) (hb : bi
       rw [if_pos ⟨h0, by rw [eq]; exact ha⟩, if_neg ha]; simp [pre]
 
 /-- The outer `while i < n` loop.
-mirrors flare/http/hpack_huffman.mojo:839-880 @59bda50 -/
+mirrors flare/http/hpack_huffman.mojo#huffman_decode sha=2be33026c518 at=59bda50f -/
 def decodeLoop (bits : UInt64) (nbits : Nat) (out : Bytes) : Bytes → Bytes × Option Error
   | [] => finalCheck bits nbits out
   | b :: bs =>
@@ -973,7 +976,7 @@ def decodeLoop (bits : UInt64) (nbits : Nat) (out : Bytes) : Bytes → Bytes × 
 
 /-- `huffman_decode(input, output)` with `output` initially empty; returns
 the bytes appended and the `HuffmanError` raised, if any.
-mirrors flare/http/hpack_huffman.mojo:820-880 @59bda50 -/
+mirrors flare/http/hpack_huffman.mojo#huffman_decode sha=2be33026c518 at=59bda50f -/
 def decodeImpl (input : Bytes) : Bytes × Option Error := decodeLoop 0 0 [] input
 
 theorem push_byte (bits : UInt64) (buf : List Bool) (b : UInt8) (hb : bits.toNat = val buf)
@@ -1020,14 +1023,14 @@ theorem decodeImpl_eq (input : Bytes) : decodeImpl input = decodeFull input := b
 /-! ## Impl: encoder -/
 
 /-- `while nbits >= 8: nbits -= 8; output.append(UInt8(bits >> nbits & 0xFF))`
-mirrors flare/http/hpack_huffman.mojo:724-727 @59bda50 -/
+mirrors flare/http/hpack_huffman.mojo#huffman_encode sha=6c1dab935f33 at=59bda50f -/
 def flush (bits : UInt64) (nbits : Nat) (out : Bytes) : Nat × Bytes :=
   if 8 ≤ nbits then
     flush bits (nbits - 8) (out ++ [((bits >>> UInt64.ofNat (nbits - 8)) &&& 0xFF).toUInt8])
   else (nbits, out)
 termination_by nbits
 
-/-- mirrors flare/http/hpack_huffman.mojo:711-737 @59bda50 -/
+/-- mirrors flare/http/hpack_huffman.mojo#huffman_encode sha=6c1dab935f33 at=59bda50f -/
 def encodeLoop (bits : UInt64) (nbits : Nat) (out : Bytes) : Bytes → Bytes
   | [] =>
     if 0 < nbits then
@@ -1042,10 +1045,10 @@ def encodeLoop (bits : UInt64) (nbits : Nat) (out : Bytes) : Bytes → Bytes
     encodeLoop bits' r.1 r.2 bs
 
 /-- `huffman_encode(input, output)` with `output` initially empty.
-mirrors flare/http/hpack_huffman.mojo:697-737 @59bda50 -/
+mirrors flare/http/hpack_huffman.mojo#huffman_encode sha=6c1dab935f33 at=59bda50f -/
 def encodeImpl (input : Bytes) : Bytes := encodeLoop 0 0 [] input
 
-/-- mirrors flare/http/hpack_huffman.mojo:684-694 @59bda50 (`huffman_encoded_length`) -/
+/-- mirrors flare/http/hpack_huffman.mojo#huffman_encoded_length sha=c99f5541eca9 at=59bda50f (`huffman_encoded_length`) -/
 def encodedLengthImpl (input : Bytes) : Nat :=
   ((input.map fun b => tableLength b.toNat).sum + 7) / 8
 
@@ -1168,7 +1171,7 @@ theorem encodedLengthImpl_eq (input : Bytes) : encodedLengthImpl input = (encode
 
 /-! ## Impl: fast-table decoder (hpack_huffman_simd.mojo) -/
 
-/-- mirrors flare/http/hpack_huffman_simd.mojo:110-130 @59bda50 (`_make_root_table`) -/
+/-- mirrors flare/http/hpack_huffman_simd.mojo#_make_root_table sha=8b305ec8e8a2 at=59bda50f (`_make_root_table`) -/
 def rootTableImpl : List Nat :=
   (List.range 256).foldl (fun t sym =>
     let clen := tableLength sym
@@ -1242,7 +1245,7 @@ def entryAt (bits : UInt64) (nbits : Nat) : Nat :=
 
 /-- The inner `while nbits >= 8` loop: fast-table lookup on the top byte,
 long-code walker over lengths 9..30 otherwise.
-mirrors flare/http/hpack_huffman_simd.mojo:175-210 @59bda50 -/
+mirrors flare/http/hpack_huffman_simd.mojo#huffman_decode_simd sha=4aa2fedb525d at=59bda50f -/
 def drainFast (bits : UInt64) (nbits : Nat) (out : Bytes) : UInt64 × Nat × Bytes × Option Error :=
   if nbits < 8 then (bits, nbits, out, none)
   else
@@ -1435,7 +1438,7 @@ theorem drainFast_spec (buf : List Bool) (bits : UInt64) (out : Bytes) (hb : bit
 /-- The main `while i < n` loop, the tail walker (the scalar inner loop,
 with the mask written `(UInt64(1) << nbits) - 1`, equal by `maskS_eq`), and
 the padding checks.
-mirrors flare/http/hpack_huffman_simd.mojo:166-247 @59bda50 -/
+mirrors flare/http/hpack_huffman_simd.mojo#huffman_decode_simd sha=4aa2fedb525d at=59bda50f -/
 def simdLoop (bits : UInt64) (nbits : Nat) (out : Bytes) : Bytes → Bytes × Option Error
   | [] =>
     match drain bits nbits out with
@@ -1447,11 +1450,11 @@ def simdLoop (bits : UInt64) (nbits : Nat) (out : Bytes) : Bytes → Bytes × Op
     | (bits', nbits', out', none) => simdLoop bits' nbits' out' bs
 
 /-- `huffman_decode_simd(input, output)` with `output` initially empty.
-mirrors flare/http/hpack_huffman_simd.mojo:137-247 @59bda50 -/
+mirrors flare/http/hpack_huffman_simd.mojo#huffman_decode_simd sha=4aa2fedb525d at=59bda50f -/
 def decodeSimdImpl (input : Bytes) : Bytes × Option Error :=
   if input.length = 0 then ([], none) else simdLoop 0 0 [] input
 
-/-- mirrors flare/http/hpack_huffman_simd.mojo:250-276 @59bda50 -/
+/-- mirrors flare/http/hpack_huffman_simd.mojo#huffman_decode_dispatch sha=7d85e7043e28 at=59bda50f -/
 def decodeDispatch (input : Bytes) (useTable : Bool) : Bytes × Option Error :=
   if useTable = true ∧ 32 ≤ input.length then decodeSimdImpl input else decodeImpl input
 

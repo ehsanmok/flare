@@ -23,10 +23,10 @@ namespace Flare.L1.QuicVarint
 
 set_option linter.unusedSimpArgs false
 
-/-- mirrors flare/quic/varint.mojo:33 @59bda50 -/
+/-- mirrors flare/quic/varint.mojo#VARINT_MAX sha=93755ee16202 at=59bda50f -/
 def VARINT_MAX : UInt64 := 0x3FFFFFFFFFFFFFFF
 
-/-- mirrors flare/quic/varint.mojo:53-67 @59bda50 -/
+/-- mirrors flare/quic/varint.mojo#varint_encoded_length sha=d024ba000adb at=59bda50f -/
 def encodedLength (v : UInt64) : Option Nat :=
   if v > VARINT_MAX then none
   else if v < 64 then some 1
@@ -34,7 +34,7 @@ def encodedLength (v : UInt64) : Option Nat :=
   else if v < 1073741824 then some 4
   else some 8
 
-/-- mirrors flare/quic/varint.mojo:70-104 @59bda50 -/
+/-- mirrors flare/quic/varint.mojo#encode_varint sha=84303a8790da at=59bda50f -/
 def encode (v : UInt64) : Option Bytes :=
   match encodedLength v with
   | none => none
@@ -47,12 +47,12 @@ def encode (v : UInt64) : Option Bytes :=
       ((v >>> 24) &&& 0xFF).toUInt8, ((v >>> 16) &&& 0xFF).toUInt8,
       ((v >>> 8) &&& 0xFF).toUInt8, (v &&& 0xFF).toUInt8]
 
-/-- Length from the two-bit tag. mirrors flare/quic/varint.mojo:121-130 @59bda50 -/
+/-- Length from the two-bit tag. mirrors flare/quic/varint.mojo#decode_varint sha=2fbdb2fed88f at=59bda50f -/
 def tagLength (first : UInt8) : Nat :=
   let tag := (first >>> 6).toNat &&& 3
   if tag = 0 then 1 else if tag = 1 then 2 else if tag = 2 then 4 else 8
 
-/-- mirrors flare/quic/varint.mojo:107-138 @59bda50 -/
+/-- mirrors flare/quic/varint.mojo#decode_varint sha=2fbdb2fed88f at=59bda50f -/
 def decode (buf : Bytes) : Option (UInt64 × Nat) :=
   match buf with
   | [] => none

@@ -22,19 +22,13 @@ active_connection_id_limit ≥ 2, stateless_reset_token is 16 bytes,
 disable_active_migration is empty, preferred_address has its fixed layout
 with a 1..20-byte CID); the result is the fold of the parameters.
 
-`Fixes.none` is flare as first audited; `Fixes.shipped` has the QUIC-10 and QUIC-13 checks
-(it equals `Fixes.all`); `Fixes.all` adds the QUIC-10 check
-(initial_max_streams_* ≤ 2^60) and the QUIC-13 check (preferred_address
-layout).
+The decoder includes the QUIC-10 check (initial_max_streams_* ≤ 2^60) and
+the QUIC-13 check (preferred_address layout).
 
 Results:
-* `decodeFixed_eq_spec`: with both fixes the decoder succeeds exactly when
-  the spec does and returns the same parameters, on every input. Hence
-  flare's duplicate, truncation, trailing-byte and value checks are right
-  (they are the parts both versions share).
-* flare as written differs from the fixed decoder only in the 0x08 / 0x09
-  value bound and the 0x0d layout check (`implVarOk`, `apply`); the
-  counterexamples are `Flare.Bugs.QUIC_10` and `QUIC_13`.
+* `decodeFixed_eq_spec`: the decoder succeeds exactly when the spec does and
+  returns the same parameters, on every input. Hence flare's duplicate,
+  truncation, trailing-byte and value checks are right.
 
 The encoder (`encode`, mirroring `encode_transport_parameters`, 237-395) is
 stated for any varint encoder with `VarintCodec` (as in `Flare.L3.H3`):
@@ -51,25 +45,14 @@ open Flare Flare.L3.H3
 inductive TPErr | truncated | trailing | duplicate | invalid
   deriving DecidableEq, Repr
 
-/-- Which minimal fixes are applied. -/
-structure Fixes where
-  streams : Bool -- QUIC-10
-  pa : Bool      -- QUIC-13
-  deriving DecidableEq, Repr
-
-def Fixes.none : Fixes := ⟨false, false⟩
-def Fixes.all : Fixes := ⟨true, true⟩
-/-- The fixes present in `flare/quic/transport_params.mojo` now. -/
-def Fixes.shipped : Fixes := ⟨true, true⟩
-
-/-- mirrors flare/quic/transport_params.mojo:70-87 @59bda50 -/
+/-- mirrors flare/quic/transport_params.mojo#TP_ID_ORIGINAL_DCID+TP_ID_MAX_IDLE_TIMEOUT+TP_ID_STATELESS_RESET_TOKEN+TP_ID_MAX_UDP_PAYLOAD_SIZE+TP_ID_INITIAL_MAX_DATA+TP_ID_INITIAL_MAX_STREAM_DATA_BIDI_LOCAL+TP_ID_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE+TP_ID_INITIAL_MAX_STREAM_DATA_UNI+TP_ID_INITIAL_MAX_STREAMS_BIDI+TP_ID_INITIAL_MAX_STREAMS_UNI+TP_ID_ACK_DELAY_EXPONENT+TP_ID_MAX_ACK_DELAY+TP_ID_DISABLE_ACTIVE_MIGRATION+TP_ID_PREFERRED_ADDRESS+TP_ID_ACTIVE_CONNECTION_ID_LIMIT+TP_ID_INITIAL_SCID+TP_ID_RETRY_SCID+TP_ID_MAX_DATAGRAM_FRAME_SIZE sha=2b833fbaf157 at=59bda50f -/
 inductive PK
   | odcid | idle | token | maxUdp | maxData | sdBidiLocal | sdBidiRemote | sdUni
   | streamsBidi | streamsUni | ackExp | maxAckDelay | disableMig | prefAddr | cidLimit
   | iscid | rscid | datagram | unknown
   deriving DecidableEq, Repr
 
-/-- mirrors flare/quic/transport_params.mojo:70-87 @59bda50 -/
+/-- mirrors flare/quic/transport_params.mojo#TP_ID_ORIGINAL_DCID+TP_ID_MAX_IDLE_TIMEOUT+TP_ID_STATELESS_RESET_TOKEN+TP_ID_MAX_UDP_PAYLOAD_SIZE+TP_ID_INITIAL_MAX_DATA+TP_ID_INITIAL_MAX_STREAM_DATA_BIDI_LOCAL+TP_ID_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE+TP_ID_INITIAL_MAX_STREAM_DATA_UNI+TP_ID_INITIAL_MAX_STREAMS_BIDI+TP_ID_INITIAL_MAX_STREAMS_UNI+TP_ID_ACK_DELAY_EXPONENT+TP_ID_MAX_ACK_DELAY+TP_ID_DISABLE_ACTIVE_MIGRATION+TP_ID_PREFERRED_ADDRESS+TP_ID_ACTIVE_CONNECTION_ID_LIMIT+TP_ID_INITIAL_SCID+TP_ID_RETRY_SCID+TP_ID_MAX_DATAGRAM_FRAME_SIZE sha=2b833fbaf157 at=59bda50f -/
 def kindTable : List (Nat × PK) :=
   [(0x00, .odcid), (0x01, .idle), (0x02, .token), (0x03, .maxUdp), (0x04, .maxData),
    (0x05, .sdBidiLocal), (0x06, .sdBidiRemote), (0x07, .sdUni), (0x08, .streamsBidi),
@@ -93,7 +76,7 @@ theorem kind_mem {id : Nat} {k : PK} (h : kind id = k) (hk : k ≠ .unknown) : (
     subst h1 h
     exact h2
 
-/-- mirrors flare/quic/transport_params.mojo:104-138 @59bda50 -/
+/-- mirrors flare/quic/transport_params.mojo#TransportParameters sha=b93229840322 at=59bda50f -/
 structure TP where
   odcid : Bytes := []
   idle : Option Nat := none
@@ -114,7 +97,7 @@ structure TP where
   datagram : Option Nat := none
   deriving DecidableEq, Repr
 
-/-- mirrors flare/quic/transport_params.mojo:401-407 @59bda50 -/
+/-- mirrors flare/quic/transport_params.mojo#_read_param_varint sha=8a186a3b1ca1 at=59bda50f -/
 def readVar (v : Bytes) : Except TPErr Nat :=
   match decVarint v with
   | none => .error .truncated
@@ -129,14 +112,6 @@ def varOk : PK → Nat → Bool
   | .maxAckDelay, x => decide (x < 2 ^ 14)
   | .cidLimit, x => decide (2 ≤ x)
   | _, _ => true
-
-/-- The checks flare applies to each varint parameter (QUIC-10: none on
-the stream limits unless `fx.streams`).
-mirrors flare/quic/transport_params.mojo:450-523 @59bda50 -/
-def implVarOk (fx : Fixes) (k : PK) (x : Nat) : Bool :=
-  match k with
-  | .streamsBidi | .streamsUni => !fx.streams || varOk k x
-  | _ => varOk k x
 
 def setVar (k : PK) (x : Nat) (tp : TP) : TP :=
   match k with
@@ -160,28 +135,29 @@ def paValid (v : Bytes) : Bool :=
   decide (25 ≤ v.length) && decide (1 ≤ (Bytes.getD v 24).toNat) &&
     decide ((Bytes.getD v 24).toNat ≤ 20) && decide (v.length = 41 + (Bytes.getD v 24).toNat)
 
-/-- A varint parameter. mirrors flare/quic/transport_params.mojo:450-523 @59bda50 -/
-def applyVar (fx : Fixes) (k : PK) (v : Bytes) (tp : TP) : Except TPErr TP :=
+/-- A varint parameter, checked with `varOk` (the stream limits since QUIC-10).
+mirrors flare/quic/transport_params.mojo#decode_transport_parameters sha=70494f455a29 at=59bda50f -/
+def applyVar (k : PK) (v : Bytes) (tp : TP) : Except TPErr TP :=
   match readVar v with
   | .error e => .error e
-  | .ok x => if implVarOk fx k x then .ok (setVar k x tp) else .error .invalid
+  | .ok x => if varOk k x then .ok (setVar k x tp) else .error .invalid
 
-/-- One parameter. mirrors flare/quic/transport_params.mojo:447-524 @59bda50
-(0x0d has no branch there; `fx.pa` adds the QUIC-13 layout check). -/
-def apply (fx : Fixes) (id : Nat) (v : Bytes) (tp : TP) : Except TPErr TP :=
+/-- One parameter. mirrors flare/quic/transport_params.mojo#decode_transport_parameters sha=70494f455a29 at=59bda50f
+(0x0d gets the QUIC-13 layout check). -/
+def apply (id : Nat) (v : Bytes) (tp : TP) : Except TPErr TP :=
   match kind id with
   | .odcid => .ok { tp with odcid := v }
   | .token => if v.length = 16 then .ok { tp with token := v } else .error .invalid
   | .iscid => .ok { tp with iscid := v }
   | .rscid => .ok { tp with rscid := v }
   | .disableMig => if v.length = 0 then .ok { tp with disableMig := true } else .error .invalid
-  | .prefAddr => if fx.pa && !paValid v then .error .invalid else .ok tp
+  | .prefAddr => if !paValid v then .error .invalid else .ok tp
   | .unknown => .ok tp
-  | k => applyVar fx k v tp
+  | k => applyVar k v tp
 
-/-- mirrors flare/quic/transport_params.mojo:420-525 @59bda50 (`b` is
+/-- mirrors flare/quic/transport_params.mojo#decode_transport_parameters sha=70494f455a29 at=59bda50f (`b` is
 `buf[pos:]`; `seen` is the duplicate list, newest first) -/
-def decodeLoop (fx : Fixes) (seen : List Nat) (tp : TP) (b : Bytes) : Except TPErr TP :=
+def decodeLoop (seen : List Nat) (tp : TP) (b : Bytes) : Except TPErr TP :=
   if b.length = 0 then .ok tp else
   match h1 : decVarint b with
   | none => .error .truncated
@@ -192,13 +168,13 @@ def decodeLoop (fx : Fixes) (seen : List Nat) (tp : TP) (b : Bytes) : Except TPE
     | some (l, k2) =>
       if k1 + k2 + l > b.length then .error .truncated
       else if id ∈ seen then .error .duplicate
-      else match apply fx id ((b.drop (k1 + k2)).take l) tp with
+      else match apply id ((b.drop (k1 + k2)).take l) tp with
         | .error e => .error e
-        | .ok tp' => decodeLoop fx (id :: seen) tp' (b.drop (k1 + k2 + l))
+        | .ok tp' => decodeLoop (id :: seen) tp' (b.drop (k1 + k2 + l))
 termination_by b.length
 decreasing_by have := decVarint_some h1; simp; omega
 
-def decode (fx : Fixes) (b : Bytes) : Except TPErr TP := decodeLoop fx [] {} b
+def decode (b : Bytes) : Except TPErr TP := decodeLoop [] {} b
 
 /-! ## Spec -/
 
@@ -252,32 +228,29 @@ def specDecode (b : Bytes) : Option TP :=
   | none => none
   | some ps => if (ids ps).Nodup ∧ ps.all (fun p => valid p.1 p.2) then some (fold {} ps) else none
 
-/-! ## The fixed decoder equals the spec -/
-
-theorem implVarOk_all (k : PK) (x : Nat) : implVarOk Fixes.all k x = varOk k x := by
-  cases k <;> simp [implVarOk, Fixes.all]
+/-! ## The decoder equals the spec -/
 
 theorem applyVar_fixed (k : PK) (v : Bytes) (tp : TP) :
-    (applyVar Fixes.all k v tp).toOption = if validVar k v then some (setVarB k v tp) else none := by
+    (applyVar k v tp).toOption = if validVar k v then some (setVarB k v tp) else none := by
   unfold applyVar validVar setVarB readVar
   cases decVarint v with
   | none => simp [Except.toOption]
   | some r =>
     obtain ⟨x, n⟩ := r
     by_cases hn : n = v.length
-    · simp only [hn, ↓reduceIte, implVarOk_all, decide_true, Bool.true_and, Option.map_some,
+    · simp only [hn, ↓reduceIte, decide_true, Bool.true_and, Option.map_some,
         Option.getD_some]
       cases varOk k x <;> simp [Except.toOption]
     · simp [hn, Except.toOption]
 
 theorem apply_fixed (id : Nat) (v : Bytes) (tp : TP) :
-    (apply Fixes.all id v tp).toOption = if valid id v then some (set id v tp) else none := by
+    (apply id v tp).toOption = if valid id v then some (set id v tp) else none := by
   unfold apply valid set
   generalize kind id = k
   cases k
   all_goals first
     | exact applyVar_fixed _ v tp
-    | (simp only [Fixes.all, Bool.true_and]; split <;> simp_all [Except.toOption]; done)
+    | (simp only; split <;> simp_all [Except.toOption]; done)
     | (simp [Except.toOption]; done)
 
 /-- The spec, processed one parameter at a time. -/
@@ -288,7 +261,7 @@ def specFrom (seen : List Nat) (tp : TP) : List (Nat × Bytes) → Option TP
 
 theorem decodeLoop_fixed (n : Nat) :
     ∀ b : Bytes, b.length ≤ n → ∀ seen tp,
-      (decodeLoop Fixes.all seen tp b).toOption =
+      (decodeLoop seen tp b).toOption =
         match tlvs b with
         | none => none
         | some ps => specFrom seen tp ps := by
@@ -324,7 +297,7 @@ theorem decodeLoop_fixed (n : Nat) :
                 · rfl
                 · have ha := apply_fixed id ((b.drop (k1 + k2)).take l) tp
                   revert ha
-                  cases apply Fixes.all id ((b.drop (k1 + k2)).take l) tp with
+                  cases apply id ((b.drop (k1 + k2)).take l) tp with
                   | error e => intro _; rfl
                   | ok tp' =>
                     intro ha
@@ -339,7 +312,7 @@ theorem decodeLoop_fixed (n : Nat) :
                   try simp only [hs, ↓reduceIte]
                   have ha := apply_fixed id ((b.drop (k1 + k2)).take l) tp
                   revert ha
-                  cases apply Fixes.all id ((b.drop (k1 + k2)).take l) tp with
+                  cases apply id ((b.drop (k1 + k2)).take l) tp with
                   | error e =>
                     intro ha
                     simp only [Except.toOption] at ha
@@ -400,8 +373,8 @@ theorem specFrom_eq (ps : List (Nat × Bytes)) :
         simp only [List.all_cons, Bool.and_eq_true] at h3
         exact hv h3.1
 
-/-- **The fixed decoder meets the spec** on every input. -/
-theorem decodeFixed_eq_spec (b : Bytes) : (decode Fixes.all b).toOption = specDecode b := by
+/-- **The decoder meets the spec** on every input. -/
+theorem decodeFixed_eq_spec (b : Bytes) : (decode b).toOption = specDecode b := by
   unfold decode specDecode
   rw [decodeLoop_fixed b.length b (Nat.le_refl _)]
   cases tlvs b with
@@ -421,20 +394,20 @@ max_ack_delay ≥ 2^14 and active_connection_id_limit < 2, and
 `encode_varint` raises on a value ≥ 2^62. Stated for any varint encoder
 `enc` with `VarintCodec enc` (flare's is proved in L1). -/
 
-/-- mirrors flare/quic/transport_params.mojo:237-250 @59bda50 (the value) -/
+/-- mirrors flare/quic/transport_params.mojo#_emit_varint_param sha=771c20d31510 at=59bda50f (the value) -/
 def optP (enc : Nat → Bytes) (id : Nat) : Option Nat → List (Nat × Bytes)
   | some x => [(id, enc x)]
   | none => []
 
-/-- mirrors flare/quic/transport_params.mojo:253-263 @59bda50 (emitted only
+/-- mirrors flare/quic/transport_params.mojo#_emit_bytes_param sha=24cfcc44e4f2 at=59bda50f (emitted only
 when non-empty) -/
 def bytP (id : Nat) (b : Bytes) : List (Nat × Bytes) := if b = [] then [] else [(id, b)]
 
-/-- mirrors flare/quic/transport_params.mojo:266-272 @59bda50 -/
+/-- mirrors flare/quic/transport_params.mojo#_emit_flag_param sha=b23b98001d6b at=59bda50f -/
 def flagP (id : Nat) (f : Bool) : List (Nat × Bytes) := if f then [(id, [])] else []
 
 /-- The parameters emitted, in order.
-mirrors flare/quic/transport_params.mojo:290-394 @59bda50 -/
+mirrors flare/quic/transport_params.mojo#encode_transport_parameters sha=c1b27a6d5f20 at=59bda50f -/
 def params (enc : Nat → Bytes) (tp : TP) : List (Nat × Bytes) :=
   bytP 0x00 tp.odcid ++ optP enc 0x01 tp.idle ++ bytP 0x02 tp.token ++ optP enc 0x03 tp.maxUdp ++
   optP enc 0x04 tp.maxData ++ optP enc 0x05 tp.sdBidiLocal ++ optP enc 0x06 tp.sdBidiRemote ++
@@ -443,7 +416,7 @@ def params (enc : Nat → Bytes) (tp : TP) : List (Nat × Bytes) :=
   optP enc 0x0e tp.cidLimit ++ bytP 0x0f tp.iscid ++ bytP 0x10 tp.rscid ++ optP enc 0x20 tp.datagram
 
 /-- The length field: `encode_varint(len)`, a literal `00` for the flag.
-mirrors flare/quic/transport_params.mojo:244, 257, 272 @59bda50 -/
+mirrors flare/quic/transport_params.mojo#_emit_varint_param+_emit_bytes_param+_emit_flag_param sha=5f4aaa8c473b at=59bda50f -/
 def lenBytes (enc : Nat → Bytes) (v : Bytes) : Bytes := if v = [] then [0] else enc v.length
 
 def wire (enc : Nat → Bytes) : List (Nat × Bytes) → Bytes
@@ -454,15 +427,14 @@ def varFields (tp : TP) : List (Option Nat) :=
   [tp.idle, tp.maxUdp, tp.maxData, tp.sdBidiLocal, tp.sdBidiRemote, tp.sdUni, tp.streamsBidi,
    tp.streamsUni, tp.ackExp, tp.maxAckDelay, tp.cidLimit, tp.datagram]
 
-/-- The encoder's raises. mirrors flare/quic/transport_params.mojo:301-305,
-351-376 @59bda50 and flare/quic/varint.mojo (values ≥ 2^62) -/
+/-- The encoder's raises. mirrors flare/quic/transport_params.mojo#encode_transport_parameters sha=c1b27a6d5f20 at=59bda50f and flare/quic/varint.mojo (values ≥ 2^62) -/
 def encodeOk (tp : TP) : Bool :=
   (tp.token = [] || tp.token.length = 16) && tp.ackExp.all (· ≤ 20) &&
     tp.maxAckDelay.all (· < 2 ^ 14) && tp.cidLimit.all (2 ≤ ·) &&
     (varFields tp).all (fun o => o.all (· < 2 ^ 62)) &&
     [tp.odcid, tp.token, tp.iscid, tp.rscid].all (fun b => decide (b.length < 2 ^ 62))
 
-/-- mirrors flare/quic/transport_params.mojo:277-395 @59bda50 -/
+/-- mirrors flare/quic/transport_params.mojo#encode_transport_parameters sha=c1b27a6d5f20 at=59bda50f -/
 def encode (enc : Nat → Bytes) (tp : TP) : Except TPErr Bytes :=
   if encodeOk tp then .ok (wire enc (params enc tp)) else .error .invalid
 

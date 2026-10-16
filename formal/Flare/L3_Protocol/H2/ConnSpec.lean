@@ -1,4 +1,5 @@
 import Flare.L3_Protocol.H2.Conn
+import Flare.L3_Protocol.H2.StreamTable
 
 /-!
 # HTTP/2 connection: RFC 9113 requirements and per-clause theorems
@@ -16,7 +17,7 @@ the connection *emits* (its reply frames), not over flare's internals:
   requirement of §6.9 ("A receiver ... MUST always account for its
   contribution against the connection flow-control window").
 
-Per-clause theorems in this file: each fixed branch answers the
+Per-clause theorems in this file: each of these branches answers the
 offending frame as the RFC requires, for every connection state.
 -/
 namespace Flare.L3.H2.Conn
@@ -58,107 +59,207 @@ theorem connErr_out (c : Conn) (code : Nat) (h : c.goawaySent = false) :
     connErr c code = ({ c with goawaySent := true }, [.goaway c.lastPeer code]) := by
   simp [connErr, h]
 
-theorem shape_headers (fx : Fix) (c : Conn) (f : Fr) (h : f.ty = tHEADERS) :
-    shapeCheck fx c f = none := by
+theorem shape_headers (c : Conn) (f : Fr) (h : f.ty = tHEADERS) :
+    shapeCheck c f = none := by
   simp [shapeCheck, h, tHEADERS, tPING, tGOAWAY, tSETTINGS, tPRIORITY, tRST, tWU, tDATA, tPUSH]
 
-theorem shape_goaway (fx : Fix) (c : Conn) (f : Fr) (h : f.ty = tGOAWAY) (h0 : f.sid = 0) :
-    shapeCheck fx c f = if fx.h2_07 && f.plen < 8 then some (connErr c eFRAME_SIZE) else none := by
+theorem shape_goaway (c : Conn) (f : Fr) (h : f.ty = tGOAWAY) (h0 : f.sid = 0) :
+    shapeCheck c f = if f.plen < 8 then some (connErr c eFRAME_SIZE) else none := by
   simp [shapeCheck, h, h0, tPING, tGOAWAY]
 
-theorem dispatch_headers (fx : Fix) (dec : Dec) (c : Conn) (f : Fr) (h : f.ty = tHEADERS) :
-    dispatch fx dec c f = headersH fx dec c f := by
+theorem dispatch_headers (dec : Dec) (c : Conn) (f : Fr) (h : f.ty = tHEADERS) :
+    dispatch dec c f = headersH dec c f := by
   simp [dispatch, h, tHEADERS, tSETTINGS, tPING, tWU]
 
-/-! ## H2-06: HEADERS on stream 0 (§6.2) -/
+/-! ## HEADERS on stream 0 (§6.2) -/
 
-theorem handle_headers0 (fx : Fix) (dec : Dec) (c : Conn) (f : Fr)
+theorem handle_headers0 (dec : Dec) (c : Conn) (f : Fr)
     (hc : c.continuing = 0) (ht : f.ty = tHEADERS) (h0 : f.sid = 0) (hl : f.plen ≤ c.localMaxFrame)
     (hlp : c.isClient = true ∨ c.lastPeer = 0) :
-    handle fx dec c f =
-      if fx.h2_06 then .ok (connErr c ePROTOCOL) else .error "h2: HEADERS on stream 0" := by
-  have hid : idCheck fx c f = .inr c := by
+    handle dec c f = .ok (connErr c ePROTOCOL) := by
+  have hid : idCheck c f = .inr c := by
     rcases hlp with h | h <;> simp [idCheck, ht, h0, h]
-  simp [handle, hc, shape_headers fx c f ht, Nat.not_lt.mpr hl, hid, dispatch_headers fx dec c f ht,
+  simp [handle, hc, shape_headers c f ht, Nat.not_lt.mpr hl, hid, dispatch_headers dec c f ht,
     headersH, h0]
 
-/-! ## H2-07: short GOAWAY (§6.8, §4.2) -/
+/-! ## Short GOAWAY (§6.8, §4.2) -/
 
-theorem handle_goaway_short (fx : Fix) (dec : Dec) (c : Conn) (f : Fr)
-    (hc : c.continuing = 0) (ht : f.ty = tGOAWAY) (h0 : f.sid = 0) (hfx : fx.h2_07 = true)
-    (hs : f.plen < 8) : handle fx dec c f = .ok (connErr c eFRAME_SIZE) := by
-  simp [handle, hc, shape_goaway fx c f ht h0, hfx, hs]
+theorem handle_goaway_short (dec : Dec) (c : Conn) (f : Fr)
+    (hc : c.continuing = 0) (ht : f.ty = tGOAWAY) (h0 : f.sid = 0)
+    (hs : f.plen < 8) : handle dec c f = .ok (connErr c eFRAME_SIZE) := by
+  simp [handle, hc, shape_goaway c f ht h0, hs]
 
-/-! ## H2-02: reuse of a used stream id (§5.1.1) -/
+/-! ## Reuse of a used stream id (§5.1.1) -/
 
-theorem handle_reuse (fx : Fix) (dec : Dec) (c : Conn) (f : Fr) (hfx : fx.h2_02 = true)
+theorem handle_reuse (dec : Dec) (c : Conn) (f : Fr)
     (hc : c.continuing = 0) (hs : c.isClient = false) (ht : f.ty = tHEADERS)
     (hl : f.plen ≤ c.localMaxFrame) (hle : f.sid ≤ c.lastPeer) (hpos : 0 < c.lastPeer)
     (hm : mem c f.sid = false) :
-    handle fx dec c f = .ok (connErr c ePROTOCOL) := by
-  have hid : idCheck fx c f = .inl (connErr c ePROTOCOL) := by
+    handle dec c f = .ok (connErr c ePROTOCOL) := by
+  have hid : idCheck c f = .inl (connErr c ePROTOCOL) := by
     unfold idCheck
-    simp only [ht, hs, hfx, hle, hpos, hm]
+    simp only [ht, hs, hle, hpos, hm]
     by_cases h2 : f.sid ≠ 0 ∧ f.sid % 2 = 0 <;> simp_all
-  simp [handle, hc, shape_headers fx c f ht, Nat.not_lt.mpr hl, hid]
+  simp [handle, hc, shape_headers c f ht, Nat.not_lt.mpr hl, hid]
 
-/-! ## H2-04: client HEADERS on a stream it never opened (§5.1, §5.1.1) -/
+/-! ## Client HEADERS on a stream it never opened (§5.1, §5.1.1) -/
 
-theorem handle_client_unopened (fx : Fix) (dec : Dec) (c : Conn) (f : Fr) (hfx : fx.h2_04 = true)
+theorem handle_client_unopened (dec : Dec) (c : Conn) (f : Fr)
     (hc : c.continuing = 0) (hcl : c.isClient = true) (ht : f.ty = tHEADERS) (h0 : f.sid ≠ 0)
     (hl : f.plen ≤ c.localMaxFrame) (hm : mem c f.sid = false) :
-    handle fx dec c f = .ok (connErr c ePROTOCOL) := by
-  have hid : idCheck fx c f = .inr c := by simp [idCheck, ht, hcl]
-  simp [handle, hc, shape_headers fx c f ht, Nat.not_lt.mpr hl, hid, dispatch_headers fx dec c f ht,
-    headersH, h0, hfx, hcl, hm]
+    handle dec c f = .ok (connErr c ePROTOCOL) := by
+  have hid : idCheck c f = .inr c := by simp [idCheck, ht, hcl]
+  simp [handle, hc, shape_headers c f ht, Nat.not_lt.mpr hl, hid, dispatch_headers dec c f ht,
+    headersH, h0, hcl, hm]
 
-/-! ## H2-08: the first frame must be SETTINGS (§3.4) -/
+/-! ## The first frame must be SETTINGS (§3.4) -/
 
-theorem drive_first_not_settings (fx : Fix) (dec : Dec) (c : Conn) (f : Fr) (h8 : fx.h2_08 = true)
+theorem drive_first_not_settings (dec : Dec) (c : Conn) (f : Fr)
     (hg : c.goawaySent = false) (hs : c.peerSettingsSeen = false) (hl : f.plen ≤ c.localMaxFrame)
     (hn : ¬ (f.ty = tSETTINGS ∧ f.f1 = false)) :
-    driveFrame fx dec c f = .ok (connErr c ePROTOCOL) := by
+    driveFrame dec c f = .ok (connErr c ePROTOCOL) := by
   have hn' : (decide (f.ty = tSETTINGS) && !f.f1) = false := by
     by_cases h : f.ty = tSETTINGS
     · cases hf : f.f1
       · exact absurd ⟨h, hf⟩ hn
       · simp
     · simp [h]
-  simp [driveFrame, prefaceGate, hg, hs, h8, Nat.not_lt.mpr hl, hn']
+  simp [driveFrame, prefaceGate, hg, hs, Nat.not_lt.mpr hl, hn']
 
-/-! ## H2-03: late WINDOW_UPDATE / RST_STREAM on a stream the client closed (§5.1) -/
+/-! ## Late WINDOW_UPDATE / RST_STREAM on a stream the client closed (§5.1) -/
 
-theorem handle_client_late_wu (fx : Fix) (dec : Dec) (c : Conn) (f : Fr) (h3 : fx.h2_03 = true)
+theorem handle_client_late_wu (dec : Dec) (c : Conn) (f : Fr)
     (hcl : c.isClient = true) (hc : c.continuing = 0) (ht : f.ty = tWU) (hp : f.plen = 4)
     (hl : f.plen ≤ c.localMaxFrame) (hinc : f.word % 2147483648 ≠ 0) (hk : f.sid ≠ 0)
     (hodd : f.sid % 2 = 1) (hle : f.sid ≤ c.maxLocalSid) (hm : get c f.sid = none) :
-    handle fx dec c f = .ok (c, []) := by
-  have hsh : shapeCheck fx c f = none := by
+    handle dec c f = .ok (c, []) := by
+  have hsh : shapeCheck c f = none := by
     simp [shapeCheck, ht, hp, tWU, tPING, tGOAWAY, tSETTINGS, tPRIORITY, tRST]
-  have hid : idCheck fx c f = .inr c := by simp [idCheck, ht, hcl]
-  have hidle : isIdleId fx c f.sid = false := by
-    simp [isIdleId, h3, hcl, Nat.not_lt.mpr hle]; omega
+  have hid : idCheck c f = .inr c := by simp [idCheck, ht, hcl]
+  have hidle : isIdleId c f.sid = false := by
+    simp [isIdleId, hcl, Nat.not_lt.mpr hle]; omega
   simp [handle, hc, hsh, Nat.not_lt.mpr hl, hid, dispatch, ht, tWU, tSETTINGS, tPING, wuH, hinc, hk,
     hm, hidle]
 
-theorem handle_client_late_rst (fx : Fix) (dec : Dec) (c : Conn) (f : Fr) (h3 : fx.h2_03 = true)
+theorem handle_client_late_rst (dec : Dec) (c : Conn) (f : Fr)
     (hcl : c.isClient = true) (hc : c.continuing = 0) (ht : f.ty = tRST) (hp : f.plen = 4)
     (hl : f.plen ≤ c.localMaxFrame) (hk : f.sid ≠ 0) (hodd : f.sid % 2 = 1)
     (hle : f.sid ≤ c.maxLocalSid) :
-    handle fx dec c f = .ok (rstH c f) := by
-  have hidle : isIdleId fx c f.sid = false := by
-    simp [isIdleId, h3, hcl, Nat.not_lt.mpr hle]; omega
-  have hsh : shapeCheck fx c f = none := by
+    handle dec c f = .ok (rstH c f) := by
+  have hidle : isIdleId c f.sid = false := by
+    simp [isIdleId, hcl, Nat.not_lt.mpr hle]; omega
+  have hsh : shapeCheck c f = none := by
     simp [shapeCheck, ht, hp, hk, hidle, tRST, tPING, tGOAWAY, tSETTINGS, tPRIORITY]
-  have hid : idCheck fx c f = .inr c := by simp [idCheck, ht, hcl]
+  have hid : idCheck c f = .inr c := by simp [idCheck, ht, hcl]
   simp [handle, hc, hsh, Nat.not_lt.mpr hl, hid, dispatch, ht, tRST, tSETTINGS, tPING, tWU, tHEADERS,
     tCONT, tDATA, tGOAWAY]
 
-/-! ## H2-11: SETTINGS_MAX_CONCURRENT_STREAMS = 0 (§5.1.2, §6.5.2) -/
+/-! ## SETTINGS_MAX_CONCURRENT_STREAMS = 0 (§5.1.2, §6.5.2) -/
 
-theorem refuse_at_limit (fx : Fix) (c : Conn) (f : Fr) (h11 : fx.h2_11 = true)
+theorem refuse_at_limit (c : Conn) (f : Fr)
     (hs : c.isClient = false) (hm : mem c f.sid = false) (hge : c.maxConcurrent ≤ activeCount c) :
-    headersRefuse fx c f 0 = eREFUSED := by
-  simp [headersRefuse, h11, hs, hm, hge]
+    headersRefuse c f 0 = eREFUSED := by
+  simp [headersRefuse, hs, hm, hge]
+
+/-! ## Ending a stream locally (§5.1) -/
+
+/-- Our END_STREAM on a half-closed (remote) stream closes it. -/
+theorem endLocal_hcr (c : Conn) (k : Nat) (s : Stream)
+    (hg : get c k = some s) (hs : s.state = .hcr) :
+    get (endLocal c k) k = some { s with state := .closed } := by
+  simp [endLocal, hg, hs]
+
+/-- Ending a closed stream changes nothing (it does not reopen it). -/
+theorem endLocal_closed (c : Conn) (k : Nat) (s : Stream)
+    (hg : get c k = some s) (hs : s.state = .closed) : endLocal c k = c := by
+  simp [endLocal, hg, hs]
+
+/-! ## HEADERS on a half-closed (remote) stream (§5.1) -/
+
+theorem headersPre_hcr (c : Conn) (f : Fr) (s : Stream)
+    (hg : get c f.sid = some s) (hs : s.state = .hcr) :
+    headersPre c f = .inl (connErr c eSTREAM_CLOSED) := by
+  simp [headersPre, hg, hs]
+
+/-! ## Frames on idle streams (§5.1) -/
+
+/-- A server never opens an even id, so every even id is idle to it. -/
+theorem isIdleId_even (c : Conn) (k : Nat) (hs : c.isClient = false)
+    (he : k % 2 = 0) : isIdleId c k = true := by
+  simp [isIdleId, hs, he]
+
+theorem shape_rst_even (c : Conn) (f : Fr) (hs : c.isClient = false)
+    (ht : f.ty = tRST) (h0 : f.sid ≠ 0) (he : f.sid % 2 = 0) (hp : f.plen = 4)
+    (hm : mem c f.sid = false) : shapeCheck c f = some (connErr c ePROTOCOL) := by
+  have hi := isIdleId_even c f.sid hs he
+  simp [shapeCheck, ht, h0, hp, hm, hi, tRST, tPING, tGOAWAY, tSETTINGS, tPRIORITY]
+
+/-- PRIORITY that makes an idle stream depend on itself. -/
+theorem shape_priority_idle (c : Conn) (f : Fr) (ht : f.ty = tPRIORITY)
+    (h0 : f.sid ≠ 0) (hp : f.plen = 5) (hd : f.word % 2147483648 = f.sid)
+    (hm : mem c f.sid = false) (hi : isIdleId c f.sid = true) :
+    shapeCheck c f = some (connErr c ePROTOCOL) := by
+  simp [shapeCheck, ht, h0, hp, hd, hm, hi, tPRIORITY, tPING, tGOAWAY, tSETTINGS]
+
+/-- Zero-increment WINDOW_UPDATE on an idle stream. -/
+theorem wuH_zero_idle (c : Conn) (f : Fr)
+    (h0 : f.sid ≠ 0) (hw : f.word % 2147483648 = 0)
+    (hm : mem c f.sid = false) (hi : isIdleId c f.sid = true) :
+    wuH c f = connErr c ePROTOCOL := by
+  simp [wuH, h0, hw, hm, hi]
+
+/-! ## Oversized frame to the client (§4.2) -/
+
+theorem client_oversize (dec : Dec) (c : Conn) (f : Fr)
+    (hc : c.isClient = true) (hl : f.plen > c.localMaxFrame) :
+    step dec c (.frame f) = .ok (connErr c eFRAME_SIZE) := by
+  simp [step, hc, driveClient, hl]
+
+/-! ## DATA (§5.1, §6.9) -/
+
+/-- No stream WINDOW_UPDATE goes out on a stream that the client's
+END_STREAM DATA closes. -/
+theorem dataFinish_no_stream_wu (c : Conn) (f : Fr) (s : Stream) (cr : Nat)
+    (hc : c.isClient = true) (hk : f.sid ≠ 0) (he : f.f1 = true) (hs : s.state = .hcl)
+    (hcl : ¬ (f.f1 = true ∧ (0 : Int) ≤ s.contentLength ∧ (s.received : Int) ≠ s.contentLength)) :
+    ∀ n, Out.wu f.sid n ∉ (dataFinish c f s cr).2 := by
+  intro n hn
+  unfold dataFinish at hn
+  rw [if_neg (by simpa [he] using hcl)] at hn
+  simp only [he, hc, hs, Bool.true_and, beq_self_eq_true, ite_true] at hn
+  unfold dataCredit at hn
+  split at hn
+  · simp only [Nat.lt_irrefl, ite_false, List.nil_append] at hn
+    split at hn
+    · simp at hn
+    · simp at hn; exact hk hn.1
+  · simp at hn
+
+/-- DATA on a closed or half-closed (remote) stream we did not reset. -/
+theorem dataH_closed (c : Conn) (f : Fr) (s : Stream)
+    (hr : f.sid ∉ c.resetByUs) (hg : get c f.sid = some s) (hs : s.state = .closed ∨ s.state = .hcr) :
+    dataH c f = connErr c eSTREAM_CLOSED := by
+  simp only [dataH, if_neg hr, hg]
+  rcases hs with h | h <;> simp [h]
+
+/-- A client that gets DATA before the response HEADERS resets that stream
+with PROTOCOL_ERROR and leaves the connection up (§8.1: a malformed
+response is a stream error). -/
+def StreamScoped (step : Conn → Fr → Conn × List Out) : Prop :=
+  ∀ c f s, c.isClient = true → f.sid ∉ c.resetByUs → get c f.sid = some s →
+    s.state ≠ .closed → s.state ≠ .hcr → s.headersComplete = false →
+    (∀ l code, Out.goaway l code ∉ (step c f).2) ∧
+    Out.rst f.sid ePROTOCOL ∈ (step c f).2 ∧
+    (step c f).1.goawaySent = c.goawaySent
+
+theorem dataH_stream_scoped : StreamScoped dataH := by
+  intro c f s hc hr hg h1 h2 hh
+  have hn : (s.state == .closed || s.state == .hcr) = false := by
+    revert h1 h2; cases s.state <;> decide
+  simp only [dataH, hr, if_false, hg, hn, hc, hh, Bool.not_false,
+    Bool.and_self, if_true, rstCloseX]
+  refine ⟨?_, by simp, by simp [put, rstC]⟩
+  intro l code hm
+  by_cases hp : f.plen > 0 <;> simp [wu0If, put, hp] at hm
 
 end Flare.L3.H2.Conn

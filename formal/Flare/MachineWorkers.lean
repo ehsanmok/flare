@@ -114,9 +114,8 @@ theorem batch_progress (i : M.I) (c : Cfg M.S) (h : c.batch ≠ []) :
   cases hb : c.batch with
   | nil => exact absurd hb h
   | cons f rest =>
-    by_cases hf : f = P.listenerTok
-    · subst hf
-      exact ⟨.acceptDone, { c with batch := rest }, by simp [step, hb], by simp⟩
+    by_cases hf : f = listenerToken
+    · exact ⟨.acceptDone, { c with batch := rest }, by simp [step, hb, hf], by simp⟩
     · refine ⟨.dispatch i, dispatchAt M P { c with batch := rest } f i, ?_, ?_⟩
       · simp [step, hb, hf]
       · rw [dispatchAt_batch]; simp
@@ -247,13 +246,11 @@ theorem sys_conn_invariant_lifts (Q : M.S → Prop) (h0 : Q M.init)
     ∀ f l, (w k).conns f = some l → Q l.st :=
   conn_invariant_lifts M (P k) Q h0 hstep (w k) (sys_component_reachable w hr k)
 
-/-- No worker has a connection on its listener token (the shipped token is
-above every fd). -/
-theorem sys_routing_ok
-    (hP : ∀ k, fdLimit ≤ (P k).listenerTok ∨ ((P k).listenerTok = 0 ∧ (P k).stdinOpen = true))
-    (w : Sys M.S n) (hr : (sysLts M P).Reachable w) (k : Fin n) :
-    (w k).conns (P k).listenerTok = none :=
-  routing_ok M (P k) (hP k) (w k) (sys_component_reachable w hr k)
+/-- No worker has a connection on the listener token (it is above every
+fd). -/
+theorem sys_routing_ok (w : Sys M.S n) (hr : (sysLts M P).Reachable w) (k : Fin n) :
+    (w k).conns listenerToken = none :=
+  routing_ok M (P k) (w k) (sys_component_reachable w hr k)
 
 end Sys
 end Flare.Machine

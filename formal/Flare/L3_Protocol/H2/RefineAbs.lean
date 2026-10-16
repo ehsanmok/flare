@@ -19,19 +19,12 @@ The verdict of a reply on stream `k` (`verdict`) is read off the frames
 flare queues: a GOAWAY is a connection error with its code, else a
 RST_STREAM on `k` is a stream error, else the frame was accepted.
 
-`F` is the model with every fix that touches stream state; `Inv` is the
-invariant of its reachable, live states.
+`Inv` is the invariant of the model's reachable, live states.
 -/
 namespace Flare.L3.H2.Refine
 open Flare.L3.H2.Conn Flare.L3.H2.StreamSpec
 
 attribute [local simp] ePROTOCOL eSTREAM_CLOSED eFLOW eCALM eCOMPRESSION eFRAME_SIZE eREFUSED eNO
-
-/-- The fixed model: every fix that bears on §5.1. -/
-def F : Fix :=
-  { h2_02 := true, h2_03 := true, h2_04 := true, h2_06 := true, h2_08 := true, h2_11 := true,
-    h2_12 := true, h2_13 := true, h2_14 := true, h2_15 := true, h2_16 := true, h2_17 := true,
-    h2_18 := true, h2_19 := true, h2_20 := true }
 
 def ofSt : St → SS
   | .idle => .idle
@@ -39,13 +32,6 @@ def ofSt : St → SS
   | .hcl => .hcl
   | .hcr => .hcr
   | .closed => .closed
-
-def idleAbs (c : Conn) (k : Nat) : Bool :=
-  if c.isClient then decide (k > c.maxLocalSid) || k % 2 == 0
-  else decide (k > c.lastPeer) || k % 2 == 0
-
-theorem isIdleId_F (c : Conn) (k : Nat) : isIdleId F c k = idleAbs c k := by
-  unfold isIdleId idleAbs F; cases c.isClient <;> simp
 
 /-- The fields the abstraction and the invariant read. -/
 structure IV where
@@ -64,7 +50,7 @@ def iv (c : Conn) : IV :=
 def abs (c : Conn) (k : Nat) : SS :=
   match get c k with
   | some s => ofSt s.state
-  | none => if idleAbs c k then .idle else .closed
+  | none => if isIdleId c k then .idle else .closed
 
 def room (c : Conn) : Bool := c.isClient || decide (activeCount c < c.maxConcurrent)
 
@@ -136,7 +122,7 @@ theorem get_congr {c c' : Conn} (h : c'.streams = c.streams) : get c' = get c :=
 theorem abs_congr {c c' : Conn} (h : iv c' = iv c) : abs c' = abs c := by
   simp only [iv, IV.mk.injEq] at h
   obtain ⟨h1, h2, h3, h4, -, -, -, -⟩ := h
-  funext k; unfold abs idleAbs; rw [get_congr h1, h2, h3, h4]
+  funext k; unfold abs isIdleId; rw [get_congr h1, h2, h3, h4]
 
 theorem room_congr {c c' : Conn} (h1 : c'.streams = c.streams) (h2 : c'.isClient = c.isClient)
     (h3 : c'.maxConcurrent = c.maxConcurrent) : room c' = room c := by
@@ -182,11 +168,11 @@ theorem abs_some {c : Conn} {k : Nat} {s : Stream} (h : get c k = some s) : abs 
   simp [abs, h]
 
 theorem abs_none {c : Conn} {k : Nat} (h : get c k = none) :
-    abs c k = if idleAbs c k then .idle else .closed := by
+    abs c k = if isIdleId c k then .idle else .closed := by
   simp [abs, h]
 
-theorem idleAbs_key {c : Conn} {k : Nat} (h : keyOK c k) : idleAbs c k = false := by
-  unfold keyOK at h; unfold idleAbs
+theorem idleAbs_key {c : Conn} {k : Nat} (h : keyOK c k) : isIdleId c k = false := by
+  unfold keyOK at h; unfold isIdleId
   cases hc : c.isClient <;> simp only [hc, if_true, if_false, Bool.false_eq_true] at h ⊢ <;>
     simp <;> omega
 
@@ -198,8 +184,8 @@ theorem abs_ensure (c : Conn) (k : Nat) (hI : Inv c) : abs (ensure c k).1 = abs 
     · funext j
       have hg := get_filter c (fun p => p.2.state != .closed) j hI.nd
       unfold abs
-      have hcl : idleAbs { c with streams := c.streams.filter (fun p => p.2.state != .closed) } j =
-          idleAbs c j := rfl
+      have hcl : isIdleId { c with streams := c.streams.filter (fun p => p.2.state != .closed) } j =
+          isIdleId c j := rfl
       rw [hg, hcl]
       cases hj : get c j with
       | none => rfl

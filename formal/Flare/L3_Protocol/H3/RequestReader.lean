@@ -16,13 +16,14 @@ until it reports NEEDS_MORE.
   (`u64_add_exact`).
 
 Results:
+* `feed_bounded` — a buffer of `16 + max_field_section_bytes + max_body_bytes`
+  bytes always makes the reader act (H3-01).
 * `feed_append`  — prefix stability of one `feed` step.
 * `drain_append` — chunking independence of the server drain loop.
 * `run_accept_impl` / `run_reject_impl` (Grammar.lean) — the frame sequences
   accepted without error are exactly the prefixes of RFC 9114 §4.1's
   `HEADERS DATA* [HEADERS]` with unknown frames ignored, with no side
-  condition on frame types (before H3-02 the impl needed "no HTTP/2-reserved
-  frame type"; see `Flare.Bugs.H3_02`).
+  condition on frame types (H3-02).
 -/
 namespace Flare.L3.H3
 
@@ -36,14 +37,14 @@ def T_GOAWAY : Nat := 0x07
 def T_MAX_PUSH_ID : Nat := 0x0D
 
 /-- Control-stream frame types the reader rejects on a request stream.
-mirrors flare/http3/request_reader.mojo:340-350 -/
+mirrors flare/http3/request_reader.mojo#feed_into sha=a4e3d230d52b at=1e286111 -/
 def isControlType (t : Nat) : Bool :=
   t == T_SETTINGS || t == T_GOAWAY || t == T_MAX_PUSH_ID || t == T_CANCEL_PUSH ||
     t == T_PUSH_PROMISE
 
 /-- HTTP/2 frame types reserved by RFC 9114 §7.2.8 / §11.2.1 (PRIORITY, PING,
 WINDOW_UPDATE, CONTINUATION): receipt MUST be H3_FRAME_UNEXPECTED.
-mirrors flare/http3/request_reader.mojo:340-352 (fixed, H3-02) -/
+mirrors flare/http3/request_reader.mojo#feed_into sha=a4e3d230d52b at=1e286111 (fixed, H3-02) -/
 def isH2Reserved (t : Nat) : Bool := t == 0x02 || t == 0x06 || t == 0x08 || t == 0x09
 
 inductive RState | init | body | trailers | done
@@ -75,9 +76,8 @@ def Ev.isError : Ev Hdrs → Bool
   | _ => false
 
 /-- Dispatch of one fully present frame on type and state. The HTTP/2-reserved
-types are rejected next to the control types (H3-02); the pre-fix dispatch is
-`Flare.Bugs.H3_02.stepFrameOld`.
-mirrors flare/http3/request_reader.mojo:277-362 (fixed, H3-02) -/
+types are rejected next to the control types (H3-02).
+mirrors flare/http3/request_reader.mojo#feed_into sha=a4e3d230d52b at=1e286111 (fixed, H3-02) -/
 def stepFrame (qd : Bytes → Option Hdrs) (r : Reader) (t : Nat) (p : Bytes) :
     Reader × Ev Hdrs :=
   if t = T_HEADERS then
@@ -96,8 +96,8 @@ def stepFrame (qd : Bytes → Option Hdrs) (r : Reader) (t : Nat) (p : Bytes) :
 
 /-- One `feed_into` call. A frame of any type other than HEADERS and DATA
 declaring more than `max_field_section_bytes` is refused from its header
-(`excessiveLoad`, H3-01); the pre-fix reader is `Flare.Bugs.H3_01.feedOld`.
-mirrors flare/http3/request_reader.mojo:197-345 (fixed, H3-01) -/
+(`excessiveLoad`, H3-01).
+mirrors flare/http3/request_reader.mojo#_parse_frame_header+feed_into sha=30b62d74be71 at=4ba5acd3 (fixed, H3-01) -/
 def feed (qd : Bytes → Option Hdrs) (r : Reader) (buf : Bytes) :
     Nat × Reader × Option (Ev Hdrs) :=
   if r.st = .done then (0, r, none)
@@ -130,6 +130,60 @@ theorem feed_le (qd : Bytes → Option Hdrs) (r : Reader) (buf : Bytes) :
     split
     · simp
     · simp; omega
+
+/-- A buffer of `bound r` bytes is always enough for the reader to act. -/
+def BoundedNeed (step : Reader → Bytes → Nat × Reader × Option (Ev Hdrs))
+    (bound : Reader → Nat) : Prop :=
+  ∀ r buf, r.st ≠ .done → bound r ≤ buf.length → 0 < (step r buf).1
+
+theorem decVarint_some_of_len (b : Bytes) (h : 8 ≤ b.length) : ∃ v k, decVarint b = some (v, k) := by
+  cases b with
+  | nil => simp at h
+  | cons b0 tl =>
+    have := varLen_pos (b0.toNat / 64)
+    simp only [decVarint]
+    rw [if_neg (by omega)]
+    exact ⟨_, _, rfl⟩
+
+theorem parseHeader_some_of_len (b : Bytes) (h : 16 ≤ b.length) :
+    ∃ t l hs, parseHeader b = some (t, l, hs) := by
+  obtain ⟨t, k1, h1⟩ := decVarint_some_of_len b (by omega)
+  have hk1 := decVarint_some h1
+  obtain ⟨l, k2, h2⟩ := decVarint_some_of_len (b.drop k1) (by simp; omega)
+  refine ⟨t, l, k1 + k2, ?_⟩
+  unfold parseHeader
+  rw [h1]
+  simp only
+  rw [if_neg (by simp; omega), h2]
+
+/-- **Bounded buffering** (H3-01): `16 + max_field_section_bytes +
+max_body_bytes` buffered bytes always make the reader act (RFC 9114 §7.2.8,
+§10.5). -/
+theorem feed_bounded (qd : Bytes → Option Hdrs) :
+    BoundedNeed (feed qd) (fun r => 16 + r.maxField + r.maxBody) := by
+  intro r buf hr hb
+  simp only at hb
+  obtain ⟨t, l, hs, hh⟩ := parseHeader_some_of_len buf (by omega)
+  have hp := parseHeader_some hh
+  unfold feed
+  rw [if_neg hr, if_neg (by omega), hh]
+  simp only
+  split; · simp; omega
+  rename_i h1
+  split; · simp; omega
+  rename_i h2
+  split; · simp; omega
+  rename_i h3
+  rw [if_neg]
+  · simp; omega
+  · intro hgt
+    by_cases ht : t = T_HEADERS
+    · exact h1 ⟨ht, by omega⟩
+    · by_cases hd : t = T_DATA
+      · have : ¬ r.bodyBytes + l > r.maxBody := fun h => h2 ⟨hd, h⟩
+        omega
+      · have : ¬ l > r.maxField := fun h => h3 ⟨ht, hd, h⟩
+        omega
 
 /-- Prefix stability: once `feed` makes progress on `buf`, appending more
 bytes changes nothing. -/
@@ -170,7 +224,7 @@ theorem feed_append (qd : Bytes → Option Hdrs) (r : Reader) (buf c : Bytes)
 the events and the unconsumed tail kept in `inbox`. A reader in `DONE`
 always reports NEEDS_MORE, so stopping on `consumed = 0` coincides with the
 Mojo loop's extra `break`s on error / DONE.
-mirrors flare/http3/server.mojo:732-807 @59bda50 -/
+mirrors flare/http3/server.mojo#Http3Connection.feed_stream_chunk+Http3Connection.signal_end_of_stream sha=5a4554dbf091 at=59bda50f -/
 def drain (qd : Bytes → Option Hdrs) (r : Reader) (buf : Bytes) :
     Reader × List (Ev Hdrs) × Bytes :=
   match hf : feed qd r buf with
