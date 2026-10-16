@@ -84,6 +84,7 @@ EXCLUDE = {
     "tests/http/test_uring_serve_handler.mojo",
     "tests/http/test_uring_serve_handler_load.mojo",
     "tests/http/test_uring_bufring_buffers.mojo",
+    "tests/http/test_uring_bufring_partial.mojo",
     # Stress/soak: runtime-bound, not compile-bound, so aggregating it buys
     # nothing and it would dominate the aggregate's wall clock.
     "tests/runtime/stress_scheduler.mojo",

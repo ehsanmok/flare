@@ -563,11 +563,11 @@ def _drive_handler_with_submit_send[
         # cycle iter writes to write_buf; the LAST one's bytes
         # are what we submit_send.
         while not step_done:
-            if (
-                last_step.want_read
-                and len(ch_ptr[].read_buf) > 0
-                and ch_ptr[].state == STATE_READING
-            ):
+            if last_step.want_read and ch_ptr[].has_buffered_request():
+                # Only drive again for a *whole* buffered request: a
+                # partial one consumes nothing, so looping on it would spin
+                # here and starve every other connection.
+                #
                 # NOTE: we DON'T call on_writable here -- we let
                 # write_buf accumulate, then submit_send the
                 # whole thing once.
@@ -678,13 +678,10 @@ def _drive_handler_after_buf_recv[
                 step_done = last_step.done
                 if (not step_done) and last_step.want_write:
                     step_done = True
-            elif (
-                last_step.want_read
-                and len(ch_ptr[].read_buf) > 0
-                and ch_ptr[].state == STATE_READING
-            ):
-                # Pipelined request already in read_buf -- drive the
-                # parser without appending more bytes. Use stack-
+            elif last_step.want_read and ch_ptr[].has_buffered_request():
+                # Whole pipelined request already in read_buf -- drive the
+                # parser without appending more bytes (a partial one would
+                # consume nothing and spin this loop). Use stack-
                 # allocated empty span (Span over a temp List would
                 # be a use-after-free).
                 var empty_buf = stack_allocation[1, UInt8]()
