@@ -346,6 +346,48 @@ struct ThreadHandle(Movable):
             pass
 
 
+# ── Calling thread's affinity ────────────────────────────────────────────────
+
+comptime _CPUSET_BYTES: Int = 128
+"""glibc's default ``cpu_set_t``: 1024 bits."""
+
+
+def save_thread_affinity() -> Int:
+    """Snapshot the calling thread's CPU mask, for
+    :func:`restore_thread_affinity`.
+
+    A serving loop that pins the pool worker it runs on restores the
+    worker's mask when it returns, so later tasks on that worker are not
+    pinned. Returns the address of a heap ``cpu_set_t``, or 0 when there
+    is nothing to restore (macOS, or ``pthread_getaffinity_np`` failed).
+    """
+    comptime if CompilationTarget.is_linux():
+        var buf = alloc(Layout[UInt8](count=_CPUSET_BYTES)).unsafe_leak()
+        unsafe_memset_zero(buf, _CPUSET_BYTES)
+        var rc = external_call[
+            "pthread_getaffinity_np", c_int, UInt64, c_size_t, _OpaquePtr
+        ](current_thread_id(), c_size_t(_CPUSET_BYTES), buf)
+        if rc != c_int(0):
+            buf.unsafe_free()
+            return 0
+        return Int(buf)
+    else:
+        return 0
+
+
+def restore_thread_affinity(saved: Int):
+    """Put back the mask :func:`save_thread_affinity` returned and free
+    it. A no-op for 0."""
+    if saved == 0:
+        return
+    var buf = _OpaquePtr(unsafe_from_address=saved)
+    comptime if CompilationTarget.is_linux():
+        _ = external_call[
+            "pthread_setaffinity_np", c_int, UInt64, c_size_t, _OpaquePtr
+        ](current_thread_id(), c_size_t(_CPUSET_BYTES), buf)
+    buf.unsafe_free()
+
+
 # ── pthread_self convenience ─────────────────────────────────────────────────
 
 

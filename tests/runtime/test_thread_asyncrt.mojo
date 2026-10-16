@@ -16,6 +16,7 @@ Covers:
 - join from inside a spawned task, including one that spawns its own
   child (the path where an AsyncRT chain wait would donate).
 - The pool-capacity check for long-lived workers.
+- Pinning a worker the way a serving loop does, then restoring its mask.
 - A forked child, which inherits AsyncRT's queue but none of its
   workers, still gets working threads (``spawn`` falls back to
   pthreads there).
@@ -39,6 +40,8 @@ from flare.runtime._thread import (
     _OpaquePtr,
     _null_ptr,
     current_thread_id,
+    restore_thread_affinity,
+    save_thread_affinity,
 )
 from flare.runtime.scheduler import default_worker_count
 from flare.utils import SIGKILL, exit, fork, kill
@@ -131,7 +134,65 @@ def _spawn_and_join_child(arg: _OpaquePtr) -> _OpaquePtr:
     return _null_ptr()
 
 
+def _mask_bits(mask: Int) -> Int:
+    var n = 0
+    var p = Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=mask)
+    for i in range(128):
+        var b = p.unsafe_offset(i)[]
+        while b != 0:
+            n += Int(b & 1)
+            b >>= 1
+    return n
+
+
+def _masks_equal(a: Int, b: Int) -> Bool:
+    var pa = Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=a)
+    var pb = Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=b)
+    for i in range(128):
+        if pa.unsafe_offset(i)[] != pb.unsafe_offset(i)[]:
+            return False
+    return True
+
+
+def _pin_then_restore(arg: _OpaquePtr) -> _OpaquePtr:
+    """What a pinned serving loop does to the worker it runs on: pin to
+    CPU 0, then put the saved mask back. cells[0] = 1 when the pin took
+    and the mask came back unchanged (or the OS has no masks), 2 if not.
+    """
+    var a = Int(arg)
+    var saved = save_thread_affinity()
+    if saved == 0:
+        _store(a, 0, 1)
+        return _null_ptr()
+    var before = save_thread_affinity()
+    var ok = True
+    try:
+        ThreadHandle(_thread_id=current_thread_id()).pin_to_cpu(0)
+    except:
+        ok = False
+    var pinned = save_thread_affinity()
+    ok = ok and _mask_bits(pinned) == 1
+    restore_thread_affinity(saved)
+    var after = save_thread_affinity()
+    ok = ok and _masks_equal(before, after)
+    restore_thread_affinity(pinned)
+    restore_thread_affinity(after)
+    restore_thread_affinity(before)
+    _store(a, 0, 1 if ok else 2)
+    return _null_ptr()
+
+
 # ── Tests ───────────────────────────────────────────────────────────────────
+
+
+def test_pinned_worker_gets_its_mask_back() raises:
+    var cells = _new_cells(1)
+    var h = ThreadHandle.spawn[_pin_then_restore](
+        _OpaquePtr(unsafe_from_address=cells)
+    )
+    h.join()
+    assert_equal(Int(_load(cells, 0)), 1)
+    _free_cells(cells)
 
 
 def test_engine_matches_build() raises:

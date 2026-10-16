@@ -12,8 +12,13 @@ from std.memory import Pointer, alloc
 
 from ..net import SocketAddr
 
-from ._asyncrt import FLARE_USE_ASYNCRT, asyncrt_pool_alive
-from ._thread import ThreadHandle, num_cpus, _OpaquePtr
+from ._thread import (
+    ThreadHandle,
+    num_cpus,
+    restore_thread_affinity,
+    save_thread_affinity,
+    _OpaquePtr,
+)
 from .frontend import Frontend
 from .scheduler_stats import (
     WORKER_STAT_DONE,
@@ -120,12 +125,12 @@ def _worker_entry[F: Frontend](arg: _OpaquePtr) -> _OpaquePtr:
     # happens from the worker itself via pthread_self, so we
     # re-wrap the current thread id into a ThreadHandle just to
     # reuse the ``pin_to_cpu`` helper. Under ``-D FLARE_ASYNCRT`` this
-    # thread is a shared AsyncRT pool worker, so pinning it would pin
-    # every task that later lands on it; the pool owns affinity.
-    var shared_worker = False
-    comptime if FLARE_USE_ASYNCRT:
-        shared_worker = asyncrt_pool_alive()
-    if ctx_ptr[].pin_cores and not shared_worker:
+    # thread is a shared AsyncRT pool worker; the serving loop holds it
+    # until shutdown, so pinning it is safe as long as the original
+    # mask is put back before the task returns.
+    var saved_mask = 0
+    if ctx_ptr[].pin_cores:
+        saved_mask = save_thread_affinity()
         try:
             var cpu = ctx_ptr[].worker_idx % num_cpus()
             var self_handle = ThreadHandle(
@@ -153,6 +158,7 @@ def _worker_entry[F: Frontend](arg: _OpaquePtr) -> _OpaquePtr:
         ctx_ptr[].stats_addr,
         ctx_ptr[].extra_fds.copy(),
     )
+    restore_thread_affinity(saved_mask)
     store_worker_stat(ctx_ptr[].stats_addr, WORKER_STAT_DONE, 1)
 
     # Ctx ownership: the Scheduler main thread destroys + frees every
