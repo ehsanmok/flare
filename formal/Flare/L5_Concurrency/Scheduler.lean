@@ -71,7 +71,7 @@ self-join (`live_handle_calls`), which no in-repo caller performs
 namespace Flare.L5.Scheduler
 
 /-- Worker program counter.
-mirrors flare/runtime/_worker.mojo#_worker_entry sha=3f94db3d9d08 at=59bda50f -/
+mirrors flare/runtime/_worker.mojo#_worker_entry sha=0c7cab63ae89 at=a7838f62 -/
 inductive WPc where
   | start   -- :110-136 read the context (stop address, pinning)
   | loop    -- frontend serve loop: `load_stop_flag(stopping)`
@@ -135,7 +135,7 @@ def init (n : Nat) : St := ⟨List.replicate n w0, false, false, .signal, false�
 def Freed (w : WS) : Bool := w.ctxF || w.statsF || w.lisF
 
 /-- One worker step: the new worker state and whether it dereferenced a
-freed cell. mirrors flare/runtime/_worker.mojo#_worker_entry sha=3f94db3d9d08 at=59bda50f -/
+freed cell. mirrors flare/runtime/_worker.mojo#_worker_entry sha=0c7cab63ae89 at=a7838f62 -/
 def wStep (stop stopF : Bool) (w : WS) : Option (WS × Bool) :=
   match w.pc with
   | .start => some ({ w with pc := .loop }, w.ctxF)
@@ -179,7 +179,7 @@ def mStep (c : Cfg) (s : St) : Option St :=
   | .free => some (freeAll s)
   | .fin => none
 
-/-- mirrors flare/runtime/scheduler.mojo#Scheduler.drain sha=df979eac331a at=193ddcec and flare/runtime/_worker.mojo#_worker_entry sha=3f94db3d9d08 at=59bda50f -/
+/-- mirrors flare/runtime/scheduler.mojo#Scheduler.drain sha=df979eac331a at=193ddcec and flare/runtime/_worker.mojo#_worker_entry sha=0c7cab63ae89 at=a7838f62 -/
 def step (c : Cfg) (s : St) : Lbl → Option St
   | .w i =>
     match s.ws[i]? with

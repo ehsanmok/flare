@@ -43,7 +43,7 @@ flare's security documentation and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 160 (51255 lines) |
+| Lean files | 160 (51256 lines) |
 | Theorems | 2542 |
 | Headline theorems in the axiom audit | 674 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |

@@ -83,7 +83,7 @@ def startAlloc (pre : Bool) (n L : Nat) : H :=
 
 /-- `start` with spawn `k` failing, then the rollback, which also frees
 `_per_worker_listener_addrs` (CONC-06).
-mirrors flare/runtime/scheduler.mojo#Scheduler.start sha=50fb20a5a897 at=3d5fa34a (fixed, CONC-06) -/
+mirrors flare/runtime/scheduler.mojo#Scheduler.start sha=191d0ca804a9 at=a7838f62 (fixed, CONC-06) -/
 def startFail (pre : Bool) (n L k : Nat) : H :=
   let h := spawnR k (startAlloc pre n L)
   let h := alloc (.ctx k) h

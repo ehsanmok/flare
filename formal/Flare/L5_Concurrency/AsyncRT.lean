@@ -60,12 +60,13 @@ inductive CS | running | done | detached
   deriving DecidableEq, Repr
 
 /-- Trampoline program counter.
-mirrors flare/runtime/_asyncrt.mojo#_asyncrt_trampoline sha=b60e20166219 at=59bda50f -/
+mirrors flare/runtime/_asyncrt.mojo#_asyncrt_trampoline sha=911e7d20efd6 at=a7838f62 -/
 inductive TPc
   | queued       -- enqueued by Execute, not yet picked up
   | started      -- after `started := 1` (line 156)
   | argLoaded    -- after `_load(cell, _CELL_ARG)` (line 159)
-  | ran          -- `start(arg)` returned (line 160)
+  | ran          -- `start(arg)` returned (line 160); a serving loop's lease
+                 -- release follows, touching no cell
   | wonPre       -- CAS RUNNING -> DONE succeeded (line 161)
   | wonTail      -- Complete published the chain, still returning (line 162)
   | lostPre      -- CAS failed: state was DETACHED (line 163)
@@ -120,7 +121,7 @@ structure Cfg where
 
 def Cfg.real : Cfg := ⟨false, true⟩
 
-/-- mirrors flare/runtime/_asyncrt.mojo#asyncrt_spawn sha=6c5db715d5de at=59bda50f (zeroed cell,
+/-- mirrors flare/runtime/_asyncrt.mojo#asyncrt_spawn sha=22a4d1c15de3 at=a7838f62 (zeroed cell,
 state RUNNING, chain initialised, enqueued) -/
 def init : St :=
   { cs := .running, started := false, result := false, chain := false,
@@ -144,8 +145,8 @@ inductive Ev
 /-- The interleaving small-step relation. Trampoline steps fire whenever
 `tpc` allows, owner steps whenever `opc` allows; the scheduler is the
 non-deterministic choice of constructor.
-mirrors flare/runtime/_asyncrt.mojo#_asyncrt_trampoline+asyncrt_spawn+asyncrt_join+asyncrt_detach+_nudge_task+_NUDGE_EVERY_NS+asyncrt_wait_started sha=2643d3473caf at=59bda50f and
-flare/runtime/_thread.mojo#ThreadHandle.join+ThreadHandle.detach+ThreadHandle.wait_started sha=1f6f3a366d32 at=59bda50f -/
+mirrors flare/runtime/_asyncrt.mojo#_asyncrt_trampoline+asyncrt_spawn+asyncrt_join+asyncrt_detach+_nudge_task+_NUDGE_EVERY_NS+asyncrt_wait_started sha=3b26e0c9b831 at=a7838f62 and
+flare/runtime/_thread.mojo#ThreadHandle.join+ThreadHandle.detach+ThreadHandle.wait_started sha=1f6f3a366d32 at=a7838f62 -/
 inductive Step (c : Cfg) : St → Ev → St → Prop
   -- trampoline (_asyncrt.mojo:155-168)
   | tStart (s : St) : s.tpc = .queued →
@@ -210,7 +211,7 @@ def cell (c : Cfg) : LTS St Ev where
 /-! ## Executable step function (deterministic once the label is fixed) -/
 
 /-- Executable successor: given the scheduled operation, the next state.
-mirrors flare/runtime/_asyncrt.mojo#_asyncrt_trampoline+asyncrt_spawn+asyncrt_join+asyncrt_detach+_nudge_task+_NUDGE_EVERY_NS+asyncrt_wait_started sha=2643d3473caf at=59bda50f -/
+mirrors flare/runtime/_asyncrt.mojo#_asyncrt_trampoline+asyncrt_spawn+asyncrt_join+asyncrt_detach+_nudge_task+_NUDGE_EVERY_NS+asyncrt_wait_started sha=3b26e0c9b831 at=a7838f62 -/
 def stepFn (c : Cfg) (s : St) : Ev → Option St
   | .tStart => if s.tpc = .queued then
       some { s with started := true, uaf := s.touch, tpc := .started } else none
