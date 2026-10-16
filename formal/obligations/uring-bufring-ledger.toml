@@ -1,0 +1,29 @@
+# Verified kernel: provided-buffer return in the io_uring buffer-ring loop.
+# Retrospective pilot for issue #37 (fixed in 6e32b279): the bug was found by
+# load testing; this record shows the shape a change like that ships with.
+id = "uring-bufring-ledger"
+issue = "https://github.com/ehsanmok/flare/issues/37"
+summary = "Every receive completion that took a provided buffer returns it exactly once, so the ring never drains."
+
+# Anchor refs (no sha): the kernel, and the code that must route its decisions through it.
+kernel = [
+    "flare/http/_bufring_ledger.mojo#classify_recv+RecvDecision+RECV_STAGE+RECV_DROP+RECV_CLOSE",
+    "flare/http/_bufring_ledger.mojo#BufLedger.__init__+BufLedger.on_fill+BufLedger.on_complete",
+]
+call_sites = ["flare/http/_server_reactor_uring.mojo#run_uring_bufring_reactor_loop_shared"]
+
+model = "Flare/Kernels/BufLedger.lean"
+specs = ["RecvOk", "Conserved", "Enabled", "Valid"]
+theorems = ["classify_ok", "run_conserved", "run_inRing_le", "run_drained"]
+difftest = ["bufring_ledger.trace"]
+tests = ["tests/http/test_bufring_ledger.mojo", "tests/http/test_uring_bufring_buffers.mojo"]
+
+# draft | spec-approved | proved. `formal-status` also reports whether the specs are in spec.lock.
+status = "proved"
+
+# What the proof does not cover, so nobody reads more into it.
+out_of_scope = [
+    "That the loop calls _br_return_buf exactly when decision.return_buf is set (one call site per action; reviewed, and exercised by test_uring_bufring_buffers).",
+    "Multishot re-arm and connection cleanup ordering (modelled separately in L5_Concurrency/UringShared.lean).",
+    "The shared-memory tail bump itself (L2_Machine/IoUring.lean, pbuf_add_preserves_tail).",
+]

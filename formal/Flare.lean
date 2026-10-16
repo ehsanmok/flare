@@ -6,6 +6,7 @@ import Flare.L3_Protocol.H2
 import Flare.L3_Protocol.QuicH3
 import Flare.L4_App
 import Flare.L5_Concurrency
+import Flare.Kernels
 import Flare.Machine
 import Flare.MachineHttp
 import Flare.MachineWorkers
