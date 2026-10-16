@@ -44,6 +44,7 @@ def main() raises:
 - **Hard to misuse under load:** Per-request `Cancel` tokens, graceful drain, sanitized 4xx/5xx, TLS cert reload, structured logging, Prometheus metrics, and an in-process `TestClient[H]`.
 - **Fast, with a tight tail:** Thread-per-core reactor (`kqueue` / `epoll`, opt-in `io_uring`); top-of-pack throughput with a p99 median that ties `actix_web` and beats `hyper` / `axum`, plus [match-or-beat-quiche on HTTP/3](#performance).
 - **Fuzzed:** 63 fuzz harnesses, 9M+ runs, zero known crashes; ASan + assert-mode coverage on every FFI boundary.
+- **Formally modelled:** Lean 4 models of the codecs, protocol state machines and concurrency, proved against the RFCs. The 0.12 audit found 138 issues with them, all fixed. Anchors keep the models in sync with the Mojo code, and differential tests run the two side by side. See [Formal verification](#formal-verification).
 
 ## Install
 
@@ -405,6 +406,18 @@ flare.utils    POSIX FFI thunks (fork / waitpid / kill / usleep / exit / getpid)
 
 Each layer imports only from layers below it. No circular dependencies. The full request lifecycle, including the `Cancel` injection point and the per-connection state machine, lives in [`docs/architecture.md`](docs/architecture.md).
 
+## Formal verification
+
+[`formal/`](formal/) holds Lean 4 models of flare, from the byte codecs up through HTTP/1.1, HTTP/2, QUIC and HTTP/3 to the scheduler. Each implementation model is a transliteration of a Mojo function and is proved against a separate spec written from the RFC. The HTTP/2 connection, for example, refines the RFC 9113 §5.1 stream-state machine. The proofs use core Lean only (no `sorry`, no `native_decide`, no extra axioms). The 0.12 audit, [`formal/REPORT.md`](formal/REPORT.md), found 138 issues this way, all of them now fixed.
+
+The models don't rot as the code moves:
+- Every model carries an anchor (`mirrors flare/x.mojo#Symbol sha=…`) that goes stale when the Mojo it mirrors changes. A pre-commit hook blocks a commit that leaves a pinned model behind.
+- A spec lock fingerprints every theorem statement, so a proof can't be passed by weakening its claim. Only a human re-locks.
+- Differential tests run the Lean models and the Mojo code on the same generated inputs.
+- A large change can ship a small Lean-verified sans-I/O kernel, like the io_uring buffer-ring ledger.
+
+Cursor skills and hooks in `.cursor/` let an agent do the model upkeep within those rules. The design, with diagrams, is in [`formal/README.md`](formal/README.md#design).
+
 ## Security
 
 Per-layer security posture and the sanitised-error-response policy live in [`docs/security.md`](docs/security.md). Highlights: RFC 7230 token validation, configurable size limits, sanitised 4xx/5xx bodies, TLS 1.2+ only, WebSocket frame masking + UTF-8 validation, enforced HTTP/2 DoS caps (header-list / CONTINUATION / rapid-reset), client decompression-bomb cap, 62 fuzz harnesses with 9M+ runs and zero known crashes.
@@ -419,7 +432,7 @@ pixi install                  # lean: tests, examples, microbench, format-check
 pixi install -e dev           # adds mojodoc + pre-commit
 ```
 
-flare uses five pixi environments, layered:
+flare uses six pixi environments:
 
 | Env | Adds | What it unlocks |
 |---|---|---|
@@ -427,6 +440,8 @@ flare uses five pixi environments, layered:
 | `dev` | `mojodoc`, `pre-commit` | `docs`, `docs-build`, `format` (with hook install) |
 | `fuzz` | `dev` + `mozz` | `fuzz-*` / `prop-*` |
 | `bench` | `dev` + `go`, `nginx`, `wrk`, `wrk2`, `rust` | `bench-vs-baseline*`, `bench-tail-quick`, `bench-mixed-keepalive`, `bench-soak-*` |
+| `metrics` | `lizard` | `complexity`, `coverage`, `metrics` |
+| `formal` | `lean4` | `formal-build`, `formal-check`, `formal-status`, `difftest*` (see [`formal/`](formal/)) |
 
 Common tasks (run with `pixi run [--environment <env>] <task>`):
 
@@ -437,6 +452,7 @@ Common tasks (run with `pixi run [--environment <env>] <task>`):
 | `check-sans-io` / `check-no-http-http2-cycle` / `check-reactor-size` / `check-example-tasks` | `default` | The four structural lints CI runs on a bare checkout: the sans-io core imports no I/O, `flare.http` and `flare.http2` stay acyclic, per-file size caps with a dated allowlist, and every example is run by something. A few seconds each, no toolchain needed |
 | `interop-smoke` | `default` | Talk to flare with software we did not write: curl and h2load on every wire, plus flare's own streaming client pulling a megabyte on each |
 | `conformance` | `default` | h2spec and the Autobahn WebSocket suite, each gated against a documented known-fail list; a leg whose binary is not provisioned skips rather than passing |
+| `formal-check` / `difftest` / `formal-status` | `formal` | Build the Lean models and audit their axioms; run them against the Mojo code on generated inputs; show stale anchors, unlocked specs and verified kernels on one screen |
 | `docs` / `docs-build` | `dev` | mojodoc-rendered package docstring (live or static) |
 | `fuzz-all` | `fuzz` | Every harness in [`fuzz/`](fuzz/) (63 harnesses, 9M+ runs combined) |
 | `fuzz-<name>` / `prop-<name>` | `fuzz` | Single harness - see [`pixi.toml`](pixi.toml) for the full list |

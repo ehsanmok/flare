@@ -118,6 +118,20 @@ release-gate) shape live with the rest of the performance work in
 
 ---
 
+## Formal models
+
+Fuzzing samples inputs; the Lean 4 models in
+[`formal/`](../formal/README.md) prove properties for all of them. The
+codecs, the HTTP/1.1, HTTP/2, WebSocket, QUIC and HTTP/3 state
+machines, and the scheduler are transliterated into Lean and checked
+against specs written from the RFCs. Differential tests then run the
+models against the Mojo code, so a transliteration error shows up too.
+The 0.12 audit ([`formal/REPORT.md`](../formal/REPORT.md)) found 138
+issues this way, all fixed. Anchors on every model and a pre-commit
+gate keep the proofs about the code that ships.
+
+---
+
 ## Reporting
 
 For security issues, please open a private security advisory on
