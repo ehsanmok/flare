@@ -18,3 +18,12 @@ repos:
         entry: pixi run -e dev format
         language: system
         pass_filenames: false
+    -   id: formal-drift
+        name: Formal drift gate (Lean anchors, spec guard, difftest)
+        # Blocks a commit that changes Mojo code a pinned Lean model mirrors
+        # without refreshing the model; see formal/scripts/precommit.sh.
+        # Bypass with a reason: FORMAL_SKIP=1 git commit ...
+        entry: pixi run -e formal formal-precommit
+        language: system
+        pass_filenames: false
+        files: ^(flare|formal)/

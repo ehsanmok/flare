@@ -329,7 +329,13 @@ lean4 = ">=4.33.0,<4.34"
 [feature.formal.tasks]
 formal-build = { cmd = "lake build", cwd = "formal" }
 formal-check = "bash formal/scripts/check.sh"
+# Re-lock theorem statements and spec definitions after a human reviewed the change.
+# Agents must never run this (a Cursor hook denies it); see formal/scripts/spec_guard.py.
+formal-spec-lock = "python3 formal/scripts/spec_guard.py --lock"
+# Drift gate run by the `formal-drift` pre-commit hook (anchors, build, spec guard, difftest).
+formal-precommit = "bash formal/scripts/precommit.sh"
 formal-anchors = "python3 formal/scripts/anchors.py check"   # every stale anchor, by tier
+formal-status  = "python3 formal/scripts/status.py"          # anchors, spec guard, difftest, obligations
 # Differential testing: Lean impl/spec models vs the Mojo code (formal/difftest/).
 # The runner builds the oracle here and the Mojo drivers in the default env.
 formal-oracle-build = { cmd = "lake build flare-oracle", cwd = "formal" }
