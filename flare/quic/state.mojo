@@ -314,9 +314,7 @@ struct Connection(Copyable):
     been opened (client 0, 4, ...; server 1, 5, ...). The client advances
     it in ``open_bidi_stream``; the server opens none."""
     var next_local_uni: UInt64
-    """The same for unidirectional streams (client 2, 6, ...; server 3, ...).
-    The server opens only its HTTP/3 control stream 3
-    (:func:`mark_local_stream_opened`)."""
+    """The same for unidirectional streams (client 2, 6, ...; server 3, ...)."""
 
 
 def new_connection(
@@ -366,11 +364,10 @@ comptime STREAM_FRAME_DATA: Int = 2
 
 
 def mark_local_stream_opened(mut conn: Connection, sid: UInt64):
-    """Record that we opened the locally initiated stream ``sid`` by
-    sending on it outside ``conn.streams`` (the server's HTTP/3 control
-    stream, RFC 9114 sec 6.2.1), so :func:`check_stream_frame_id` accepts
-    the peer's STOP_SENDING / MAX_STREAM_DATA for it (RFC 9000 sec 19.10).
-    """
+    """Record that we opened local stream ``sid`` by sending on it outside
+    ``conn.streams`` (the server's HTTP/3 control stream), so
+    :func:`check_stream_frame_id` accepts the peer's STOP_SENDING /
+    MAX_STREAM_DATA for it (RFC 9000 sec 19.10)."""
     if (sid & UInt64(2)) != 0:
         if sid >= conn.next_local_uni:
             conn.next_local_uni = sid + UInt64(4)
