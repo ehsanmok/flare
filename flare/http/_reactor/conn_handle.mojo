@@ -359,6 +359,11 @@ struct ConnHandle(Movable):
     """The peer has half-closed (FIN / close_notify) with a request still
     buffered. That request is served, with ``Connection: close``."""
 
+    var short_read_ok: Bool
+    """Set by a driver whose readiness event carried no HUP: a ``recv``
+    that does not fill the chunk then ends the drain without an extra
+    probe. Left False (full drain to EAGAIN) by every other driver."""
+
     var request_started_ms: Int
     """Monotonic ms at which the first byte of the request being read
     was seen; 0 between requests. Bounds the whole read phase (head and
@@ -401,6 +406,7 @@ struct ConnHandle(Movable):
         self.head_request = False
         self.request_started_ms = 0
         self.peer_eof = False
+        self.short_read_ok = False
         self.h2c_upgrade_allowed = False
         self.continue_sent = False
         self.continue_pending = List[UInt8]()
@@ -447,7 +453,7 @@ struct ConnHandle(Movable):
         flips_cancel_on_close: Bool
     ](mut self, config: ServerConfig) raises -> Optional[StepResult]:
         """Drain the non-blocking socket via ``_recv`` into
-        ``self.read_buf`` until EAGAIN. Returns ``Some(StepResult)``
+        ``self.read_buf`` until a short read or EAGAIN. Returns ``Some(StepResult)``
         when the state machine should bail (peer-close, oversize,
         hard error); ``None`` when the buffer is up-to-date and the
         caller should fall through to the parse step.
@@ -480,6 +486,16 @@ struct ConnHandle(Movable):
                     self._note_head_from_buf()
                     self._queue_error(413, "Content Too Large")
                     return Optional[StepResult](self._transition_to_writing())
+                # A read that did not fill the chunk emptied the socket
+                # (``recv`` returns what is queued, up to the chunk), so
+                # another call would only report EAGAIN. Registration is
+                # level-triggered: anything that arrives later raises
+                # the next event. A peer shutdown is the exception to
+                # skipping the probe: the response to a request that came
+                # with the FIN must announce ``close``, so a driver sets
+                # ``short_read_ok`` only for an event without HUP.
+                if self.short_read_ok and got_int < 8192:
+                    break
             elif got == 0:
                 self.should_close = True
                 # A FIN after a complete request is a half-close: the

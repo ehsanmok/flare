@@ -857,6 +857,7 @@ def _unified_handle_conn_event[
     mut wheel: TimerWheel,
     mut timers: Dict[Int, UInt64],
     ws_hooks: Optional[WsH2Hooks] = None,
+    peer_hup: Bool = False,
 ) raises:
     """Dispatch one reactor event for an already-known connection fd.
 
@@ -899,6 +900,7 @@ def _unified_handle_conn_event[
             or (tls_cross and is_writable)
             or h1_ptr[]._h2c_upgrade_pending
         ):
+            h1_ptr[].short_read_ok = not peer_hup
             done3 = _drive_h1(
                 fd,
                 _addr(packed),
@@ -1268,6 +1270,7 @@ def _run_unified_loop_for_fd[
                 wheel,
                 timers,
                 ws_hooks.copy(),
+                peer_hup=evt.is_hup(),
             )
 
         # Deadlines that passed while this poll's events were pending are
@@ -1455,6 +1458,7 @@ def run_unified_reactor_loop_multi[
                 reactor,
                 wheel,
                 timers,
+                peer_hup=evt.is_hup(),
             )
 
         # Deadlines that passed while this poll's events were pending are
