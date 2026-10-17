@@ -8,6 +8,14 @@ CI, so they stay green with the code. Run any single example with
 `pixi run example-<name>` (see [`pixi.toml`](../pixi.toml) for the
 full task list).
 
+## Imports and handler shapes
+
+`flare.prelude` and the root `flare` package export the same list: `Request`, `Response`, `Router`, `HttpServer`, the `ok` / `ok_json` / `not_found` / ... builders, `Method` / `Status`, the `Handler` family, `SocketAddr`, the extractors, the stock middleware, sessions, and the TCP / TLS / Unix / WebSocket types. A symbol is on it if another exported symbol's signature names it, or if the examples need it. Wire-format codecs, runtime primitives and anything in a `_`-prefixed module keep their own import, for example `from flare.http2 import Http2Connection`. Code meant to last is better off naming the module it takes things from.
+
+`srv.serve(r^)` accepts any `Handler`. Multi-worker (`num_workers=N`) needs a `Copyable` handler, since each worker gets its own `H.copy()`; `Router` qualifies because its routes sit behind an Arc-style refcount. `raises` on a handler is optional and tracks the body: drop it when the handler cannot fail, keep it when it parses input or does I/O (the server converts a raise to a sanitized 500). For stateful infallible handlers see [`HandlerInfallible`](../examples/intermediate/infallible_handler.mojo).
+
+Free with every server: 404 on unknown paths, 405 with `Allow`, sanitized 4xx/5xx, peer-FIN cancellation, RFC 7230 size limits, per-worker `kqueue` / `epoll` (opt-in `io_uring`).
+
 ## Basic — networking primitives, hello-world HTTP, simple WS
 
 The "first ten minutes with flare" surface. Plain functions, no
