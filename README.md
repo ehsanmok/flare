@@ -281,7 +281,7 @@ TFB plaintext (`GET /plaintext` returning 13 bytes of `Hello, World!`), `wrk2 -t
 
 The σ on the tail percentiles is the **honesty meter**: a small σ means all 5 runs landed inside the working envelope; a σ in the tens or hundreds of ms means at least one run brushed the saturation cliff and the headline rate is sitting at the limit, not comfortably inside it.
 
-**4-worker comparison** (the four frameworks that ship a multi-worker mode):
+**4-worker comparison** (the servers that ship a multi-worker mode):
 
 | Server | Workers | Req/s | σ%  | p50 (ms) | p99 (ms) | p99.9 (ms) | p99.99 (ms) |
 |---|---:|---:|---:|---:|---:|---:|---:|
@@ -297,16 +297,16 @@ Same box, same harness, one run for all five rows, flare workers pinned (the ben
 
 | Server | Workers | Req/s | σ%  | p50 (ms) | p99 (ms) | p99.9 (ms) | p99.99 (ms) |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| nginx (`worker_processes 1`) | 1 | 204,634 | 0.34 | 1.14 ± 0.02 | 2.48 ± 2.64 | 2.90 ± 7.09 | 3.30 ± 7.96 |
-| **flare** (reactor) | **1** | **135,104** | **0.16** | **0.88 ± 0.00** | **1.93 ± 0.06** | **2.44 ± 3.61** | **3.47 ± 6.24** |
-| Go `net/http` (`GOMAXPROCS=1`) | 1 | 80,477 | 0.16 | 1.01 ± 0.01 | 2.56 ± 0.33 | 4.73 ± 10.16 | 6.12 ± 13.53 |
+| nginx (`worker_processes 1`) | 1 | 211,873 | 0.28 | 1.17 ± 0.02 | 7.43 ± 4.62 | 16.66 ± 10.11 | 18.70 ± 11.11 |
+| **flare** (reactor) | **1** | **168,128** | **0.16** | **1.01 ± 0.02** | **2.28 ± 0.10** | **4.67 ± 3.45** | **6.45 ± 4.04** |
+| Go `net/http` (`GOMAXPROCS=1`) | 1 | 98,691 | 0.21 | 1.10 ± 0.02 | 3.82 ± 7.60 | 14.98 ± 11.41 | 17.38 ± 12.61 |
 
 What jumps out:
 
-- **flare_mc** (the handler path) reads `0.90x` actix with pinned workers and `0.93x` with unpinned ones, up from `0.77x` before connections were balanced across workers and the extra `recv` per request was removed ([details](docs/benchmark.md#flare_mc-against-actix_web-profile-and-fixes)). It is level with `flare_mc_static` in the pinned run, `-2 %` against hyper and `+7 %` against axum. Raw capacity is `746k` against actix's `782k req/s`.
-- **flare_mc_static** (fixed-response fast path) reads `0.89x` actix pinned and `0.98x` unpinned, with the most raw capacity of any server (`845k`). On this VM unpinned workers were faster than pinned ones in every comparison, by about `5-10 %`; the default stays pinned.
-- **Every 4-worker row is stable:** all five runs of every server stayed inside the envelope, σ `<= 0.33 %` on throughput.
-- **flare 1w** has the lowest p50 and p99 of the single-worker servers and does `1.7x` Go `net/http`, but nginx does `1.5x` flare at 256 connections. At 64 connections (one wrk2 thread) flare leads nginx by `11 %` (`187k` against `167k req/s`), so the single reactor loses ground as the connection count grows.
+- **flare_mc** (the handler path) reads `0.90x` actix with pinned workers and `0.93x` with unpinned ones; raw capacity is `746k` against actix's `782k req/s` ([profile and details](docs/benchmark.md#handler-path-against-actix_web-profile)). In the pinned run it is level with `flare_mc_static`, `-2 %` against hyper and `+7 %` against axum.
+- **flare_mc_static** (fixed-response fast path) reads `0.89x` actix pinned and `0.98x` unpinned, with the most raw capacity of any server (`845k`). On this VM unpinned workers were faster than pinned ones by about `5-10 %`; the default stays pinned.
+- **Every 4-worker row is stable:** all five runs of every server stayed inside the envelope, σ `<= 0.45 %` on throughput.
+- **flare 1w** has the lowest p50 and p99 of the single-worker servers and does `1.7x` Go `net/http`, while nginx does `1.26x` flare at 256 connections. At 64 connections (one wrk2 thread) nginx leads flare by `5 %` (`203k` against `193k req/s`), so the single reactor loses ground as the connection count grows.
 - **Threads:** AsyncRT matched the old pthread engine within `±1 %` in paired runs at 1-48 workers, and spawns a task in `6.3 µs` against `57 µs` for an OS thread.
 
 **HTTP/3 throughput:** The full flare HTTP/3 wire path landed in v0.8 - codec, AEAD, rustls QUIC binding, state machine, HTTP/3 dispatch, and the live UDP reactor I/O loop. On the 1-client × 100-stream workload (5×30 s runs, h2load with `--log-file`), flare does `129,635 req/s` (σ `0.61 %`, p99 `1.03 ms`, p99.99 `1.40 ms`) against quiche's `153,494 req/s` (σ `2.95 %`, p99 `0.86 ms`, p99.99 `3.28 ms`): `0.84x` the throughput with the tighter extreme tail. On the older EPYC box flare led quiche by `2.9 %` with `--log-file` off and read the same `0.85x` with it on. The HTTP/3 path got fast through the reactor rewrite - eliminating per-packet whole-connection deep copies (in-place `ref` mutation), a cached-table QPACK decode path, and coalesced 1-RTT egress with capacity-reserved packet builders - not from egress syscall batching (ingress `recvmmsg` is built and default-on; egress `sendmmsg`/GSO are built in `flare.udp.batch` but not yet wired into QUIC egress, which leaves room against quiche). `quinn 0.11 + h3 0.0.8` is not a valid comparison at this workload shape (98% errored streams) and is excluded pending recalibration. Full table, baselines, and h2load+H3 build recipe in [`docs/benchmark.md#http3-throughput`](docs/benchmark.md#http3-throughput).
