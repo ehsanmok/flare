@@ -507,6 +507,7 @@ test-thread-engine   = "mojo -I . tests/runtime/test_thread_engine.mojo"      # 
 bench-threads        = "bash benchmark/scripts/bench_threads.sh"             # spawn/join, fan-out and block_in_pool cost: AsyncRT tasks vs OS threads
 test-reuseport       = "mojo -I . tests/runtime/test_reuseport.mojo"          # v0.4.0 Track 3 — SO_REUSEPORT helper (~6 tests)
 test-scheduler       = "mojo -I . tests/runtime/test_scheduler.mojo"          # v0.4.0 Track 3 — multicore Scheduler lifecycle (~6 tests)
+test-balance         = "mojo -I . tests/runtime/test_balance.mojo"            # accept-time connection balancing across workers (~12 tests)
 test-server-multicore = "mojo -I . tests/http/test_server_multicore.mojo"  # v0.4.0 Track 3 — HttpServer multicore (~7 tests)
 test-extractors      = "mojo -I . tests/http/test_extractors.mojo"         # v0.4.1 Track 2 — Typed extractors + Extracted[H] (~42 tests)
 test-extractors-concrete = "mojo -I . tests/http/test_extractors_concrete.mojo"  # v0.5.0 Step 2 — concrete PathInt/PathStr/etc. (~30 tests)
