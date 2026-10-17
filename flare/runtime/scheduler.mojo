@@ -85,6 +85,7 @@ from ..tcp import TcpListener
 
 from ._thread import ThreadHandle, num_cpus, _OpaquePtr
 from .frontend import Frontend
+from ._balance import balance_group_alloc, balance_group_free
 from .reuseport import bind_reuseport, bind_shared
 
 # Re-exported so the reactor loops' existing
@@ -99,6 +100,8 @@ from .scheduler_stats import (
     WORKER_STAT_STATUS,
     WORKER_STAT_DONE,
     WORKER_STAT_SLOTS,
+    WORKER_STAT_GROUP,
+    WORKER_STAT_INDEX,
     WORKER_STATUS_RUNNING,
     WORKER_STATUS_CLEAN,
     WORKER_STATUS_CRASHED,
@@ -265,6 +268,10 @@ struct Scheduler[F: Frontend](Movable):
     # (in-flight snapshot + exit status). Read by ``drain`` after the
     # workers join; freed on teardown. Empty until ``start``.
     var _stats_addrs: List[Int]
+    # Accept-balancing group block shared by every worker
+    # (``flare.runtime._balance``); 0 when balancing is off or there is a
+    # single worker. Freed with the stats cells.
+    var _balance_addr: Int
     # Number of workers whose last run exited with WORKER_STATUS_CRASHED,
     # captured from the stats cells during ``shutdown`` / ``drain`` before
     # they are freed. Lets callers tell a crash from a clean shutdown
@@ -285,6 +292,7 @@ struct Scheduler[F: Frontend](Movable):
         self._ctx_addrs = List[Int]()
         self._stopping_addr = 0
         self._stats_addrs = List[Int]()
+        self._balance_addr = 0
         self._last_crash_count = 0
 
     @staticmethod
@@ -475,11 +483,17 @@ struct Scheduler[F: Frontend](Movable):
         # Allocated on this thread before any pthread spawns; the worker
         # writes them, ``drain`` reads them after join, teardown frees
         # them. Native Mojo allocator (see _scheduler_free_raw).
-        for _ in range(num_workers):
+        # Several workers share one block that balances accepted
+        # connections between them; ``FLARE_BALANCE_ACCEPT=0`` opts out.
+        if num_workers >= 2 and getenv("FLARE_BALANCE_ACCEPT") != "0":
+            s._balance_addr = balance_group_alloc(num_workers)
+        for w in range(num_workers):
             var sp = alloc(Layout[Int64](count=WORKER_STAT_SLOTS)).unsafe_leak()
             sp[unsafe_offset=WORKER_STAT_INFLIGHT] = Int64(0)
             sp[unsafe_offset=WORKER_STAT_STATUS] = Int64(WORKER_STATUS_RUNNING)
             sp[unsafe_offset=WORKER_STAT_DONE] = Int64(0)
+            sp[unsafe_offset=WORKER_STAT_GROUP] = Int64(s._balance_addr)
+            sp[unsafe_offset=WORKER_STAT_INDEX] = Int64(w)
             s._stats_addrs.append(Int(sp))
 
         # If we need per-worker listeners (io_uring buffer-ring
@@ -608,6 +622,8 @@ struct Scheduler[F: Frontend](Movable):
                         _OpaquePtr(unsafe_from_address=s._stats_addrs[k])
                     )
                 s._stats_addrs.clear()
+                balance_group_free(s._balance_addr)
+                s._balance_addr = 0
                 # The pre-bound per-worker listeners (default mode) were
                 # never freed here, so a failed start left every one of
                 # them open and bound (CONC-06). All workers joined.
@@ -734,6 +750,8 @@ struct Scheduler[F: Frontend](Movable):
                 _OpaquePtr(unsafe_from_address=self._stats_addrs[i])
             )
         self._stats_addrs.clear()
+        balance_group_free(self._balance_addr)
+        self._balance_addr = 0
 
         if self._stopping_addr != 0:
             var stop_raw = _OpaquePtr(unsafe_from_address=self._stopping_addr)

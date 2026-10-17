@@ -74,6 +74,8 @@ from flare.runtime import (
     INTEREST_WRITE,
     LISTENER_TOKEN,
 )
+from flare.runtime._balance import Balancer
+from flare.runtime.pool import Pool
 from flare.runtime.scheduler import (
     load_stop_flag,
     store_worker_stat,
@@ -660,6 +662,113 @@ def _migrate_pending(
 # ── Accept loop with deferred-protocol handles ─────────────────────────────
 
 
+def _adopt_unified_stream(
+    var stream: TcpStream,
+    mut reactor: Reactor,
+    mut conns: Dict[Int, Int],
+    mut wheel: TimerWheel,
+    mut timers: Dict[Int, UInt64],
+    idle_timeout_ms: Int,
+    tls_ctx_addr: Int,
+):
+    """Register an accepted (non-blocking) stream on this worker.
+
+    Cleartext listeners produce a KIND_PENDING
+    :class:`PendingConnHandle` that peeks for the HTTP/2 preface. When
+    ``tls_ctx_addr`` is non-zero the connection starts as a KIND_TLS
+    :class:`TlsConnHandle` instead and the protocol is settled by ALPN
+    at the end of the handshake. A failed allocation or registration
+    drops the stream, which closes it.
+    """
+    var client_fd = Int(stream._socket.fd)
+    var addr: Int
+    var kind: Int
+    if tls_ctx_addr != 0:
+        var ctx_ptr = Pointer[UInt8, MutUntrackedOrigin](
+            unsafe_from_address=tls_ctx_addr
+        ).unsafe_bitcast[ServerCtx]()
+        try:
+            addr = _tls_conn_alloc_addr(stream^, ctx_ptr[])
+        except:
+            return
+        kind = KIND_TLS
+    else:
+        try:
+            addr = _pending_conn_alloc_addr(stream^)
+        except:
+            return
+        kind = KIND_PENDING
+    conns[client_fd] = _pack(kind, addr)
+    try:
+        reactor.register(c_int(client_fd), UInt64(client_fd), INTEREST_READ)
+    except:
+        if kind == KIND_TLS:
+            _tls_conn_free_addr(addr)
+        else:
+            _pending_conn_free_addr(addr)
+        try:
+            _ = conns.pop(client_fd)
+        except:
+            pass
+        return
+    _arm_accept_timer(client_fd, wheel, timers, idle_timeout_ms)
+
+
+def _hand_off_stream(
+    var stream: TcpStream, target: Int, bal: Balancer
+) -> Optional[TcpStream]:
+    """Give ``stream`` to worker ``target`` through its inbox.
+
+    Returns ``None`` once the peer owns it. When the peer refuses (it
+    stopped, or its inbox is full) the stream comes back so the caller
+    keeps the connection. A failed heap allocation drops it, which
+    closes the connection; the allocation is one small cell.
+    """
+    var addr: Int
+    try:
+        addr = Pool[TcpStream].alloc_move(stream^)
+    except:
+        return None
+    if bal.push(target, addr):
+        return None
+    var cell = Pool[TcpStream].get_ptr(addr)
+    var back = cell.unsafe_take_pointee()
+    cell.unsafe_free()
+    return Optional[TcpStream](back^)
+
+
+def _adopt_handed_off(
+    bal: Balancer,
+    mut reactor: Reactor,
+    mut conns: Dict[Int, Int],
+    mut wheel: TimerWheel,
+    mut timers: Dict[Int, UInt64],
+    idle_timeout_ms: Int,
+    max_connections: Int,
+    tls_ctx_addr: Int,
+):
+    """Register every stream peers left in this worker's inbox."""
+    while True:
+        var addr = bal.pop()
+        if addr == 0:
+            break
+        var cell = Pool[TcpStream].get_ptr(addr)
+        var stream = cell.unsafe_take_pointee()
+        cell.unsafe_free()
+        if max_connections > 0 and len(conns) >= max_connections:
+            continue
+        _adopt_unified_stream(
+            stream^,
+            reactor,
+            conns,
+            wheel,
+            timers,
+            idle_timeout_ms,
+            tls_ctx_addr,
+        )
+    bal.publish(len(conns))
+
+
 def _accept_loop_unified_fd(
     listener_fd: Int,
     mut reactor: Reactor,
@@ -669,15 +778,10 @@ def _accept_loop_unified_fd(
     idle_timeout_ms: Int,
     max_connections: Int = 0,
     tls_ctx_addr: Int = 0,
+    bal: Balancer = Balancer(),
 ):
     """Accept every available connection on ``listener_fd`` and
     register it in the shared ``conns`` table.
-
-    Cleartext listeners produce a KIND_PENDING
-    :class:`PendingConnHandle` that peeks for the HTTP/2 preface. When
-    ``tls_ctx_addr`` is non-zero the listener is TLS-terminating, so the
-    connection starts as a KIND_TLS :class:`TlsConnHandle` instead and
-    the protocol is settled by ALPN at the end of the handshake.
 
     Used by every single-listener unified loop variant (dedicated,
     shared/EPOLLEXCLUSIVE, multi-listener); the dedicated variant
@@ -686,6 +790,11 @@ def _accept_loop_unified_fd(
     ``max_connections`` (0 = unlimited) caps the per-worker live table
     and the errno decides the stop/skip action -- same admission
     contract as the HTTP/1.1 ``_accept_loop_fd`` (D8).
+
+    When ``bal`` is enabled and this worker holds clearly more
+    connections than the least-loaded peer, the new stream goes to that
+    peer instead (see ``flare.runtime._balance``); otherwise it stays
+    here, as before.
     """
     while True:
         if max_connections > 0 and len(conns) >= max_connections:
@@ -701,38 +810,23 @@ def _accept_loop_unified_fd(
             stream._socket.set_nonblocking(True)
         except:
             pass
-        var client_fd = Int(stream._socket.fd)
-        var addr: Int
-        var kind: Int
-        if tls_ctx_addr != 0:
-            var ctx_ptr = Pointer[UInt8, MutUntrackedOrigin](
-                unsafe_from_address=tls_ctx_addr
-            ).unsafe_bitcast[ServerCtx]()
-            try:
-                addr = _tls_conn_alloc_addr(stream^, ctx_ptr[])
-            except:
-                continue
-            kind = KIND_TLS
-        else:
-            try:
-                addr = _pending_conn_alloc_addr(stream^)
-            except:
-                continue
-            kind = KIND_PENDING
-        conns[client_fd] = _pack(kind, addr)
-        try:
-            reactor.register(c_int(client_fd), UInt64(client_fd), INTEREST_READ)
-        except:
-            if kind == KIND_TLS:
-                _tls_conn_free_addr(addr)
-            else:
-                _pending_conn_free_addr(addr)
-            try:
-                _ = conns.pop(client_fd)
-            except:
-                pass
-            continue
-        _arm_accept_timer(client_fd, wheel, timers, idle_timeout_ms)
+        if bal.enabled():
+            var target = bal.pick(len(conns))
+            if target >= 0:
+                var back = _hand_off_stream(stream^, target, bal)
+                if not back:
+                    continue
+                stream = back.take()
+        _adopt_unified_stream(
+            stream^,
+            reactor,
+            conns,
+            wheel,
+            timers,
+            idle_timeout_ms,
+            tls_ctx_addr,
+        )
+        bal.publish(len(conns))
 
 
 # ── Shared per-event dispatch + lifecycle helpers ──────────────────────────
@@ -1098,14 +1192,29 @@ def _run_unified_loop_for_fd[
     var events = List[Event]()
     var exit_status = WORKER_STATUS_CLEAN
     var stopping_addr = Int(Pointer[Bool, _](to=stopping))
+    # Joins the scheduler's accept-balancing group (disabled for a lone
+    # worker or when ``FLARE_BALANCE_ACCEPT=0``).
+    var bal = Balancer.open(stats_addr, reactor.wake_fd())
     while not load_stop_flag(stopping_addr):
         store_worker_stat(stats_addr, WORKER_STAT_INFLIGHT, len(conns))
+        bal.publish(len(conns))
         events.clear()
         try:
             _ = reactor.poll(_poll_timeout_ms(wheel), events)
         except:
             exit_status = WORKER_STATUS_CRASHED
             break
+        if bal.pending() > 0:
+            _adopt_handed_off(
+                bal,
+                reactor,
+                conns,
+                wheel,
+                timers,
+                config.idle_timeout_ms,
+                config.max_connections,
+                tls_ctx_addr,
+            )
 
         var now_ms = UInt64(_monotonic_ms())
         var fired_fds = List[Int]()
@@ -1126,6 +1235,7 @@ def _run_unified_loop_for_fd[
                     config.idle_timeout_ms,
                     config.max_connections,
                     tls_ctx_addr,
+                    bal,
                 )
                 continue
             var fd = Int(evt.token)
@@ -1139,6 +1249,7 @@ def _run_unified_loop_for_fd[
                     config.idle_timeout_ms,
                     config.max_connections,
                     tls_ctx_addr,
+                    bal,
                 )
                 continue
             if fd not in conns:
@@ -1167,6 +1278,14 @@ def _run_unified_loop_for_fd[
             _cleanup_conn_unified(expired[i], conns, timers, reactor, wheel)
 
     store_worker_stat(stats_addr, WORKER_STAT_STATUS, exit_status)
+    # Stop taking hand-offs, then close what peers queued before that
+    # (a stream dropped here closes its fd).
+    bal.close()
+    while True:
+        var left = bal.pop()
+        if left == 0:
+            break
+        Pool[TcpStream].free(left)
     # Publish what was actually still in flight when the loop stopped,
     # so Scheduler.drain reports a measured number rather than the
     # count from whichever iteration happened to run last.

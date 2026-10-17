@@ -645,6 +645,15 @@ struct Reactor(Movable):
             b.unsafe_write(UInt8(1))
             _ = self._io.write(self._wake_write, b, c_size_t(1))
 
+    def wake_fd(self) -> Int:
+        """The fd another thread writes to make ``poll`` return.
+
+        Lets a peer wake this reactor without holding a reference to it
+        (``flare.runtime._balance`` publishes it for connection
+        hand-off). Write 8 bytes; ``poll`` drains them.
+        """
+        return Int(self._wake_write)
+
     # ── Introspection ─────────────────────────────────────────────────────────
 
     def registered_count(self) -> Int:
