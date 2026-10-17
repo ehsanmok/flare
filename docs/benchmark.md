@@ -1915,36 +1915,24 @@ tables above; compare rows within a table.
 ### HTTP/1.1, 4 workers (`throughput_mc`: wrk2, 8 threads, 256 connections)
 
 One harness run for all five servers; flare workers pinned (the benchmark
-default). Absolute numbers move by about 5 % between runs on this shared
-box, so compare rows within one run.
+default, `FLARE_BENCH_PIN=1`). Absolute numbers move by about 5 % between
+runs on this shared box, so compare rows within one run.
 
 | Server | Workers | Req/s | σ% | p50 (ms) | p99 (ms) | p99.9 (ms) | p99.99 (ms) | Raw capacity |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| actix_web | 4 | 594,048 | 0.20 | 1.05 ± 0.00 | 2.74 ± 0.09 | 3.28 ± 8.35 | 3.63 ± 14.30 | 782k |
-| hyper | 4 | 545,338 | 0.20 | 1.06 ± 0.01 | 2.67 ± 0.02 | 3.19 ± 0.02 | 3.61 ± 0.04 | 570k |
-| **flare_mc** (handler) | **4** | **533,640** | **0.02** | **1.12 ± 0.01** | **2.77 ± 0.04** | **3.30 ± 3.27** | **3.66 ± 7.36** | **746k** |
-| **flare_mc_static** | **4** | **530,615** | **0.45** | **1.14 ± 0.01** | **2.62 ± 0.03** | **3.11 ± 0.03** | **3.45 ± 1.72** | **845k** |
-| axum | 4 | 499,529 | 0.32 | 1.06 ± 0.01 | 2.77 ± 2.01 | 3.31 ± 10.64 | 3.74 ± 12.36 | 511k |
+| **flare_mc_static** | **4** | **705,569** | **0.20** | **1.07 ± 0.02** | **2.82 ± 0.06** | **3.40 ± 3.69** | **4.98 ± 6.26** | **903k** |
+| actix_web | 4 | 610,408 | 0.32 | 1.03 ± 0.01 | 2.78 ± 0.12 | 3.48 ± 6.86 | 4.66 ± 9.04 | 781k |
+| **flare_mc** (handler) | **4** | **607,940** | **0.20** | **1.06 ± 0.02** | **3.00 ± 0.11** | **6.30 ± 2.34** | **14.49 ± 7.69** | **737k** |
+| hyper | 4 | 556,619 | 0.20 | 1.05 ± 0.00 | 2.67 ± 1.85 | 3.20 ± 7.50 | 3.59 ± 8.70 | 569k |
+| axum | 4 | 489,422 | 0.32 | 1.08 ± 0.00 | 2.71 ± 0.01 | 3.23 ± 0.02 | 3.71 ± 1.14 | 512k |
 
-The same harness with `FLARE_BENCH_PIN=0` (flare workers unpinned), actix in
-the same run:
-
-| Server | Workers | Req/s | σ% | p50 (ms) | p99 (ms) | p99.9 (ms) | p99.99 (ms) | Raw capacity |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| actix_web | 4 | 628,895 | 0.17 | 0.98 ± 0.01 | 2.79 ± 0.25 | 3.58 ± 6.08 | 4.90 ± 8.66 | 783k |
-| **flare_mc_static** | **4** | **616,960** | **0.20** | **1.05 ± 0.03** | **2.89 ± 0.11** | **5.98 ± 2.94** | **10.72 ± 4.72** | **858k** |
-| **flare_mc** (handler) | **4** | **584,691** | **0.20** | **1.08 ± 0.02** | **2.86 ± 0.03** | **3.40 ± 0.13** | **4.99 ± 1.13** | **748k** |
-
-- The handler path reads `0.90x` actix with pinned workers and `0.93x`
-  unpinned; on raw capacity it is `0.95x`. In the pinned run it is level
-  with the static path, `-2 %` against hyper and `+7 %` against axum.
-- The static path reads `0.89x` actix pinned and `0.98x` unpinned, and has
-  the most raw capacity of any server (`+8 %` over actix).
-- On this VM unpinned workers were faster than pinned ones by about
-  `5-10 %`. Moving wrk2 to cores 4-47 so it cannot preempt the pinned
-  workers did not change that, so co-location does not explain it. The cause
-  is not established; `pin_cores` and the benchmark's `FLARE_BENCH_PIN=1`
-  default are unchanged.
+- The handler path reads `1.00x` actix in this run (`0.96x` in a second
+  run of the three on the same box); on raw capacity it is `0.94x`. It is
+  `+9 %` against hyper and `+24 %` against axum.
+- The static path reads `1.16x` actix (`1.08x` in the second run) and has
+  the most raw capacity of any server (`+16 %` over actix).
+- The handler path's p99.9 and p99.99 are the loosest of the five rows
+  (`6.30` and `14.49 ms`).
 
 ### Handler path against actix_web: profile
 
@@ -1959,41 +1947,34 @@ counters, CPU per request from `/proc/<pid>/stat`, syscalls from `strace -c`):
 
 | Server | user µs/req | sys µs/req | total µs/req | `recv` per request |
 |---|---:|---:|---:|---:|
-| flare_mc_static | 0.66 | 4.44 | 5.09 | 2 (one returns EAGAIN) |
-| actix_web | 1.39 | 4.00 | 5.39 | 1 |
-| flare_mc (handler) | 1.55 | 4.14 | 5.68 | 1 |
+| flare_mc_static | 0.61 | 4.17 | 4.78 | 1 |
+| actix_web | 1.43 | 4.03 | 5.47 | 1 |
+| flare_mc (handler) | 1.44 | 4.04 | 5.47 | 1 |
 
 The `sys` column is the kernel's TCP work and dominates every row. The
-handler path's extra user CPU is spread thin: request parse `6.4 %`,
-response serialise `6.7 %`, `HeaderMap::set` `2.1 %`, `_wants_close`
-`3.5 %`, `request_te_framing` `1.8 %`, and the `Request`/`Response`
-lifecycle. There is no single hot spot, and closing the rest of the distance
-from the static path would take changes to those types rather than to the
-reactor.
+handler path's user CPU is spread thin: request parse, response serialise,
+`HeaderMap::set`, `_wants_close`, `request_te_framing`, and the
+`Request`/`Response` lifecycle. There is no single hot spot, and closing the
+rest of the distance to the static path would take changes to those types
+rather than to the reactor.
 
 **Balance.** Per-worker `SO_REUSEPORT` listeners let the kernel hash each
 connection to a worker, which is random: left alone, the busiest of four
-workers took `26-32 %` of the CPU where actix, whose single acceptor deals
+workers takes `26-32 %` of the CPU where actix, whose single acceptor deals
 connections out round-robin, takes `25.0 %`. Accepted connections are
 therefore balanced across the workers of a scheduler
 (`flare/runtime/_balance.mojo`): a worker that is more than one connection
 ahead of the least-loaded peer hands the new stream to it through a small
 inbox and wakes it. Connection counts sit at `63-65` of 256 per worker.
 `FLARE_BALANCE_ACCEPT=0` turns it off. It covers the unified reactor loop
-that `HttpServer.serve` uses, on Linux, for two or more workers; the static
-path (`serve_static`), the io_uring buffer-ring and the h1-only loops accept
-without it.
+that `HttpServer.serve` uses and the static loop behind `serve_static`, on
+Linux, for two or more workers; the io_uring buffer-ring and the plain h1
+loops accept without it.
 
 **One `recv` per request.** The drain loop stops after a short read instead
-of probing for EAGAIN. A peer shutdown still gets the full drain, so a
-request sent together with a FIN is answered with `Connection: close`. Only
-the unified loop does this, which is why the static path above still makes
-two `recv` calls per request.
-
-**Other workloads** (paired runs, wrk2 overdrive, `flare_mc` binary): one
-worker `+6.8 %`, h2c `+4.7 %`, mixed keep-alive with 20 % `Connection: close`
-`+0.8 %`, 16 workers `-0.4 %`, 48 workers `-0.1 %` against the previous
-build (the last two are limited by the load generator).
+of probing for EAGAIN, in the unified loop and the static loop. A peer
+shutdown still gets the full drain, so a request sent together with a FIN is
+answered with `Connection: close`.
 
 ### HTTP/1.1, 1 worker (same load)
 

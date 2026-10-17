@@ -789,7 +789,7 @@ handlers that raise are logged to stderr with the request id
 | Env var | Effect |
 |---|---|
 | `FLARE_REUSEPORT_WORKERS=0` | Switch from per-worker `SO_REUSEPORT` to shared-listener `EPOLLEXCLUSIVE` shape (7–22 % less req/s depending on path, uniformly tighter p99.99 σ under sustained load) |
-| `FLARE_BALANCE_ACCEPT=0` | Turn off accept-time balancing: with per-worker `SO_REUSEPORT` listeners, a worker that is more than one connection ahead of the least-loaded peer hands new connections to it (Linux, `num_workers >= 2`, `HttpServer.serve`) |
+| `FLARE_BALANCE_ACCEPT=0` | Turn off accept-time balancing: with per-worker `SO_REUSEPORT` listeners, a worker that is more than one connection ahead of the least-loaded peer hands new connections to it (Linux, `num_workers >= 2`, `HttpServer.serve` and `serve_static`) |
 | `FLARE_BUFRING_HANDLER=1` | Opt into `io_uring` reactor on Linux ≥ 6.0; auto-fallback to `epoll` |
 | `FLARE_SOAK_WORKERS=on` | Enable cross-worker `WorkerHandoffPool` for skewed-keepalive workloads |
 | `FLARE_QUIC_NO_BATCH=1` | Force the QUIC reactor's per-datagram `recvfrom` drain instead of the default batched `recvmmsg` burst drain (Linux); use to A/B the syscall-batching win |
