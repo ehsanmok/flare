@@ -1914,6 +1914,10 @@ tables above; compare rows within a table.
 
 ### HTTP/1.1, 4 workers (`throughput_mc`: wrk2, 8 threads, 256 connections)
 
+This table is the baseline *before* connections were balanced across
+workers; the handler-path rows after the fixes are in
+[flare_mc against actix_web](#flare_mc-against-actix_web-profile-and-fixes).
+
 | Server | Workers | Req/s | σ% | p50 (ms) | p99 (ms) | p99.9 (ms) | p99.99 (ms) | Raw capacity |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | actix_web | 4 | 639,285 | 0.20 | 0.96 ± 0.01 | 2.85 ± 0.54 | 4.94 ± 7.66 | 6.38 ± 10.20 | 775k |
@@ -1928,6 +1932,86 @@ tables above; compare rows within a table.
   actix: `0.77x` at the sustainable peak, `0.92x` on raw capacity. On the EPYC
   the same harness put it at `0.64x` actix. The gap is not the thread engine:
   the paired runs below give the same handler numbers under pthreads.
+
+### flare_mc against actix_web: profile and fixes
+
+The table above has the handler path at `0.77x` actix at the sustainable
+peak but `0.92x` on raw capacity. That mismatch was the first clue: the
+sustainable peak is the rate where p99 stops growing, which the busiest
+worker sets, so an uneven spread of connections costs far more than a few
+percent of per-request CPU.
+
+**Profile** (4 workers, fixed 400k req/s, 8 wrk2 threads, 256 connections;
+user-space `perf` `cpu-clock` sampling because the VM exposes no hardware
+counters, CPU per request from `/proc/<pid>/stat`, syscalls from `strace -c`):
+
+| Server | user µs/req | sys µs/req | total µs/req | `recv` per request |
+|---|---:|---:|---:|---:|
+| flare_mc_static | 0.68 | 4.31 | 4.99 | 2 (one returns EAGAIN) |
+| actix_web | 1.39 | 4.00 | 5.39 | 1 |
+| flare_mc (before) | 1.53 | 4.28 | 5.81 | 2 (one returns EAGAIN) |
+
+The `sys` column is the kernel's TCP work and is the same for everyone. The
+handler path's extra user CPU is spread thin: request parse `5.6 %`, response
+serialise `6.2 %`, `HeaderMap::set` `2.3 %`, `_wants_close` `3.5 %`, and the
+`Request`/`Response` lifecycle. There is no single hot spot.
+
+**Balance.** Per-worker `SO_REUSEPORT` listeners let the kernel hash each
+connection to a worker. Over four independent starts the busiest of four
+workers took `26-32 %` of the CPU where actix, whose single acceptor deals
+connections out round-robin, takes `25.0 %`. The shared `EPOLLEXCLUSIVE`
+listener was worse, so it was not the fix.
+
+**What changed** (two general changes, no benchmark-specific code):
+
+1. Accepted connections are balanced across the workers of a scheduler
+   (`flare/runtime/_balance.mojo`): a worker that is more than one connection
+   ahead of the least-loaded peer hands the new stream to it through a small
+   inbox and wakes it. Connection counts went from a `26-32 %` spread to
+   `63-65` of 256 per worker. `FLARE_BALANCE_ACCEPT=0` turns it off. It
+   covers the unified reactor loop that `HttpServer.serve` uses, on Linux,
+   for two or more workers; the io_uring buffer-ring and the h1-only loops
+   still accept as before.
+2. `recv` stops after a short read instead of probing for EAGAIN, which
+   saves one syscall per request. A peer shutdown still gets the full drain,
+   so a request sent together with a FIN is still answered with
+   `Connection: close`.
+
+**Result, 4 workers, `throughput_mc`.** Each pair of rows comes from one
+harness run, so compare within a pair; absolute numbers move by about `5 %`
+between runs on this shared box (actix read `594k` to `639k`).
+
+| Run | actix_web | flare_mc | flare_mc / actix | flare_mc_static / actix |
+|---|---:|---:|---:|---:|
+| Before, pinned workers (default) | 639,285 | 494,224 | 0.77x | 1.00x |
+| After, pinned workers (default) | 594,048 | 533,640 | 0.90x | 0.89x |
+| After, `FLARE_BENCH_PIN=0` | 628,895 | 584,691 | 0.93x | 0.98x |
+
+Raw capacity in the same runs: actix `782k`, flare_mc `746k` (`0.95x`,
+before `0.92x`), flare_mc_static `845k`. In the pinned run flare_mc is level
+with flare_mc_static (`533,640` against `530,615`), where it was `0.78x` of
+it before. In the pinned run hyper read `545,338` and axum `499,529`, so
+the handler path is `-2 %` against hyper and `+7 %` against axum; the
+earlier table's `+4.6 %` over hyper no longer holds in that run.
+
+The target of the work was parity within 3 % of actix. It was not reached:
+the handler path ends at `0.93x` with unpinned workers and `0.90x` with
+pinned ones. The remaining distance from the static path is the
+`Request`/`Response` lifecycle listed above, which would need changes to
+those types rather than to the reactor.
+
+**Pinning.** On this VM unpinned workers were faster than pinned ones in
+every comparison (about `5-10 %` at the sustainable peak, e.g. `608k`
+unpinned against `575k` pinned in two consecutive runs of an earlier build).
+Moving wrk2 to cores 4-47 so it cannot preempt the pinned workers on 0-3
+did not close it (actix `615k`, pinned flare_mc `553k`), so co-location is
+not the whole story. The cause is not established, and `pin_cores` and the
+benchmark's `FLARE_BENCH_PIN=1` default are unchanged.
+
+**No regressions elsewhere** (paired runs of the original against the final
+build; wrk2 overdrive, `flare_mc` binary): one worker `+6.8 %`, h2c `+4.7 %`,
+mixed keep-alive with 20 % `Connection: close` `+0.8 %`, 16 workers `-0.4 %`,
+48 workers `-0.1 %` (those two are limited by the load generator).
 
 ### HTTP/1.1, 1 worker (same load)
 

@@ -42,7 +42,7 @@ def main() raises:
 - **Batteries included:** HTTP/1.1, HTTP/2, and HTTP/3 over QUIC (server + client), WebSocket (RFC 6455 + permessage-deflate), gRPC, TLS 1.2/1.3 + mTLS + in-process HTTPS termination (`bind_tls` + `serve`), streaming responses on every wire (one handler streams byte-identically over h1 / h2 / h3 / https), sessions, gzip + brotli, CORS, static files, SSE, templates, RFC 9111 caching, and an OpenAPI 3.1 emitter. Full inventory in [`docs/features.md`](docs/features.md).
 - **Composable by types, not callbacks:** `Handler` is a trait; `Router`, middleware, and typed extractors (`PathInt`, `JsonAs[T]`, `Cookies`, ...) compose by nesting structs, monomorphised into one direct call sequence per request type with no virtual dispatch.
 - **Hard to misuse under load:** Per-request `Cancel` tokens, graceful drain, sanitized 4xx/5xx, TLS cert reload, structured logging, Prometheus metrics, and an in-process `TestClient[H]`.
-- **Fast, with a tight tail:** Thread-per-core reactor (`kqueue` / `epoll`, opt-in `io_uring`) on Mojo's AsyncRT thread pool. At 4 workers the static path ties `actix_web` and the handler path beats `hyper` / `axum`, all with p99 under 3 ms at the peak; see [Performance](#performance).
+- **Fast, with a tight tail:** Thread-per-core reactor (`kqueue` / `epoll`, opt-in `io_uring`) on Mojo's AsyncRT thread pool. At 4 workers the handler path reaches `0.90-0.93x` of `actix_web` and the static path `0.89-0.98x` (pinned or unpinned workers), all with p99 under 3 ms at the peak; see [Performance](#performance).
 - **Fuzzed:** 63 fuzz harnesses, 9M+ runs, zero known crashes; ASan + assert-mode coverage on every FFI boundary.
 - **Formally modelled:** Lean 4 models of the codecs, protocol state machines and concurrency, proved against the RFCs. The 0.12 audit found 138 issues with them, all fixed. Anchors keep the models in sync with the Mojo code, and differential tests run the two side by side. See [Formal verification](#formal-verification).
 
@@ -285,11 +285,13 @@ The σ on the tail percentiles is the **honesty meter**: a small σ means all 5 
 
 | Server | Workers | Req/s | σ%  | p50 (ms) | p99 (ms) | p99.9 (ms) | p99.99 (ms) |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| actix_web (tokio) | 4 | 639,285 | 0.20 | 0.96 ± 0.01 | 2.85 ± 0.54 | 4.94 ± 7.66 | 6.38 ± 10.20 |
-| **flare_mc_static** (fixed-response fast path) [^reuse] | **4** | **636,513** | **0.20** | **1.04 ± 0.03** | **2.85 ± 0.06** | **3.57 ± 3.99** | **7.22 ± 8.78** |
-| **flare_mc** (handler) [^reuse] | **4** | **494,224** | **0.16** | **1.10 ± 0.01** | **2.87 ± 0.08** | **5.25 ± 3.26** | **7.49 ± 8.84** |
-| axum (tokio multi-thread) | 4 | 479,790 | 0.28 | 1.10 ± 0.01 | 2.72 ± 0.19 | 3.23 ± 9.42 | 3.67 ± 12.66 |
-| hyper (tokio multi-thread) | 4 | 472,351 | 0.33 | 1.14 ± 0.01 | 2.83 ± 0.08 | 3.42 ± 3.58 | 3.82 ± 5.76 |
+| actix_web (tokio) | 4 | 594,048 | 0.20 | 1.05 ± 0.00 | 2.74 ± 0.09 | 3.28 ± 8.35 | 3.63 ± 14.30 |
+| hyper (tokio multi-thread) | 4 | 545,338 | 0.20 | 1.06 ± 0.01 | 2.67 ± 0.02 | 3.19 ± 0.02 | 3.61 ± 0.04 |
+| **flare_mc** (handler) [^reuse] | **4** | **533,640** | **0.02** | **1.12 ± 0.01** | **2.77 ± 0.04** | **3.30 ± 3.27** | **3.66 ± 7.36** |
+| **flare_mc_static** (fixed-response fast path) [^reuse] | **4** | **530,615** | **0.45** | **1.14 ± 0.01** | **2.62 ± 0.03** | **3.11 ± 0.03** | **3.45 ± 1.72** |
+| axum (tokio multi-thread) | 4 | 499,529 | 0.32 | 1.06 ± 0.01 | 2.77 ± 2.01 | 3.31 ± 10.64 | 3.74 ± 12.36 |
+
+Same box, same harness, one run for all five rows, flare workers pinned (the benchmark default). Absolute numbers move by about 5 % between runs on this shared box, so compare rows within one run. In a second run with `FLARE_BENCH_PIN=0` and actix in the same run, actix read `628,895`, flare_mc `584,691` and flare_mc_static `616,960 req/s`.
 
 **Single-worker** (per-core request-processing cost):
 
@@ -301,8 +303,8 @@ The σ on the tail percentiles is the **honesty meter**: a small σ means all 5 
 
 What jumps out:
 
-- **flare_mc_static** (fixed-response fast path) ties actix at the sustainable peak, `636,513` against `639,285 req/s` (`-0.4 %`), with a tighter p99 (σ `0.06` against `0.54 ms`). Without a latency bound it has the most raw capacity of any server: `863k` against actix's `775k req/s`.
-- **flare_mc** (the handler path) beats hyper by `4.6 %` and axum by `3.0 %` at the same p99 (`2.87` against `2.83` / `2.72 ms`), and trails actix: `0.77x` at the sustainable peak, `0.92x` on raw capacity (`712k` against `775k`).
+- **flare_mc** (the handler path) reads `0.90x` actix with pinned workers and `0.93x` with unpinned ones, up from `0.77x` before connections were balanced across workers and the extra `recv` per request was removed ([details](docs/benchmark.md#flare_mc-against-actix_web-profile-and-fixes)). It is level with `flare_mc_static` in the pinned run, `-2 %` against hyper and `+7 %` against axum. Raw capacity is `746k` against actix's `782k req/s`.
+- **flare_mc_static** (fixed-response fast path) reads `0.89x` actix pinned and `0.98x` unpinned, with the most raw capacity of any server (`845k`). On this VM unpinned workers were faster than pinned ones in every comparison, by about `5-10 %`; the default stays pinned.
 - **Every 4-worker row is stable:** all five runs of every server stayed inside the envelope, σ `<= 0.33 %` on throughput.
 - **flare 1w** has the lowest p50 and p99 of the single-worker servers and does `1.7x` Go `net/http`, but nginx does `1.5x` flare at 256 connections. At 64 connections (one wrk2 thread) flare leads nginx by `11 %` (`187k` against `167k req/s`), so the single reactor loses ground as the connection count grows.
 - **Threads:** AsyncRT matched the old pthread engine within `±1 %` in paired runs at 1-48 workers, and spawns a task in `6.3 µs` against `57 µs` for an OS thread.

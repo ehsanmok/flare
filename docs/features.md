@@ -113,6 +113,7 @@ because a front end could read the same bytes as a different request:
 | `HttpServer.serve_static(StaticResponse, num_workers=1)` — pre-encoded static-response fast path that skips parsing and handler dispatch; `num_workers > 1` runs one listener per worker thread (used by `flare_mc_static` bench row) | [`static_response.mojo`](../examples/intermediate/static_response.mojo) |
 | `ServerConfig.check[config]()` — build-time invariant checks on a comptime `ServerConfig`; `serve_comptime[handler, config]()`, the pre-0.11 spelling, was removed in v0.12 | `flare.http.server` |
 | Per-worker `SO_REUSEPORT` listeners by default (`num_workers >= 2`); `FLARE_REUSEPORT_WORKERS=0` switches to single-listener `EPOLLEXCLUSIVE` shape | [`multicore.mojo`](../examples/intermediate/multicore.mojo) |
+| Connections are balanced across workers at accept time, so the kernel's random 4-tuple hash does not leave one worker with 27-32 % of them (`FLARE_BALANCE_ACCEPT=0` opts out) | [`multicore.mojo`](../examples/intermediate/multicore.mojo) |
 | `pin_cores=True` (default): worker N pinned to core `N % num_cpus()` on Linux, no-op on macOS | [`multicore.mojo`](../examples/intermediate/multicore.mojo) |
 | `HttpServer.drain(timeout_ms) -> ShutdownReport` per worker: closes the listener, keeps the reactor serving for the full `timeout_ms` (in-flight responses finish), then stops it; `drain(0)` is a hard stop | [`drain.mojo`](../examples/intermediate/drain.mojo) |
 | `ServerConfig` (request / handler / `read_body_timeout_ms` deadlines, `max_header_size`, `max_body_size`, `max_keepalive_requests`, `idle_timeout_ms`) | `flare.http.server` |
@@ -788,6 +789,7 @@ handlers that raise are logged to stderr with the request id
 | Env var | Effect |
 |---|---|
 | `FLARE_REUSEPORT_WORKERS=0` | Switch from per-worker `SO_REUSEPORT` to shared-listener `EPOLLEXCLUSIVE` shape (7–22 % less req/s depending on path, uniformly tighter p99.99 σ under sustained load) |
+| `FLARE_BALANCE_ACCEPT=0` | Turn off accept-time balancing: with per-worker `SO_REUSEPORT` listeners, a worker that is more than one connection ahead of the least-loaded peer hands new connections to it (Linux, `num_workers >= 2`, `HttpServer.serve`) |
 | `FLARE_BUFRING_HANDLER=1` | Opt into `io_uring` reactor on Linux ≥ 6.0; auto-fallback to `epoll` |
 | `FLARE_SOAK_WORKERS=on` | Enable cross-worker `WorkerHandoffPool` for skewed-keepalive workloads |
 | `FLARE_QUIC_NO_BATCH=1` | Force the QUIC reactor's per-datagram `recvfrom` drain instead of the default batched `recvmmsg` burst drain (Linux); use to A/B the syscall-batching win |
