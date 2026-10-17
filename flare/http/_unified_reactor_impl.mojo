@@ -101,7 +101,11 @@ from ._h2_conn_handle import (
     _pending_conn_free_addr,
     _pending_conn_ptr_from_int,
 )
-from ._reactor.lifecycle import _collect_fired_timers, _expired_idle_conns
+from ._reactor.lifecycle import (
+    _collect_fired_timers,
+    _expired_idle_conns,
+    _hand_off_stream,
+)
 from ._server_reactor_impl import (
     ConnHandle,
     StepResult,
@@ -712,29 +716,6 @@ def _adopt_unified_stream(
             pass
         return
     _arm_accept_timer(client_fd, wheel, timers, idle_timeout_ms)
-
-
-def _hand_off_stream(
-    var stream: TcpStream, target: Int, bal: Balancer
-) -> Optional[TcpStream]:
-    """Give ``stream`` to worker ``target`` through its inbox.
-
-    Returns ``None`` once the peer owns it. When the peer refuses (it
-    stopped, or its inbox is full) the stream comes back so the caller
-    keeps the connection. A failed heap allocation drops it, which
-    closes the connection; the allocation is one small cell.
-    """
-    var addr: Int
-    try:
-        addr = Pool[TcpStream].alloc_move(stream^)
-    except:
-        return None
-    if bal.push(target, addr):
-        return None
-    var cell = Pool[TcpStream].get_ptr(addr)
-    var back = cell.unsafe_take_pointee()
-    cell.unsafe_free()
-    return Optional[TcpStream](back^)
 
 
 def _adopt_handed_off(

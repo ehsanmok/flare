@@ -68,6 +68,7 @@ from flare.net import IpAddr, SocketAddr
 from flare.net._libc import _recv, _send, _close, MSG_NOSIGNAL
 from flare.net.error import NetworkError
 from flare.tcp import TcpStream, TcpListener, accept_fd
+from flare.runtime._balance import Balancer
 from flare.runtime import (
     Reactor,
     Event,
@@ -107,6 +108,7 @@ from ._reactor.lifecycle import (
     _arm_accept_timer,
     _accept_loop,
     _accept_loop_fd,
+    _adopt_handed_off_h1,
 )
 
 
@@ -364,14 +366,28 @@ def _run_static_loop_impl[
     var events = List[Event]()
     var exit_status = WORKER_STATUS_CLEAN
     var stopping_addr = Int(Pointer[Bool, _](to=stopping))
+    # Joins the scheduler's accept-balancing group (disabled for a lone
+    # worker or when ``FLARE_BALANCE_ACCEPT=0``).
+    var bal = Balancer.open(stats_addr, reactor.wake_fd())
     while not load_stop_flag(stopping_addr):
         store_worker_stat(stats_addr, WORKER_STAT_INFLIGHT, len(conns))
+        bal.publish(len(conns))
         events.clear()
         try:
             _ = reactor.poll(_poll_timeout_ms(wheel), events)
         except:
             exit_status = WORKER_STATUS_CRASHED
             break
+        if bal.pending() > 0:
+            _adopt_handed_off_h1(
+                bal,
+                reactor,
+                conns,
+                wheel,
+                timers,
+                config.idle_timeout_ms,
+                config.max_connections,
+            )
 
         var now_ms = UInt64(_monotonic_ms())
         var fired_fds = List[Int]()
@@ -391,6 +407,7 @@ def _run_static_loop_impl[
                     timers,
                     config.idle_timeout_ms,
                     config.max_connections,
+                    bal,
                 )
                 continue
             var fd = Int(evt.token)
@@ -401,6 +418,11 @@ def _run_static_loop_impl[
             try:
                 var last_step = StepResult()
                 if evt.is_readable():
+                    # A level-triggered socket that was not filled is
+                    # empty: skip the recv that would only return EAGAIN.
+                    # Not when the peer already sent a FIN (HUP): the
+                    # drain must reach EOF to answer with ``close``.
+                    ch_ptr[].short_read_ok = not evt.is_hup()
                     last_step = ch_ptr[].on_readable_static(resp, config)
                     step_done = last_step.done
                     var cycles = 0
@@ -457,6 +479,14 @@ def _run_static_loop_impl[
             _cleanup_conn(expired[i], conns, timers, reactor, wheel)
 
     store_worker_stat(stats_addr, WORKER_STAT_STATUS, exit_status)
+    # Stop taking hand-offs, then close what peers queued before that
+    # (a stream dropped here closes its fd).
+    bal.close()
+    while True:
+        var left = bal.pop()
+        if left == 0:
+            break
+        Pool[TcpStream].free(left)
 
     # Graceful shutdown. Dedicated path flips ``Cancel.SHUTDOWN`` on
     # every leftover ConnHandle before close (paranoia copy from the
