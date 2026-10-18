@@ -94,6 +94,7 @@ from flare.http3.request_reader import (
 from flare.http3.response_writer import (
     encode_response_data,
     encode_response_head,
+    encode_response_trailers,
 )
 from flare.http.wire import Request, Response
 from flare.qpack import QpackHeader
@@ -1047,6 +1048,18 @@ struct Http3Connection(Copyable, Defaultable):
         encode_response_head(response.status, response.headers, state.outbox)
         if len(response.body) != 0:
             encode_response_data(Span[UInt8, _](response.body), state.outbox)
+        # Trailers follow the body as a final HEADERS frame (RFC 9114
+        # sec 4.1); a buffered response used to drop them, which breaks
+        # gRPC status over h3.
+        if len(response.trailers._keys) > 0:
+            var tr = List[QpackHeader]()
+            for i in range(len(response.trailers._keys)):
+                tr.append(
+                    QpackHeader(
+                        response.trailers._keys[i], response.trailers._values[i]
+                    )
+                )
+            encode_response_trailers(tr, state.outbox)
         state.response_emitted = True
 
     # -- Unidirectional stream type dispatch (RFC 9114 §6.2) ----------

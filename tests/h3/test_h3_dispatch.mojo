@@ -332,6 +332,37 @@ def test_response_drops_connection_specific_fields() raises:
     assert_true("x-keep" in names)
 
 
+def test_buffered_response_carries_its_trailers() raises:
+    """A buffered response's trailers follow the body as a final HEADERS
+    frame (RFC 9114 sec 4.1); they used to be dropped."""
+    from flare.qpack import decode_field_section
+    from flare.quic.varint import decode_varint
+
+    var c = Http3Connection()
+    c.feed_stream_chunk(0, _build_get_request_bytes("/"))
+    c.signal_end_of_stream(0)
+    _ = c.take_request(0)
+    var resp = ok("hi")
+    resp.trailers.set("grpc-status", "0")
+    c.emit_response(0, resp^)
+    var out = c.take_response_frames(0)
+    var types = List[UInt64]()
+    var last = List[UInt8]()
+    var pos = 0
+    while pos < len(out):
+        var t = decode_varint(Span[UInt8, _](out)[pos:])
+        var n = decode_varint(Span[UInt8, _](out)[pos + t.consumed :])
+        var start = pos + t.consumed + n.consumed
+        types.append(t.value)
+        last = List[UInt8](Span[UInt8, _](out)[start : start + Int(n.value)])
+        pos = start + Int(n.value)
+    assert_equal(len(types), 3)
+    assert_equal(types[2], UInt64(H3_FRAME_TYPE_HEADERS))
+    var tr = decode_field_section(Span[UInt8, _](last))
+    assert_equal(tr[0].name, "grpc-status")
+    assert_equal(tr[0].value, "0")
+
+
 def test_stream_frames_are_reassembled_by_offset() raises:
     """STREAM data was fed to the reader in arrival order, whatever its
     offset, so a reordered request was parsed from scrambled bytes and
@@ -450,6 +481,7 @@ def main() raises:
     test_take_request_keeps_repeats_and_joins_cookies()
     test_request_without_pseudo_headers_is_refused()
     test_response_drops_connection_specific_fields()
+    test_buffered_response_carries_its_trailers()
     test_stream_frames_are_reassembled_by_offset()
     test_retransmit_after_the_response_does_not_rerun_the_request()
     test_undecodable_field_section_is_a_connection_error()
@@ -457,4 +489,4 @@ def main() raises:
     test_h2_reserved_request_frame_is_a_connection_error()
     test_a_decodable_request_is_not_a_connection_error()
     test_h3_error_codes_are_named_in_error_messages()
-    print("test_h3_dispatch: 20 passed")
+    print("test_h3_dispatch: 21 passed")
