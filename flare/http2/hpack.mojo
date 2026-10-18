@@ -34,7 +34,7 @@ inserts evict the oldest entry until ``size <= max_size``.
 from std.collections import Optional
 
 from flare.http.hpack_huffman_simd import huffman_decode_simd
-from flare.http.proto.ascii import ascii_unchecked_string
+from std.memory import unsafe_memcpy
 from flare.http.hpack_huffman import (
     huffman_decode,
     huffman_encode,
@@ -63,10 +63,10 @@ def _octets_to_string(b: Span[UInt8, _]) -> String:
     CR and LF. Consumers that need text must validate or convert it
     themselves.
     """
-    for i in range(len(b)):
-        if b[i] >= 0x80:
-            return String(unsafe_from_utf8=b)
-    return ascii_unchecked_string(b)
+    var s = String(unsafe_uninit_length=len(b))
+    if len(b) > 0:
+        unsafe_memcpy(dest=s.unsafe_ptr_mut(), src=b.unsafe_ptr(), count=len(b))
+    return s^
 
 
 comptime HPACK_BUDGET_ERROR: String = (

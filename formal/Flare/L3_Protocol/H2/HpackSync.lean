@@ -124,7 +124,7 @@ theorem utf8Lossy_length_ge (l : Bytes) : l.length ≤ (utf8Lossy l).length := b
           omega
 
 /-- The shipped conversion. mirrors flare/http2/hpack.mojo#_octets_to_string+HPACK_BUDGET_ERROR sha=71830c539a36 at=c165c9a1 (HPACK-01 fix):
-the octets are stored unchanged (`String(unsafe_from_utf8=b)`), so the table
+the octets are copied unchanged into the `String`, so the table
 holds exactly the peer's entry sizes (RFC 7541 §4.1). -/
 def octetsToString (b : Bytes) : Bytes := b
 
