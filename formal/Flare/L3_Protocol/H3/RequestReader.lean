@@ -37,14 +37,14 @@ def T_GOAWAY : Nat := 0x07
 def T_MAX_PUSH_ID : Nat := 0x0D
 
 /-- Control-stream frame types the reader rejects on a request stream.
-mirrors flare/http3/request_reader.mojo#feed_into sha=da98c606579c at=0a183352 -/
+mirrors flare/http3/request_reader.mojo#feed_into sha=da98c606579c at=12630564 -/
 def isControlType (t : Nat) : Bool :=
   t == T_SETTINGS || t == T_GOAWAY || t == T_MAX_PUSH_ID || t == T_CANCEL_PUSH ||
     t == T_PUSH_PROMISE
 
 /-- HTTP/2 frame types reserved by RFC 9114 §7.2.8 / §11.2.1 (PRIORITY, PING,
 WINDOW_UPDATE, CONTINUATION): receipt MUST be H3_FRAME_UNEXPECTED.
-mirrors flare/http3/request_reader.mojo#feed_into sha=da98c606579c at=0a183352 (fixed, H3-02) -/
+mirrors flare/http3/request_reader.mojo#feed_into sha=da98c606579c at=12630564 (fixed, H3-02) -/
 def isH2Reserved (t : Nat) : Bool := t == 0x02 || t == 0x06 || t == 0x08 || t == 0x09
 
 inductive RState | init | body | trailers | done
@@ -77,7 +77,7 @@ def Ev.isError : Ev Hdrs → Bool
 
 /-- Dispatch of one fully present frame on type and state. The HTTP/2-reserved
 types are rejected next to the control types (H3-02).
-mirrors flare/http3/request_reader.mojo#feed_into sha=da98c606579c at=0a183352 (fixed, H3-02) -/
+mirrors flare/http3/request_reader.mojo#feed_into sha=da98c606579c at=12630564 (fixed, H3-02) -/
 def stepFrame (qd : Bytes → Option Hdrs) (r : Reader) (t : Nat) (p : Bytes) :
     Reader × Ev Hdrs :=
   if t = T_HEADERS then
@@ -97,7 +97,7 @@ def stepFrame (qd : Bytes → Option Hdrs) (r : Reader) (t : Nat) (p : Bytes) :
 /-- One `feed_into` call. A frame of any type other than HEADERS and DATA
 declaring more than `max_field_section_bytes` is refused from its header
 (`excessiveLoad`, H3-01).
-mirrors flare/http3/request_reader.mojo#_parse_frame_header+feed_into sha=773b706e2145 at=0a183352 (fixed, H3-01) -/
+mirrors flare/http3/request_reader.mojo#_parse_frame_header+feed_into sha=773b706e2145 at=12630564 (fixed, H3-01) -/
 def feed (qd : Bytes → Option Hdrs) (r : Reader) (buf : Bytes) :
     Nat × Reader × Option (Ev Hdrs) :=
   if r.st = .done then (0, r, none)
@@ -231,7 +231,7 @@ def liftR (lift : Hdrs → Bool) (r : Reader) : Option (Ev Hdrs) → Reader
 the events and the unconsumed tail kept in `inbox`. A reader in `DONE`
 always reports NEEDS_MORE, so stopping on `consumed = 0` coincides with the
 Mojo loop's extra `break`s on error / DONE.
-mirrors flare/http3/server.mojo#Http3Connection.feed_stream_chunk+Http3Connection.signal_end_of_stream sha=3ecba8b5284b at=30fc5e99 -/
+mirrors flare/http3/server.mojo#Http3Connection.feed_stream_chunk+Http3Connection.signal_end_of_stream sha=3ecba8b5284b at=c738a911 -/
 def drain (qd : Bytes → Option Hdrs) (lift : Hdrs → Bool) (r : Reader) (buf : Bytes) :
     Reader × List (Ev Hdrs) × Bytes :=
   match hf : feed qd r buf with
@@ -302,7 +302,7 @@ decreasing_by
 
 /-- Successive `feed_stream_chunk` calls with chunks `cs`, starting from
 inbox `inbox`. Once the reader is DONE a chunk is dropped, not appended.
-mirrors flare/http3/server.mojo#Http3Connection.feed_stream_chunk+Http3Connection.signal_end_of_stream sha=3ecba8b5284b at=30fc5e99 -/
+mirrors flare/http3/server.mojo#Http3Connection.feed_stream_chunk+Http3Connection.signal_end_of_stream sha=3ecba8b5284b at=c738a911 -/
 def feedChunks (qd : Bytes → Option Hdrs) (lift : Hdrs → Bool) (r : Reader) (inbox : Bytes) :
     List Bytes → Reader × List (Ev Hdrs) × Bytes
   | [] => (r, [], inbox)

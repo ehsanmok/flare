@@ -241,7 +241,7 @@ def fireAll (cancel : Bool) (tm : Nat) (c : Cfg S) (ts : List Timer) : Cfg S :=
 /-- The reap after the previous batch, then `reactor.poll` returned `toks`
 and `_collect_fired_timers` (`wheel.advance(now)`). The poll guard in `step`
 checks `toks` against the connections left after the reap.
-mirrors flare/http/_server_reactor_epoll.mojo#_run_handler_loop_impl sha=2f9bbe6a6bd1 at=30fc5e99 -/
+mirrors flare/http/_server_reactor_epoll.mojo#_run_handler_loop_impl sha=2f9bbe6a6bd1 at=c738a911 -/
 def pollStep (cancel : Bool) (c : Cfg S) (now : Nat) (toks : List Fd) : Cfg S :=
   fireAll cancel now { c with now := now, batch := toks, wheel := c.wheel.filter (fun t => now < t.due) }
     (c.wheel.filter (fun t => t.due ≤ now))

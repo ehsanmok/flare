@@ -67,7 +67,7 @@ def CloseOK {σ : Type} (step : σ → Act → σ × List Out) (init : σ) : Pro
 was sent and fails a TEXT frame that is not UTF-8 with CLOSE 1007 (sent
 once), `close()` sends once, `send_*` and `send_frame` raise (write
 nothing) after a CLOSE. A `recv` event is a final frame.
-mirrors flare/ws/server.mojo#WsConnection.send_text+WsConnection.send_binary+WsConnection.send_frame+WsConnection._require_open+WsConnection.recv+WsConnection._recv_one+WsConnection.close+WsConnection.peer_addr sha=63125833aa5d at=0a183352 (fixed, WS-06) -/
+mirrors flare/ws/server.mojo#WsConnection.send_text+WsConnection.send_binary+WsConnection.send_frame+WsConnection._require_open+WsConnection.recv+WsConnection._recv_one+WsConnection.close+WsConnection.peer_addr sha=63125833aa5d at=12630564 (fixed, WS-06) -/
 def fixStep : Bool → Act → Bool × List Out
   | s, .recv op p =>
     if op = 9 then (s, [⟨10, p⟩])

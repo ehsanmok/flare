@@ -72,7 +72,7 @@ def joinR : Nat → H → H
   | k + 1, h => join (joinR k h)
 
 /-- Spawns `0..k-1` succeeded: context `i` allocated, thread `i` running.
-mirrors flare/runtime/scheduler.mojo#Scheduler.start sha=a1f17c56964f at=0a183352 -/
+mirrors flare/runtime/scheduler.mojo#Scheduler.start sha=a1f17c56964f at=12630564 -/
 def spawnR : Nat → H → H
   | 0, h => h
   | k + 1, h => { (alloc (.ctx k) (spawnR k h)) with thr := (spawnR k h).thr + 1 }
@@ -80,7 +80,7 @@ def spawnR : Nat → H → H
 /-- Allocation before the first spawn but the balancing group (added by
 `startFail`; counts commute); `pre` is `prebind_per_worker`, `L`
 the number of per-worker listeners (`n * (1 + len(extra_addrs))`).
-mirrors flare/runtime/scheduler.mojo#Scheduler.start sha=a1f17c56964f at=0a183352 -/
+mirrors flare/runtime/scheduler.mojo#Scheduler.start sha=a1f17c56964f at=12630564 -/
 def startAlloc (pre : Bool) (n L : Nat) : H :=
   let h := alloc .stop H.empty
   let h := if pre then h else alloc .shared h
@@ -90,7 +90,7 @@ def startAlloc (pre : Bool) (n L : Nat) : H :=
 
 /-- `start` with spawn `k` failing, then the rollback, which also frees
 `_per_worker_listener_addrs` (CONC-06).
-mirrors flare/runtime/scheduler.mojo#Scheduler.start sha=a1f17c56964f at=0a183352 (fixed, CONC-06) -/
+mirrors flare/runtime/scheduler.mojo#Scheduler.start sha=a1f17c56964f at=12630564 (fixed, CONC-06) -/
 def startFail (pre : Bool) (n L k : Nat) : H :=
   let h := startAlloc pre n L
   let h := if balOn n then alloc .grp h else h
@@ -108,7 +108,7 @@ def startFail (pre : Bool) (n L k : Nat) : H :=
 
 /-- `_abandon_start` after a failed per-worker bind, before any spawn:
 `b` listeners stored so far. `_free_resources` then the worker array.
-mirrors flare/runtime/scheduler.mojo#Scheduler.start+Scheduler._abandon_start+Scheduler._free_resources sha=902b9e98cc9d at=0a183352 -/
+mirrors flare/runtime/scheduler.mojo#Scheduler.start+Scheduler._abandon_start+Scheduler._free_resources sha=902b9e98cc9d at=12630564 -/
 def abandon (n b : Nat) : H :=
   let h := alloc .stop H.empty
   let h := alloc .warr h
@@ -433,7 +433,7 @@ theorem abandon_clean (n b : Nat) : abandon n b = H.empty := by
 /-! ## 2. Drain's stuck-worker index bookkeeping -/
 
 /-- Mojo `List.pop(idx)`.
-mirrors flare/runtime/scheduler.mojo#Scheduler.drain sha=25089b531e7a at=30fc5e99 -/
+mirrors flare/runtime/scheduler.mojo#Scheduler.drain sha=25089b531e7a at=c738a911 -/
 def eraseAt {α : Type} : List α → Nat → List α
   | [], _ => []
   | _ :: l, 0 => l
@@ -445,14 +445,14 @@ def keepIdx {α : Type} (p : Nat → Bool) : List α → List α
   | a :: l => if p 0 then a :: keepIdx (fun j => p (j + 1)) l else keepIdx (fun j => p (j + 1)) l
 
 /-- The sweep appends `i` to `stuck` when worker `i` was detached.
-mirrors flare/runtime/scheduler.mojo#Scheduler.drain sha=25089b531e7a at=30fc5e99 -/
+mirrors flare/runtime/scheduler.mojo#Scheduler.drain sha=25089b531e7a at=c738a911 -/
 def sweepStuck (det : Nat → Bool) : Nat → List Nat
   | 0 => []
   | k + 1 => sweepStuck det k ++ (if det k then [k] else [])
 
 /-- `for k in range(len(stuck) - 1, -1, -1): idx = stuck[k];
 if idx < len(l): l.pop(idx)`.
-mirrors flare/runtime/scheduler.mojo#Scheduler.drain sha=25089b531e7a at=30fc5e99 -/
+mirrors flare/runtime/scheduler.mojo#Scheduler.drain sha=25089b531e7a at=c738a911 -/
 def popStuck {α : Type} (l : List α) (stuck : List Nat) : List α :=
   stuck.reverse.foldl (fun acc i => if i < acc.length then eraseAt acc i else acc) l
 
@@ -645,7 +645,7 @@ def liveAfter (w : WOut) : Bool := !w.done || w.rc != .ok
 stop flag and the balancing group with it); a raising
 `join`/`detach` falls into `except: pass` and the worker's resources are
 freed with the rest (`_join_workers` has no stuck list at all).
-mirrors flare/runtime/scheduler.mojo#Scheduler._join_workers+Scheduler.drain sha=4385e44f79be at=30fc5e99 -/
+mirrors flare/runtime/scheduler.mojo#Scheduler._join_workers+Scheduler.drain sha=4385e44f79be at=c738a911 -/
 def keptImpl (w : WOut) : Bool := !w.done && w.rc == .ok
 
 /-- Hardened variant: treat a failed call like a detached worker. -/

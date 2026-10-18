@@ -126,7 +126,7 @@ inductive Ev where
 variable {Req : Type}
 
 /-- `ConnHandle.__init__`: STATE_READING, empty buffers.
-mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle.__init__ sha=da9e8054e64b at=da6fb43a -/
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle.__init__ sha=da9e8054e64b at=98b092d2 -/
 def init : St Req :=
   { phase := .reading, kq := [], kfin := false, rbuf := [], wbuf := [], wpos := 0,
     ka := 0, shouldClose := false, peerEof := false, done := false,
@@ -138,7 +138,7 @@ def segBytes (s : St Req) : Bytes := (s.segs.map Prod.fst).flatten
 
 /-- `_queue_error` then `_transition_to_writing`: mark close, queue a
 `Connection: close` error response, enter STATE_WRITING.
-mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._queue_error+ConnHandle._transition_to_writing sha=24fc9902f25c at=da6fb43a -/
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._queue_error+ConnHandle._transition_to_writing sha=24fc9902f25c at=98b092d2 -/
 def queueError (P : Params Req) (s : St Req) (o : Out Req) : St Req :=
   { s with shouldClose := true, wbuf := P.ser o, wpos := 0, phase := .writing,
            log := s.log ++ [o] }
@@ -161,7 +161,7 @@ def applyKA (P : Params Req) (s : St Req) (closeAfter : Bool) : St Req × Bool :
 version-mismatch branch (426), else keep-alive policy then handler, with a
 raising handler mapped through `_queue_error`. The 426 branch sets
 `should_close = True` (APP-01).
-mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle.on_readable sha=5f85dfb8b98a at=da6fb43a (fixed, APP-01) -/
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle.on_readable sha=5f85dfb8b98a at=98b092d2 (fixed, APP-01) -/
 def dispatch (P : Params Req) (s : St Req) (r : Req) (n : Nat) : St Req :=
   if P.wsMismatch r then
     finalise P { s with shouldClose := true } r n ⟨some r, .ws426, false⟩
@@ -175,7 +175,7 @@ def dispatch (P : Params Req) (s : St Req) (r : Req) (n : Nat) : St Req :=
 
 /-- `_check_request_complete` (request budget, then framing) followed by
 dispatch.
-mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._check_request_complete sha=e491b536478f at=da6fb43a -/
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._check_request_complete sha=e491b536478f at=98b092d2 -/
 def parse (P : Params Req) (late : Bool) (s : St Req) : St Req :=
   if late && !s.rbuf.isEmpty then queueError P s ⟨none, .err 408, false⟩
   else match P.frame s.rbuf with
@@ -184,12 +184,12 @@ def parse (P : Params Req) (late : Bool) (s : St Req) : St Req :=
     | .complete r n => dispatch P s r n
 
 /-- The recv loop of `_drain_recv`: move the kernel queue into `read_buf`.
-mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._drain_recv sha=f10d5b3e208a at=da6fb43a -/
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._drain_recv sha=f10d5b3e208a at=98b092d2 -/
 @[simp] def drained (s : St Req) : St Req := { s with rbuf := s.rbuf ++ s.kq, kq := [] }
 
 /-- `on_readable`: ignored outside STATE_READING; drain the socket
 (`_drain_recv`: size cap, FIN handling with the half-close rule), then parse.
-mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle.on_readable+ConnHandle._drain_recv sha=7e4a055da99d at=da6fb43a -/
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle.on_readable+ConnHandle._drain_recv sha=7e4a055da99d at=98b092d2 -/
 def onReadable (P : Params Req) (late : Bool) (s : St Req) : St Req :=
   if s.phase ≠ .reading then s
   else if !s.kq.isEmpty && decide (P.cap < (s.rbuf ++ s.kq).length) then
@@ -224,7 +224,7 @@ def onTimeout (s : St Req) : St Req :=
 
 /-- One event delivered to the handle (methods of `ConnHandle`, plus the
 kernel's receive queue).
-mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle.on_readable+ConnHandle.on_writable+ConnHandle.on_timeout sha=5467fdaef40a at=da6fb43a -/
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle.on_readable+ConnHandle.on_writable+ConnHandle.on_timeout sha=5467fdaef40a at=98b092d2 -/
 def stepCH (P : Params Req) (s : St Req) : Ev → St Req
   | .arrive b => if s.kfin then s else { s with kq := s.kq ++ b, inp := s.inp ++ b }
   | .fin => { s with kfin := true }
@@ -924,8 +924,8 @@ theorem headFlag_spec : HeadSpec headFlag := by
 /-- The static fast path (fixed, APP-04): `on_readable_static` copies the
 pre-encoded response, but for HEAD only the head (bytes up to the first
 CRLFCRLF).
-mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle.on_readable_view+ConnHandle.on_readable_static sha=b85945acdfb5 at=da6fb43a (fixed, APP-04) and
-flare/http/_reactor/write_path.mojo#_head_length+serialize_static_into sha=6f0318aff397 at=da6fb43a (fixed, APP-04) -/
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle.on_readable_view+ConnHandle.on_readable_static sha=b85945acdfb5 at=98b092d2 (fixed, APP-04) and
+flare/http/_reactor/write_path.mojo#_head_length+serialize_static_into sha=6f0318aff397 at=98b092d2 (fixed, APP-04) -/
 def staticBytes (head body : Bytes) (isHead : Bool) : Bytes :=
   if isHead then head else head ++ body
 

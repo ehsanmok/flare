@@ -214,7 +214,7 @@ structure CCfg where
 
 /-- The encoding branch: append `Vary: Accept-Encoding`, replace the body,
 set Content-Encoding and Content-Length.
-mirrors flare/http/middleware.mojo#Compress.serve sha=d4b25a2e284c at=0a183352 -/
+mirrors flare/http/middleware.mojo#Compress.serve sha=d4b25a2e284c at=12630564 -/
 def encodeAs (c : CCfg) (e : Enc) (x : Resp) : Resp :=
   let b := c.encode e x.body
   { x with body := b,

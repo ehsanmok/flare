@@ -414,7 +414,7 @@ structure St where
 
 /-- `_drain_recv_tls`: append the plaintext; on WANT_WRITE set the flag and
 arm both; on close_notify finish (the half-close rule is in `ConnSM`).
-mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._drain_recv_tls sha=abc2d72216c2 at=da6fb43a -/
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._drain_recv_tls sha=abc2d72216c2 at=98b092d2 -/
 def drain (s : St) (e : Edge) : St :=
   let s1 := { s with rbuf := s.rbuf ++ e.plain, inp := s.inp ++ e.plain }
   match e.rstop with
@@ -424,7 +424,7 @@ def drain (s : St) (e : Edge) : St :=
 
 /-- `_flush_write_buf_tls` plus the partial / flushed handling of
 `on_writable`: on WANT_READ set the flag and arm both.
-mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._flush_write_buf_tls+ConnHandle.on_writable sha=b1dac3759c10 at=da6fb43a -/
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._flush_write_buf_tls+ConnHandle.on_writable sha=b1dac3759c10 at=98b092d2 -/
 def flush (s : St) (e : Edge) : St :=
   let x := min e.sent (s.wbuf.length - s.wpos)
   let s1 := { s with wpos := s.wpos + x, wire := s.wire ++ (s.wbuf.drop s.wpos).take x }
@@ -436,8 +436,8 @@ def flush (s : St) (e : Edge) : St :=
 
 /-- `_drive_h1`: `on_readable` drains while reading; while writing it
 returns `want_write` and the inline cycle runs `on_writable`.
-mirrors flare/http/_unified_reactor_impl.mojo#_drive_h1 sha=6001dd107a8a at=da6fb43a,
-flare/http/_reactor/conn_handle.mojo#ConnHandle.on_readable sha=5f85dfb8b98a at=da6fb43a -/
+mirrors flare/http/_unified_reactor_impl.mojo#_drive_h1 sha=6001dd107a8a at=98b092d2,
+flare/http/_reactor/conn_handle.mojo#ConnHandle.on_readable sha=5f85dfb8b98a at=98b092d2 -/
 def readDriver (s : St) (e : Edge) : St :=
   match s.phase with
   | .reading => drain s e
@@ -455,7 +455,7 @@ def writeDriver (s : St) (e : Edge) : St :=
 /-- The reactor's KIND_H1 dispatch: clear the flag, then the read driver on
 a readable edge or on a writable edge with the flag set, else the write
 driver on a writable edge.
-mirrors flare/http/_unified_reactor_impl.mojo#_unified_handle_conn_event sha=bba7c346f73a at=da6fb43a -/
+mirrors flare/http/_unified_reactor_impl.mojo#_unified_handle_conn_event sha=bba7c346f73a at=98b092d2 -/
 def route (s : St) (e : Edge) : St :=
   if s.done then s
   else

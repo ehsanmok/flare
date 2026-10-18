@@ -54,7 +54,7 @@ inductive H3Err
 
 /-! ## SETTINGS -/
 
-/-- mirrors flare/http3/server.mojo#Http3Connection._apply_peer_settings+Http3Connection sha=7a7c94d4e85b at=0a183352 (the fields of
+/-- mirrors flare/http3/server.mojo#Http3Connection._apply_peer_settings+Http3Connection sha=7a7c94d4e85b at=12630564 (the fields of
 `Http3Connection` it writes) -/
 structure PeerSettings where
   maxFieldSection : Option Nat := none
@@ -64,7 +64,7 @@ structure PeerSettings where
   h3Datagram : Option Bool := none
   deriving DecidableEq, Repr
 
-/-- mirrors flare/http3/server.mojo#Http3Connection._apply_peer_settings sha=aa13c1763f9b at=30fc5e99 -/
+/-- mirrors flare/http3/server.mojo#Http3Connection._apply_peer_settings sha=aa13c1763f9b at=c738a911 -/
 def applySetting (ps : PeerSettings) (p : Nat × Nat) : PeerSettings :=
   if p.1 = 0x06 then { ps with maxFieldSection := some p.2 }
   else if p.1 = 0x01 then { ps with qpackCap := some p.2 }
@@ -81,7 +81,7 @@ def isH2Setting (id : Nat) : Bool := 2 ≤ id && id ≤ 5
 def datagramBad (qd : Bool) (p : Nat × Nat) : Bool :=
   p.1 = 0x33 && (decide (p.2 > 1) || (p.2 = 1 && !qd))
 
-/-- mirrors flare/http3/server.mojo#Http3Connection._apply_peer_settings sha=aa13c1763f9b at=30fc5e99 (fixed, H3-04): reserved
+/-- mirrors flare/http3/server.mojo#Http3Connection._apply_peer_settings sha=aa13c1763f9b at=c738a911 (fixed, H3-04): reserved
 identifiers raise before any value is applied; a bad H3_DATAGRAM raises
 while applying, so the connection errors either way. -/
 def applySettings (qd : Bool) (ps : PeerSettings) (ss : List (Nat × Nat)) :
@@ -131,7 +131,7 @@ theorem applySettingsFixed_eq_spec (qd : Bool) (ps : PeerSettings) (ss : List (N
 
 /-! ## Control-stream frames -/
 
-/-- mirrors flare/http3/server.mojo#Http3Connection.__init__ sha=54a3b07d96c3 at=0a183352 (initial values),
+/-- mirrors flare/http3/server.mojo#Http3Connection.__init__ sha=54a3b07d96c3 at=12630564 (initial values),
 1170-1211 (fields read and written) -/
 structure CtlState where
   settingsReceived : Bool := false
@@ -180,7 +180,7 @@ theorem goawayFixed_eq_spec (s : CtlState) (p : Bytes) :
       simp only
       by_cases hk : k = tl.length + 1 <;> simp [hk]
 
-/-- mirrors flare/http3/server.mojo#Http3Connection._dispatch_control_frame sha=ee593a4f5552 at=0a183352 (fixed, H3-03): the forbidden-type
+/-- mirrors flare/http3/server.mojo#Http3Connection._dispatch_control_frame sha=ee593a4f5552 at=12630564 (fixed, H3-03): the forbidden-type
 check comes after the SETTINGS-first check. -/
 def dispatchControl (s : CtlState) (t : Nat) (p : Bytes) : Except H3Err CtlState :=
   if t = 0x04 then
@@ -295,7 +295,7 @@ theorem feedControl_le (s : CtlState) (b : Bytes) (s' : CtlState) (c : Bytes)
 inductive UKind | control | push | qpackEnc | qpackDec | unknown
   deriving DecidableEq, Repr
 
-/-- mirrors flare/http3/server.mojo#Http3Connection.__init__ sha=54a3b07d96c3 at=0a183352 -/
+/-- mirrors flare/http3/server.mojo#Http3Connection.__init__ sha=54a3b07d96c3 at=12630564 -/
 structure UniState where
   ctrl : Option Nat := none
   enc : Option Nat := none

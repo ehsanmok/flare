@@ -171,7 +171,7 @@ def parseRestWith (sf sa : Bytes → Bytes × Bytes) (strip : Bytes → Bytes)
     if host = [] then .error "missing host"
     else .ok ⟨scheme, host, port, path, query, fragment⟩
 
-/-- mirrors flare/http/url.mojo#Url.parse sha=11eddb276c82 at=0a183352 (step 1, then `parseRestWith`). -/
+/-- mirrors flare/http/url.mojo#Url.parse sha=11eddb276c82 at=12630564 (step 1, then `parseRestWith`). -/
 def parseWith (sf sa : Bytes → Bytes × Bytes) (strip : Bytes → Bytes) (raw : Bytes) :
     Except String Url :=
   match find raw sepB with
@@ -182,12 +182,12 @@ def parseWith (sf sa : Bytes → Bytes × Bytes) (strip : Bytes → Bytes) (raw 
     else parseRestWith sf sa strip scheme (raw.drop (se + 3))
 
 /-- Fragment starts at the **first** `#` (RFC 3986 §3.5, WHATWG).
-mirrors flare/http/url.mojo#Url.parse sha=11eddb276c82 at=0a183352 (fixed, APP-23) -/
+mirrors flare/http/url.mojo#Url.parse sha=11eddb276c82 at=12630564 (fixed, APP-23) -/
 def splitFragment (s : Bytes) : Bytes × Bytes :=
   match idxOf cHash s with | some p => (s.take p, s.drop (p + 1)) | none => (s, [])
 
 /-- Authority ends at the first `/` **or `?`** (RFC 3986 §3.2).
-mirrors flare/http/url.mojo#Url.parse sha=11eddb276c82 at=0a183352 (fixed, APP-23) -/
+mirrors flare/http/url.mojo#Url.parse sha=11eddb276c82 at=12630564 (fixed, APP-23) -/
 def splitAuthority (s : Bytes) : Bytes × Bytes :=
   match idxWhere (fun c => c == cSlash || c == cQ) s with
   | none => (s, [cSlash]) | some p => (s.take p, s.drop p)

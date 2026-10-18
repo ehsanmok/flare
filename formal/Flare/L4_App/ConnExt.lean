@@ -79,7 +79,7 @@ def driveH1Writable (s : St) : St := (onWritable s).1
 
 /-- Routing of a writable edge on a `KIND_H1` connection: while an upgrade is
 pending the edge goes to `_drive_h1`.
-mirrors flare/http/_unified_reactor_impl.mojo#_unified_handle_conn_event sha=bba7c346f73a at=da6fb43a (fixed, APP-47) -/
+mirrors flare/http/_unified_reactor_impl.mojo#_unified_handle_conn_event sha=bba7c346f73a at=98b092d2 (fixed, APP-47) -/
 def route (s : St) : St :=
   match s.kind with
   | .h2 => s
@@ -124,14 +124,14 @@ inductive Wire | tls | cleartext
 
 /-- `on_readable` takes the WebSocket branch: a handler is configured, the
 connection is not TLS, and the request is a version-13 handshake.
-mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle.on_readable sha=5f85dfb8b98a at=da6fb43a (fixed, APP-48) -/
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle.on_readable sha=5f85dfb8b98a at=98b092d2 (fixed, APP-48) -/
 def upgradeTaken (wsHandler tls isWs : Bool) : Bool :=
   wsHandler && !tls && isWs
 
 /-- Where the answer goes, given the branch condition: `_handle_ws_upgrade`
 writes on the detached raw fd; every other path goes through the
 connection's (TLS or plain) stream.
-mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._start_h2c_upgrade+ConnHandle._handle_ws_upgrade sha=9774bd2a2578 at=da6fb43a (fixed, APP-48) -/
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._start_h2c_upgrade+ConnHandle._handle_ws_upgrade sha=9774bd2a2578 at=98b092d2 (fixed, APP-48) -/
 def wire (wsHandler tls isWs : Bool) : Wire :=
   if upgradeTaken wsHandler tls isWs then .cleartext
   else if tls then .tls else .cleartext

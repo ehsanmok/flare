@@ -89,7 +89,7 @@ inductive WPc where
 slot, the drain thread's snapshot `done[i]`, what the drain did to the
 handle, and the freed bits of this worker's heap cells (`_balance_addr`
 is shared, with `St.stopF`).
-mirrors flare/runtime/scheduler.mojo#Scheduler sha=ea1cf1af69c8 at=30fc5e99 -/
+mirrors flare/runtime/scheduler.mojo#Scheduler sha=ea1cf1af69c8 at=c738a911 -/
 structure WS where
   pc : WPc
   done : Bool
@@ -102,7 +102,7 @@ structure WS where
   deriving DecidableEq, Repr
 
 /-- Drain thread program counter.
-mirrors flare/runtime/scheduler.mojo#Scheduler.drain sha=25089b531e7a at=30fc5e99 -/
+mirrors flare/runtime/scheduler.mojo#Scheduler.drain sha=25089b531e7a at=c738a911 -/
 inductive MPc where
   | signal          -- `_signal_stop` (store stop := True)
   | wait            -- :831-844 sample `WORKER_STAT_DONE` until all done or deadline
@@ -134,7 +134,7 @@ inductive Lbl where
 def w0 : WS := ⟨.start, false, false, false, false, false, false, false⟩
 
 /-- State right after `Scheduler.start` returned with `n` workers.
-mirrors flare/runtime/scheduler.mojo#Scheduler.start sha=a1f17c56964f at=30fc5e99 -/
+mirrors flare/runtime/scheduler.mojo#Scheduler.start sha=a1f17c56964f at=c738a911 -/
 def init (n : Nat) : St := ⟨List.replicate n w0, false, false, .signal, false⟩
 
 def Freed (w : WS) : Bool := w.ctxF || w.statsF || w.lisF
@@ -155,7 +155,7 @@ listener entries are dropped from what gets freed (CONC-04), the stop flag
 and the balancing group are leaked (`self._stopping_addr = 0`,
 `self._balance_addr = 0`) when a worker was detached (CONC-03), and
 `_free_resources` frees the rest.
-mirrors flare/runtime/scheduler.mojo#Scheduler.drain+default_worker_count+Scheduler._free_resources sha=a150f98fac4c at=30fc5e99 (fixed, CONC-03, CONC-04) -/
+mirrors flare/runtime/scheduler.mojo#Scheduler.drain+default_worker_count+Scheduler._free_resources sha=a150f98fac4c at=c738a911 (fixed, CONC-03, CONC-04) -/
 def freeAll (s : St) : St :=
   let anyDet := s.ws.any (·.detached)
   { s with
@@ -165,7 +165,7 @@ def freeAll (s : St) : St :=
     stopF := !anyDet,
     m := .fin }
 
-/-- One drain-thread step. mirrors flare/runtime/scheduler.mojo#Scheduler.drain sha=25089b531e7a at=30fc5e99 -/
+/-- One drain-thread step. mirrors flare/runtime/scheduler.mojo#Scheduler.drain sha=25089b531e7a at=c738a911 -/
 def mStep (c : Cfg) (s : St) : Option St :=
   match s.m with
   | .signal => some { s with stop := true, m := .wait, uaf := s.uaf || s.stopF }
@@ -185,7 +185,7 @@ def mStep (c : Cfg) (s : St) : Option St :=
   | .free => some (freeAll s)
   | .fin => none
 
-/-- mirrors flare/runtime/scheduler.mojo#Scheduler.drain sha=25089b531e7a at=30fc5e99 and flare/runtime/_worker.mojo#_worker_entry sha=0c7cab63ae89 at=30fc5e99 -/
+/-- mirrors flare/runtime/scheduler.mojo#Scheduler.drain sha=25089b531e7a at=c738a911 and flare/runtime/_worker.mojo#_worker_entry sha=0c7cab63ae89 at=c738a911 -/
 def step (c : Cfg) (s : St) : Lbl → Option St
   | .w i =>
     match s.ws[i]? with

@@ -95,7 +95,7 @@ theorem findBy_none (p : α → Bool) (t : Table α) :
     obtain ⟨i, hi, rfl⟩ := List.getElem_of_mem he
     exact h _ _ (getAbs_of t i hi)
 
-/-- mirrors flare/qpack/dynamic.mojo#encode_field_section_dynamic sha=5f76cf493a8d at=0a183352 -/
+/-- mirrors flare/qpack/dynamic.mojo#encode_field_section_dynamic sha=5f76cf493a8d at=12630564 -/
 def ric (full name : α → Option Nat) (hs : List α) : Nat :=
   hs.foldl (fun m h => match full h <|> name h with
     | some i => max m (i + 1)

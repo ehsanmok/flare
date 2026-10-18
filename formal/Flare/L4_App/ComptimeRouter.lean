@@ -62,7 +62,7 @@ inductive CScan where
   | miss (allowed : List Str)
 
 /-- The unrolled route loop of `ComptimeRouter.serve`.
-mirrors flare/http/routes.mojo#ComptimeRouter.serve+_match_one sha=92a09d8e34b5 at=0a183352 (unchanged by APP-10; the
+mirrors flare/http/routes.mojo#ComptimeRouter.serve+_match_one sha=92a09d8e34b5 at=12630564 (unchanged by APP-10; the
 fix is in `_match_one`) -/
 def scanCT (segsIn : List Str) (method : Str) : List CRoute → List Str → CScan
   | [], allowed => .miss allowed

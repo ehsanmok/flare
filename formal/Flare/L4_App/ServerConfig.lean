@@ -85,13 +85,13 @@ theorem check_maxKA (c : Cfg) (h : check c) : 1 ≤ c.maxKeepaliveRequests := h.
 /-! ## Timer instructions issued by the machine -/
 
 /-- Head still arriving: `idle_timeout_ms`.
-mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._check_request_complete sha=e491b536478f at=da6fb43a -/
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._check_request_complete sha=e491b536478f at=98b092d2 -/
 def headTimer (c : Cfg) : Int := c.idleTimeoutMs
 
 /-- Body still arriving: `body_timeout_ms if body_timeout_ms > 0 else
 idle_timeout_ms`, with `body_timeout_ms = read_body_timeout_ms` from every
 `on_readable*` reader except the static one.
-mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._check_request_complete sha=e491b536478f at=da6fb43a -/
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._check_request_complete sha=e491b536478f at=98b092d2 -/
 def bodyTimer (c : Cfg) : Int :=
   if c.readBodyTimeoutMs > 0 then c.readBodyTimeoutMs else c.idleTimeoutMs
 
@@ -139,7 +139,7 @@ with at most `T` ms on every read) closes the connection when it fires. -/
 `last` the previous readable event, and the list the later readable event
 times. Each event either comes after the armed timer fired (close at
 `last + T`), trips the absolute budget (408 at `t`), or re-arms.
-mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._check_request_complete sha=e491b536478f at=da6fb43a -/
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._check_request_complete sha=e491b536478f at=98b092d2 -/
 def closeTime (R T t0 last : Nat) : List Nat → Nat
   | [] => last + T
   | t :: ts =>
@@ -176,7 +176,7 @@ def overCapSpec (len maxH maxB : Int) : Bool := decide (len > maxH + maxB)
 /-- The cap test as shipped (fixed, APP-06): `len(self.read_buf) -
 config.max_header_size > config.max_body_size` at all three sites of
 conn_handle.mojo (and `_parse_http_request`).
-mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._drain_recv+ConnHandle._drain_recv_tls+ConnHandle._append_pre_recv_bytes sha=0188d1fe6e50 at=da6fb43a (fixed,
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._drain_recv+ConnHandle._drain_recv_tls+ConnHandle._append_pre_recv_bytes sha=0188d1fe6e50 at=98b092d2 (fixed,
 APP-06) -/
 def overCapImpl (len maxH maxB : Int64) : Bool := len - maxH > maxB
 

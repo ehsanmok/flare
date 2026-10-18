@@ -47,14 +47,14 @@ open Flare Flare.L3.H3
 inductive TPErr | truncated | trailing | duplicate | invalid
   deriving DecidableEq, Repr
 
-/-- mirrors flare/quic/transport_params.mojo#TP_ID_ORIGINAL_DCID+TP_ID_MAX_IDLE_TIMEOUT+TP_ID_STATELESS_RESET_TOKEN+TP_ID_MAX_UDP_PAYLOAD_SIZE+TP_ID_INITIAL_MAX_DATA+TP_ID_INITIAL_MAX_STREAM_DATA_BIDI_LOCAL+TP_ID_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE+TP_ID_INITIAL_MAX_STREAM_DATA_UNI+TP_ID_INITIAL_MAX_STREAMS_BIDI+TP_ID_INITIAL_MAX_STREAMS_UNI+TP_ID_ACK_DELAY_EXPONENT+TP_ID_MAX_ACK_DELAY+TP_ID_DISABLE_ACTIVE_MIGRATION+TP_ID_PREFERRED_ADDRESS+TP_ID_ACTIVE_CONNECTION_ID_LIMIT+TP_ID_INITIAL_SCID+TP_ID_RETRY_SCID+TP_ID_MAX_DATAGRAM_FRAME_SIZE+TP_ID_MIN_ACK_DELAY sha=da284e7a6065 at=da6fb43a -/
+/-- mirrors flare/quic/transport_params.mojo#TP_ID_ORIGINAL_DCID+TP_ID_MAX_IDLE_TIMEOUT+TP_ID_STATELESS_RESET_TOKEN+TP_ID_MAX_UDP_PAYLOAD_SIZE+TP_ID_INITIAL_MAX_DATA+TP_ID_INITIAL_MAX_STREAM_DATA_BIDI_LOCAL+TP_ID_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE+TP_ID_INITIAL_MAX_STREAM_DATA_UNI+TP_ID_INITIAL_MAX_STREAMS_BIDI+TP_ID_INITIAL_MAX_STREAMS_UNI+TP_ID_ACK_DELAY_EXPONENT+TP_ID_MAX_ACK_DELAY+TP_ID_DISABLE_ACTIVE_MIGRATION+TP_ID_PREFERRED_ADDRESS+TP_ID_ACTIVE_CONNECTION_ID_LIMIT+TP_ID_INITIAL_SCID+TP_ID_RETRY_SCID+TP_ID_MAX_DATAGRAM_FRAME_SIZE+TP_ID_MIN_ACK_DELAY sha=da284e7a6065 at=98b092d2 -/
 inductive PK
   | odcid | idle | token | maxUdp | maxData | sdBidiLocal | sdBidiRemote | sdUni
   | streamsBidi | streamsUni | ackExp | maxAckDelay | disableMig | prefAddr | cidLimit
   | iscid | rscid | datagram | minAckDelay | unknown
   deriving DecidableEq, Repr
 
-/-- mirrors flare/quic/transport_params.mojo#TP_ID_ORIGINAL_DCID+TP_ID_MAX_IDLE_TIMEOUT+TP_ID_STATELESS_RESET_TOKEN+TP_ID_MAX_UDP_PAYLOAD_SIZE+TP_ID_INITIAL_MAX_DATA+TP_ID_INITIAL_MAX_STREAM_DATA_BIDI_LOCAL+TP_ID_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE+TP_ID_INITIAL_MAX_STREAM_DATA_UNI+TP_ID_INITIAL_MAX_STREAMS_BIDI+TP_ID_INITIAL_MAX_STREAMS_UNI+TP_ID_ACK_DELAY_EXPONENT+TP_ID_MAX_ACK_DELAY+TP_ID_DISABLE_ACTIVE_MIGRATION+TP_ID_PREFERRED_ADDRESS+TP_ID_ACTIVE_CONNECTION_ID_LIMIT+TP_ID_INITIAL_SCID+TP_ID_RETRY_SCID+TP_ID_MAX_DATAGRAM_FRAME_SIZE+TP_ID_MIN_ACK_DELAY sha=da284e7a6065 at=da6fb43a -/
+/-- mirrors flare/quic/transport_params.mojo#TP_ID_ORIGINAL_DCID+TP_ID_MAX_IDLE_TIMEOUT+TP_ID_STATELESS_RESET_TOKEN+TP_ID_MAX_UDP_PAYLOAD_SIZE+TP_ID_INITIAL_MAX_DATA+TP_ID_INITIAL_MAX_STREAM_DATA_BIDI_LOCAL+TP_ID_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE+TP_ID_INITIAL_MAX_STREAM_DATA_UNI+TP_ID_INITIAL_MAX_STREAMS_BIDI+TP_ID_INITIAL_MAX_STREAMS_UNI+TP_ID_ACK_DELAY_EXPONENT+TP_ID_MAX_ACK_DELAY+TP_ID_DISABLE_ACTIVE_MIGRATION+TP_ID_PREFERRED_ADDRESS+TP_ID_ACTIVE_CONNECTION_ID_LIMIT+TP_ID_INITIAL_SCID+TP_ID_RETRY_SCID+TP_ID_MAX_DATAGRAM_FRAME_SIZE+TP_ID_MIN_ACK_DELAY sha=da284e7a6065 at=98b092d2 -/
 def kindTable : List (Nat × PK) :=
   [(0x00, .odcid), (0x01, .idle), (0x02, .token), (0x03, .maxUdp), (0x04, .maxData),
    (0x05, .sdBidiLocal), (0x06, .sdBidiRemote), (0x07, .sdUni), (0x08, .streamsBidi),
@@ -79,7 +79,7 @@ theorem kind_mem {id : Nat} {k : PK} (h : kind id = k) (hk : k ≠ .unknown) : (
     subst h1 h
     exact h2
 
-/-- mirrors flare/quic/transport_params.mojo#TransportParameters sha=511c286cee0d at=30fc5e99 -/
+/-- mirrors flare/quic/transport_params.mojo#TransportParameters sha=511c286cee0d at=c738a911 -/
 structure TP where
   odcid : Bytes := []
   idle : Option Nat := none
@@ -141,13 +141,13 @@ def paValid (v : Bytes) : Bool :=
     decide ((Bytes.getD v 24).toNat ≤ 20) && decide (v.length = 41 + (Bytes.getD v 24).toNat)
 
 /-- A varint parameter, checked with `varOk` (the stream limits since QUIC-10).
-mirrors flare/quic/transport_params.mojo#decode_transport_parameters sha=378c626d35a4 at=da6fb43a -/
+mirrors flare/quic/transport_params.mojo#decode_transport_parameters sha=378c626d35a4 at=98b092d2 -/
 def applyVar (k : PK) (v : Bytes) (tp : TP) : Except TPErr TP :=
   match readVar v with
   | .error e => .error e
   | .ok x => if varOk k x then .ok (setVar k x tp) else .error .invalid
 
-/-- One parameter. mirrors flare/quic/transport_params.mojo#decode_transport_parameters sha=378c626d35a4 at=da6fb43a
+/-- One parameter. mirrors flare/quic/transport_params.mojo#decode_transport_parameters sha=378c626d35a4 at=98b092d2
 (0x0d gets the QUIC-13 layout check). -/
 def apply (id : Nat) (v : Bytes) (tp : TP) : Except TPErr TP :=
   match kind id with
@@ -160,7 +160,7 @@ def apply (id : Nat) (v : Bytes) (tp : TP) : Except TPErr TP :=
   | .unknown => .ok tp
   | k => applyVar k v tp
 
-/-- mirrors flare/quic/transport_params.mojo#decode_transport_parameters sha=378c626d35a4 at=da6fb43a (`b` is
+/-- mirrors flare/quic/transport_params.mojo#decode_transport_parameters sha=378c626d35a4 at=98b092d2 (`b` is
 `buf[pos:]`; `seen` is the duplicate list, newest first) -/
 def decodeLoop (seen : List Nat) (tp : TP) (b : Bytes) : Except TPErr TP :=
   if b.length = 0 then .ok tp else
@@ -412,7 +412,7 @@ def bytP (id : Nat) (b : Bytes) : List (Nat × Bytes) := if b = [] then [] else 
 def flagP (id : Nat) (f : Bool) : List (Nat × Bytes) := if f then [(id, [])] else []
 
 /-- The parameters emitted, in order.
-mirrors flare/quic/transport_params.mojo#encode_transport_parameters sha=bd16d1e078bc at=30fc5e99 -/
+mirrors flare/quic/transport_params.mojo#encode_transport_parameters sha=bd16d1e078bc at=c738a911 -/
 def params (enc : Nat → Bytes) (tp : TP) : List (Nat × Bytes) :=
   bytP 0x00 tp.odcid ++ optP enc 0x01 tp.idle ++ bytP 0x02 tp.token ++ optP enc 0x03 tp.maxUdp ++
   optP enc 0x04 tp.maxData ++ optP enc 0x05 tp.sdBidiLocal ++ optP enc 0x06 tp.sdBidiRemote ++
@@ -433,14 +433,14 @@ def varFields (tp : TP) : List (Option Nat) :=
   [tp.idle, tp.maxUdp, tp.maxData, tp.sdBidiLocal, tp.sdBidiRemote, tp.sdUni, tp.streamsBidi,
    tp.streamsUni, tp.ackExp, tp.maxAckDelay, tp.cidLimit, tp.datagram, tp.minAckDelay]
 
-/-- The encoder's raises. mirrors flare/quic/transport_params.mojo#encode_transport_parameters sha=bd16d1e078bc at=30fc5e99 and flare/quic/varint.mojo (values ≥ 2^62) -/
+/-- The encoder's raises. mirrors flare/quic/transport_params.mojo#encode_transport_parameters sha=bd16d1e078bc at=c738a911 and flare/quic/varint.mojo (values ≥ 2^62) -/
 def encodeOk (tp : TP) : Bool :=
   (tp.token = [] || tp.token.length = 16) && tp.ackExp.all (· ≤ 20) &&
     tp.maxAckDelay.all (· < 2 ^ 14) && tp.cidLimit.all (2 ≤ ·) &&
     (varFields tp).all (fun o => o.all (· < 2 ^ 62)) &&
     [tp.odcid, tp.token, tp.iscid, tp.rscid].all (fun b => decide (b.length < 2 ^ 62))
 
-/-- mirrors flare/quic/transport_params.mojo#encode_transport_parameters sha=bd16d1e078bc at=30fc5e99 -/
+/-- mirrors flare/quic/transport_params.mojo#encode_transport_parameters sha=bd16d1e078bc at=c738a911 -/
 def encode (enc : Nat → Bytes) (tp : TP) : Except TPErr Bytes :=
   if encodeOk tp then .ok (wire enc (params enc tp)) else .error .invalid
 

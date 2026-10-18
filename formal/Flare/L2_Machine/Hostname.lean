@@ -41,7 +41,7 @@ inductive Res where
   deriving DecidableEq, Repr
 
 /-- the per-byte loop, `ll` = `label_len`.
-mirrors flare/dns/resolver.mojo#resolve sha=fbb517864b3e at=0a183352 -/
+mirrors flare/dns/resolver.mojo#resolve sha=fbb517864b3e at=12630564 -/
 def scan : Bytes → Nat → Res
   | [], _ => .ok
   | b :: r, ll =>

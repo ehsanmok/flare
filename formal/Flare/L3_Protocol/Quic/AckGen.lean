@@ -57,17 +57,17 @@ def Canon : Ranges → Prop
   | [p] => p.1 ≤ p.2
   | p :: q :: r => p.1 ≤ p.2 ∧ q.2 + 2 ≤ p.1 ∧ Canon (q :: r)
 
-/-- mirrors flare/quic/_server_support.mojo#_ack_record sha=018fa7a5b4ab at=0a183352 (one insertion
+/-- mirrors flare/quic/_server_support.mojo#_ack_record sha=018fa7a5b4ab at=12630564 (one insertion
 step: the element goes after every `low` not greater than its own) -/
 def sortIns (x : Nat × Nat) : Ranges → Ranges
   | [] => [x]
   | y :: ys => if y.1 > x.1 then x :: y :: ys else y :: sortIns x ys
 
-/-- mirrors flare/quic/_server_support.mojo#_ack_record sha=018fa7a5b4ab at=0a183352 -/
+/-- mirrors flare/quic/_server_support.mojo#_ack_record sha=018fa7a5b4ab at=12630564 -/
 def isort (l : Ranges) : Ranges := l.foldl (fun acc x => sortIns x acc) []
 
 /-- The merge loop; the accumulator is `(ml, mh)` reversed (head = last).
-mirrors flare/quic/_server_support.mojo#_ack_record sha=018fa7a5b4ab at=0a183352 -/
+mirrors flare/quic/_server_support.mojo#_ack_record sha=018fa7a5b4ab at=12630564 -/
 def mergeAcc : Ranges → Ranges → Ranges
   | acc, [] => acc
   | [], x :: r => mergeAcc [x] r
@@ -80,7 +80,7 @@ def cap : Nat := 32
 /-- All merged ranges, descending, before the cap. -/
 def merged (flat : Ranges) (pn : Nat) : Ranges := mergeAcc [] (isort (flat ++ [(pn, pn)]))
 
-/-- mirrors flare/quic/_server_support.mojo#_ack_record sha=018fa7a5b4ab at=0a183352 -/
+/-- mirrors flare/quic/_server_support.mojo#_ack_record sha=018fa7a5b4ab at=12630564 -/
 def record (flat : Ranges) (pn : Nat) : Ranges := (merged flat pn).take cap
 
 /-- The tracked state (fixed, QUIC-14): the stored ranges plus the floor, one
@@ -97,7 +97,7 @@ def floorAfter (s : St) (pn : Nat) : Nat :=
   | [] => s.floor
   | q :: _ => max s.floor (q.2 + 1)
 
-/-- mirrors flare/quic/_server_support.mojo#_ack_record sha=018fa7a5b4ab at=0a183352 incl. the floor
+/-- mirrors flare/quic/_server_support.mojo#_ack_record sha=018fa7a5b4ab at=12630564 incl. the floor
 slot (fixed, QUIC-14) -/
 def recordSt (s : St) (pn : Nat) : St :=
   { flat := record s.flat pn, floor := floorAfter s pn }
@@ -458,14 +458,14 @@ theorem ack_roundtrip (flat : Ranges) (hc : Canon flat) {largest first : Nat}
 
 /-! ## Driver: owe an ACK, emit it on the next drain -/
 
-/-- mirrors flare/quic/server.mojo#QuicListener+QuicListener._process_one_packet sha=c86b2a14bdb6 at=0a183352 (`rx_1rtt_ranges`,
+/-- mirrors flare/quic/server.mojo#QuicListener+QuicListener._process_one_packet sha=c86b2a14bdb6 at=12630564 (`rx_1rtt_ranges`,
 `rx_1rtt_ack_pending`) -/
 structure Rx where
   flat : Ranges := []
   floor : Nat := 0
   pending : Bool := false
 
-/-- mirrors flare/quic/server.mojo#QuicListener._process_one_packet sha=e7525f448f1f at=0a183352 (duplicates dropped,
+/-- mirrors flare/quic/server.mojo#QuicListener._process_one_packet sha=e7525f448f1f at=12630564 (duplicates dropped,
 then record, then owe an ACK if the packet was ack-eliciting) -/
 def recv (s : Rx) (pn : Nat) (eliciting : Bool) : Rx :=
   if contains ⟨s.flat, s.floor⟩ pn then s
@@ -475,7 +475,7 @@ def recv (s : Rx) (pn : Nat) (eliciting : Bool) : Rx :=
 /-- `due` is `ack_due`: false only while the peer's ACK_FREQUENCY lets the
 owed ACK wait (below its threshold and delay, no IMMEDIATE_ACK); the ACK
 then stays owed.
-mirrors flare/quic/server.mojo#QuicListener._drain_1rtt_coalesced sha=99380341168c at=0a183352 -/
+mirrors flare/quic/server.mojo#QuicListener._drain_1rtt_coalesced sha=99380341168c at=12630564 -/
 def drain (s : Rx) (due : Bool := true) : Option (Nat × Nat × List (Nat × Nat)) × Rx :=
   if s.pending ∧ 2 ≤ 2 * s.flat.length ∧ due then (fromRanges s.flat, { s with pending := false })
   else (none, s)
@@ -621,7 +621,7 @@ theorem drain_held (s : Rx) : drain s false = (none, s) := by
 
 /-! ## The in-order fast path of `_ack_record` -/
 
-/-- mirrors flare/quic/_server_support.mojo#_ack_record sha=018fa7a5b4ab at=0a183352 (the fast path,
+/-- mirrors flare/quic/_server_support.mojo#_ack_record sha=018fa7a5b4ab at=12630564 (the fast path,
 then the full rebuild `recordSt`) -/
 def recordFast (s : St) (pn : Nat) : St :=
   match s.flat with

@@ -80,7 +80,7 @@ def serverSpec (b cscid : Bytes) : Bool :=
 (raising on an error), none of the server-only ids present, and
 initial_source_connection_id present and equal to the Source CID of the
 client's Initial. Run once the 1-RTT keys are installed (fixed, QUIC-11).
-mirrors flare/quic/transport_params.mojo#transport_parameter_present+check_client_transport_params sha=04cdcd28caeb at=da6fb43a, flare/quic/server.mojo#QuicListener._dispatch_crypto_frames+QuicListener._client_params_ok sha=ad24410b52d8 at=da6fb43a (fixed, QUIC-11) -/
+mirrors flare/quic/transport_params.mojo#transport_parameter_present+check_client_transport_params sha=04cdcd28caeb at=98b092d2, flare/quic/server.mojo#QuicListener._dispatch_crypto_frames+QuicListener._client_params_ok sha=ad24410b52d8 at=98b092d2 (fixed, QUIC-11) -/
 def serverCheck (b cscid : Bytes) : Bool :=
   match decode b with
   | .error _ => false

@@ -25,7 +25,7 @@ def hexNibble (c : UInt8) : Option Nat :=
   else if 65 ≤ c.toNat ∧ c.toNat ≤ 70 then some (c.toNat - 55)
   else none
 
-/-- mirrors flare/http/form.mojo#urldecode sha=a62961a5db5c at=0a183352
+/-- mirrors flare/http/form.mojo#urldecode sha=a62961a5db5c at=12630564
 (the byte loop). The Mojo guard
 `if i + 2 >= n: raise` is the "fewer than two bytes after `%`" case. -/
 def urldecodeBytes : Bytes → Option Bytes

@@ -37,14 +37,14 @@ def pollCap : Nat := 100
 /-- Bytes of an in-flight response delivered when the stop flag is set
 `stopDelay` ms after the `drain` call and the reactor notices it `lag` ms
 later, then closes every live connection.
-mirrors flare/http/_unified_reactor_impl.mojo#_run_unified_loop_for_fd+_drain_remaining_conns_unified sha=c5fdb4d4e8b8 at=0a183352 -/
+mirrors flare/http/_unified_reactor_impl.mojo#_run_unified_loop_for_fd+_drain_remaining_conns_unified sha=c5fdb4d4e8b8 at=12630564 -/
 def delivered (stopDelay lag rate pending : Nat) : Nat :=
   min pending (rate * (stopDelay + lag))
 
 /-- After closing the listener, `drain` waits out `timeout_ms`
 (negative clamps to 0) before setting `_stopping`; a positive wait gets one
 extra millisecond tick, so a whole `timeout_ms` passes on a millisecond clock.
-mirrors flare/http/server.mojo#HttpServer.drain sha=2c107717424e at=0a183352 (fixed, APP-46) -/
+mirrors flare/http/server.mojo#HttpServer.drain sha=2c107717424e at=12630564 (fixed, APP-46) -/
 def stopDelay (timeoutMs : Int) : Nat := timeoutMs.toNat + (if 0 < timeoutMs then 1 else 0)
 
 /-- Graceful-drain contract: a response the peer can absorb within the

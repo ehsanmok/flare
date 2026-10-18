@@ -51,24 +51,24 @@ def DayNumbering (f : Int → Int → Int → Int) : Prop :=
 
 /-! ## Implementation -/
 
-/-- March-based year. mirrors flare/runtime/date_cache.mojo#civil_to_unix_seconds sha=4b7a508fbf16 at=0a183352 -/
+/-- March-based year. mirrors flare/runtime/date_cache.mojo#civil_to_unix_seconds sha=4b7a508fbf16 at=12630564 -/
 def shiftYear (y m : Int) : Int := y - (if m ≤ 2 then 1 else 0)
 
-/-- March-based month in `[0, 11]`. mirrors flare/runtime/date_cache.mojo#civil_to_unix_seconds sha=4b7a508fbf16 at=0a183352 -/
+/-- March-based month in `[0, 11]`. mirrors flare/runtime/date_cache.mojo#civil_to_unix_seconds sha=4b7a508fbf16 at=12630564 -/
 def shiftMonth (m : Int) : Int := m + (if m ≤ 2 then 9 else -3)
 
 /-- Day-of-year where March-based month `mp` starts.
-mirrors flare/runtime/date_cache.mojo#civil_to_unix_seconds+unix_seconds_to_civil sha=9457125f18f6 at=0a183352 -/
+mirrors flare/runtime/date_cache.mojo#civil_to_unix_seconds+unix_seconds_to_civil sha=9457125f18f6 at=12630564 -/
 def mStart (mp : Int) : Int := (153 * mp + 2) / 5
 
 /-- Days of an era before year-of-era `yoe`.
-mirrors flare/runtime/date_cache.mojo#civil_to_unix_seconds+unix_seconds_to_civil sha=9457125f18f6 at=0a183352 -/
+mirrors flare/runtime/date_cache.mojo#civil_to_unix_seconds+unix_seconds_to_civil sha=9457125f18f6 at=12630564 -/
 def startOf (yoe : Int) : Int := 365 * yoe + yoe / 4 - yoe / 100
 
-/-- mirrors flare/runtime/date_cache.mojo#unix_seconds_to_civil sha=92712c862792 at=0a183352 -/
+/-- mirrors flare/runtime/date_cache.mojo#unix_seconds_to_civil sha=92712c862792 at=12630564 -/
 def yoeOf (doe : Int) : Int := (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365
 
-/-- mirrors flare/runtime/date_cache.mojo#unix_seconds_to_civil sha=92712c862792 at=0a183352 -/
+/-- mirrors flare/runtime/date_cache.mojo#unix_seconds_to_civil sha=92712c862792 at=12630564 -/
 def mpOf (doy : Int) : Int := (5 * doy + 2) / 153
 
 /-- `civil_to_unix_seconds` day part, floor era (`year // 400`).

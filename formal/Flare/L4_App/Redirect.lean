@@ -91,7 +91,7 @@ def parsePort (s : Str) : Option Nat :=
     if v < 1 ∨ v > 65535 then none else some v
   else none
 
-/-- mirrors flare/http/url.mojo#Url.parse sha=11eddb276c82 at=0a183352 -/
+/-- mirrors flare/http/url.mojo#Url.parse sha=11eddb276c82 at=12630564 -/
 def parse (raw : Str) : Option Url := do
   let se ← findSub raw "://".toList
   let scheme := raw.take se

@@ -227,10 +227,10 @@ def ticketsOff : Ctx := { issues := false, resumes := false }
 /-- `TlsServerConfig.enable_session_tickets` defaults to `False`;
 `TlsAcceptor.__init__` enables, or calls
 `flare_ssl_ctx_disable_session_tickets`.
-mirrors flare/tls/acceptor.mojo#TlsServerConfig.__init__+TlsAcceptor.__init__ sha=e6f4bd9e99d9 at=da6fb43a (fixed, DOC-08) -/
+mirrors flare/tls/acceptor.mojo#TlsServerConfig.__init__+TlsAcceptor.__init__ sha=e6f4bd9e99d9 at=98b092d2 (fixed, DOC-08) -/
 def defaultTickets : Bool := false
 
-/-- mirrors flare/tls/acceptor.mojo#TlsServerConfig.__init__+TlsAcceptor.__init__ sha=e6f4bd9e99d9 at=da6fb43a (fixed, DOC-08) -/
+/-- mirrors flare/tls/acceptor.mojo#TlsServerConfig.__init__+TlsAcceptor.__init__ sha=e6f4bd9e99d9 at=98b092d2 (fixed, DOC-08) -/
 def build (enable : Bool) : Ctx := if enable then ticketsOn else ticketsOff
 
 /-- The doc's promise: off unless asked for, and off really means off. -/

@@ -26,7 +26,7 @@ namespace Flare.L3.H3.ControlStart
 open Flare.L3.H3
 
 /-- The `Http3Config` fields read by `emit_initial_settings`.
-mirrors flare/http3/server.mojo#Http3Config sha=7ac438a60aed at=30fc5e99 -/
+mirrors flare/http3/server.mojo#Http3Config sha=7ac438a60aed at=c738a911 -/
 structure Config where
   maxFieldSection : Nat := 65536
   qpackCap : Nat := 0
@@ -38,13 +38,13 @@ structure Config where
 def Config.Valid (c : Config) : Prop :=
   c.maxFieldSection < 2 ^ 62 ∧ c.qpackCap < 2 ^ 62 ∧ c.qpackBlocked < 2 ^ 62
 
-/-- mirrors flare/http3/server.mojo#Http3Connection.emit_initial_settings sha=c08b3afc5529 at=30fc5e99 -/
+/-- mirrors flare/http3/server.mojo#Http3Connection.emit_initial_settings sha=c08b3afc5529 at=c738a911 -/
 def settingsList (c : Config) : List (Nat × Nat) :=
   [(0x06, c.maxFieldSection), (0x01, c.qpackCap), (0x07, c.qpackBlocked)] ++
     (if c.connect then [(0x08, 1)] else []) ++
     (if c.h3Datagram then [(0x33, 1)] else [])
 
-/-- mirrors flare/http3/server.mojo#Http3Connection.emit_initial_settings sha=c08b3afc5529 at=30fc5e99 -/
+/-- mirrors flare/http3/server.mojo#Http3Connection.emit_initial_settings sha=c08b3afc5529 at=c738a911 -/
 def emitInitialSettings (enc : Nat → Bytes) (c : Config) : Bytes :=
   enc 0x00 ++ encodeFrame enc 0x04 (encodeSettings enc (settingsList c))
 
@@ -73,7 +73,7 @@ def ClientBidi (reqs : List Nat) : Prop := ∀ s ∈ reqs, s % 4 = 0
 /-- The outbound set: stream 3 with the bytes of `take_control_stream_start()`,
 appended to the first 1-RTT flight next to HANDSHAKE_DONE, then one response
 stream per request.
-mirrors flare/quic/server.mojo#QuicListener._drain_1rtt_coalesced sha=99380341168c at=0a183352, flare/http3/server.mojo#Http3Connection.take_control_stream_start sha=309466764d0e at=0a183352 (fixed, H3-07) -/
+mirrors flare/quic/server.mojo#QuicListener._drain_1rtt_coalesced sha=99380341168c at=12630564, flare/http3/server.mojo#Http3Connection.take_control_stream_start sha=309466764d0e at=12630564 (fixed, H3-07) -/
 def implOut (enc : Nat → Bytes) (c : Config) (resp : Nat → Bytes) (reqs : List Nat) : Out :=
   (3, emitInitialSettings enc c) :: reqs.map fun s => (s, resp s)
 

@@ -42,7 +42,7 @@ def http10B : Bytes := [72, 84, 84, 80, 47, 49, 46, 48]                -- HTTP/1
 def connB : Bytes := [99, 111, 110, 110, 101, 99, 116, 105, 111, 110, 58]   -- connection:
 
 /-- One byte lowercased the way the scan loops do it (`c + 32` on `A-Z`).
-mirrors flare/http/_reactor/keepalive_scan.mojo#_wants_close sha=1dc8921b6a2c at=da6fb43a -/
+mirrors flare/http/_reactor/keepalive_scan.mojo#_wants_close sha=1dc8921b6a2c at=98b092d2 -/
 def lowerB (c : UInt8) : UInt8 := if 65 ≤ c ∧ c ≤ 90 then c + 32 else c
 
 /-- `_ascii_lower` on a whole value. -/
@@ -119,22 +119,22 @@ theorem computeCloseAfter_eq_spec (v : Bytes) (http10 : Bool) :
 def at' (d : Bytes) (i : Nat) : UInt8 := Bytes.getD d i
 
 /-- Exact match of `needle` at offset `i`.
-mirrors flare/http/_reactor/keepalive_scan.mojo#_wants_close sha=1dc8921b6a2c at=da6fb43a -/
+mirrors flare/http/_reactor/keepalive_scan.mojo#_wants_close sha=1dc8921b6a2c at=98b092d2 -/
 def matchAt (d : Bytes) (i : Nat) (needle : Bytes) : Bool :=
   (List.range needle.length).all fun j => at' d (i + j) == Bytes.getD needle j
 
 /-- Case-folded match of `needle` (lowercase) at offset `i`.
-mirrors flare/http/_reactor/keepalive_scan.mojo#_wants_close sha=1dc8921b6a2c at=da6fb43a -/
+mirrors flare/http/_reactor/keepalive_scan.mojo#_wants_close sha=1dc8921b6a2c at=98b092d2 -/
 def matchAtLower (d : Bytes) (i : Nat) (needle : Bytes) : Bool :=
   (List.range needle.length).all fun j => lowerB (at' d (i + j)) == Bytes.getD needle j
 
 /-- Index of the first LF in `[0, n)`, else `n`.
-mirrors flare/http/_reactor/keepalive_scan.mojo#_wants_close sha=1dc8921b6a2c at=da6fb43a -/
+mirrors flare/http/_reactor/keepalive_scan.mojo#_wants_close sha=1dc8921b6a2c at=98b092d2 -/
 def firstEol (d : Bytes) (n : Nat) : Nat :=
   ((List.range n).find? fun i => at' d i == 10).getD n
 
 /-- `HTTP/1.0` somewhere on the request line.
-mirrors flare/http/_reactor/keepalive_scan.mojo#_wants_close sha=1dc8921b6a2c at=da6fb43a -/
+mirrors flare/http/_reactor/keepalive_scan.mojo#_wants_close sha=1dc8921b6a2c at=98b092d2 -/
 def version10 (d : Bytes) (n : Nat) : Bool :=
   (List.range (firstEol d n + 1 - 8)).any fun i => matchAt d i http10B
 
@@ -145,7 +145,7 @@ def scanTo (n start : Nat) (p : Nat → Bool) : Nat :=
 
 /-- The value of a `connection:` match at `i`: skip OWS, cut at CR, LF or
 `header_end`.
-mirrors flare/http/_reactor/keepalive_scan.mojo#_wants_close sha=1dc8921b6a2c at=da6fb43a -/
+mirrors flare/http/_reactor/keepalive_scan.mojo#_wants_close sha=1dc8921b6a2c at=98b092d2 -/
 def valueAt (d : Bytes) (n i : Nat) : Bytes :=
   let pos := scanTo n (i + 11) fun k => !isOWS (at' d k)
   let vEnd := scanTo n pos fun k => at' d k == 13 || at' d k == 10
@@ -160,7 +160,7 @@ def verdict (d : Bytes) (n i : Nat) : Bool × Bool :=
 
 /-- Candidate offsets of the header scan: `i` from `first_eol + 1` while
 `i < n - len("connection:")`.
-mirrors flare/http/_reactor/keepalive_scan.mojo#_wants_close sha=1dc8921b6a2c at=da6fb43a -/
+mirrors flare/http/_reactor/keepalive_scan.mojo#_wants_close sha=1dc8921b6a2c at=98b092d2 -/
 def candidates (d : Bytes) (n : Nat) : List Nat :=
   List.range' (firstEol d n + 1) (n - 11 - (firstEol d n + 1))
 
@@ -170,13 +170,13 @@ def isConn (d : Bytes) (i : Nat) : Bool := matchAtLower d i connB
 def firstConn (d : Bytes) (n : Nat) : Option Nat := (candidates d n).find? (isConn d)
 
 /-- Offset `i` starts a header line.
-mirrors flare/http/_reactor/keepalive_scan.mojo#_wants_close sha=1dc8921b6a2c at=da6fb43a (fixed, APP-02) -/
+mirrors flare/http/_reactor/keepalive_scan.mojo#_wants_close sha=1dc8921b6a2c at=98b092d2 (fixed, APP-02) -/
 def lineStart (d : Bytes) (n i : Nat) : Bool := i == firstEol d n + 1 || at' d (i - 1) == 10
 
 /-- `_wants_close` as shipped (fixed, APP-02): `connection:` is tested only at
 line starts and the verdicts of every such line are OR-ed instead of
 `break`ing at the first match.
-mirrors flare/http/_reactor/keepalive_scan.mojo#_wants_close sha=1dc8921b6a2c at=da6fb43a (fixed, APP-02) -/
+mirrors flare/http/_reactor/keepalive_scan.mojo#_wants_close sha=1dc8921b6a2c at=98b092d2 (fixed, APP-02) -/
 def wantsClose (d : Bytes) (n : Nat) : Bool :=
   let hits := (candidates d n).filter fun i => lineStart d n i && isConn d i
   hits.any (fun i => (verdict d n i).1) ||

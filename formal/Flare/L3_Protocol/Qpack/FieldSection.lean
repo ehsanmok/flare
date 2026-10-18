@@ -105,7 +105,7 @@ structure Geo where
 
 /-- Base, as flare computes it (UInt64 wrap); `implResolve` guards
 `delta < ric` before using the `sign` branch.
-mirrors flare/qpack/dynamic.mojo#_pre_base_abs+_post_base_abs+decode_field_section_dynamic sha=0fbf1ac73b98 at=0a183352 (fixed, QPACK-01) -/
+mirrors flare/qpack/dynamic.mojo#_pre_base_abs+_post_base_abs+decode_field_section_dynamic sha=0fbf1ac73b98 at=12630564 (fixed, QPACK-01) -/
 def implBase (ric delta : UInt64) (sign : Bool) : UInt64 :=
   if sign then ric - delta - 1 else ric + delta
 
@@ -151,7 +151,7 @@ def fixedCheck (ric : UInt64) (g : Geo) : Option UInt64 → Option UInt64
   | some abs => if abs ≥ ric ∨ abs < g.dropped ∨ abs ≥ g.ic then none else some abs
 
 /-- The shipped resolver.
-mirrors flare/qpack/dynamic.mojo#_pre_base_abs+_post_base_abs+decode_field_section_dynamic sha=0fbf1ac73b98 at=0a183352 (fixed, QPACK-01) -/
+mirrors flare/qpack/dynamic.mojo#_pre_base_abs+_post_base_abs+decode_field_section_dynamic sha=0fbf1ac73b98 at=12630564 (fixed, QPACK-01) -/
 def implResolve (ric delta : UInt64) (sign : Bool) (g : Geo) (r : Ref) : Option UInt64 :=
   if sign ∧ delta ≥ ric then none
   else if ric > g.ic then none
@@ -261,7 +261,7 @@ theorem implResolve_safe (ric delta : UInt64) (sign : Bool) (g : Geo) (r : Ref) 
 /-- Encoder/decoder relative-index round trip: flare's encoder writes
 `rel = base - 1 - abs` (dynamic.mojo:441,447) and the decoder computes
 `base - 1 - rel`; for every referenced `abs < base` this is the identity.
-mirrors flare/qpack/dynamic.mojo#encode_field_section_dynamic+decode_field_section_dynamic sha=fa1fc5cf003d at=0a183352 -/
+mirrors flare/qpack/dynamic.mojo#encode_field_section_dynamic+decode_field_section_dynamic sha=fa1fc5cf003d at=12630564 -/
 theorem rel_roundtrip (base abs : Nat) (h : abs < base) :
     base - 1 - (base - 1 - abs) = abs := by omega
 
@@ -280,7 +280,7 @@ def implSignOffset (buf : Bytes) (total maxEntries : UInt64) : Option Nat :=
       | some _ => some off
 
 /-- The shipped decoder checks the cursor before reading the Sign byte.
-mirrors flare/qpack/dynamic.mojo#decode_field_section_dynamic sha=ea6fb380c242 at=0a183352 (fixed, QPACK-02) -/
+mirrors flare/qpack/dynamic.mojo#decode_field_section_dynamic sha=ea6fb380c242 at=12630564 (fixed, QPACK-02) -/
 def implSignReadIndex (buf : Bytes) (total maxEntries : UInt64) : Option Nat :=
   match implSignOffset buf total maxEntries with
   | some off => if off ≥ buf.length then none else some off
@@ -364,7 +364,7 @@ def StringOk (b : Bytes) : Prop := (ByteArray.mk b.toArray).validateUTF8 = true
 the ASCII fast path when every byte is `< 0x80` (valid UTF-8 by construction)
 and otherwise builds the `String` with `String(from_utf8=...)`, raising when the
 bytes are not valid UTF-8. Both routes accept exactly the valid-UTF-8 payloads.
-mirrors flare/qpack/codec.mojo#_literal_to_string+_decode_string_literal+decode_field_section sha=7b16eb832943 at=0a183352 (fixed, QPACK-03) -/
+mirrors flare/qpack/codec.mojo#_literal_to_string+_decode_string_literal+decode_field_section sha=7b16eb832943 at=12630564 (fixed, QPACK-03) -/
 def implLiteral (buf : Bytes) (offset prefixBits : Nat) (hmask : UInt8) :
     Option (Bytes × Nat) :=
   match implLiteralRaw buf offset prefixBits hmask with
@@ -407,7 +407,7 @@ def specDynRef (dropped ic ip : Nat) : Outcome :=
 /-- The shipped resolution: `_relative_to_abs` checks `rel < len(entries)`
 (`ip < ic - dropped`) before the subtraction and raises a tagged
 QPACK_ENCODER_STREAM_ERROR otherwise.
-mirrors flare/qpack/dynamic.mojo#_relative_to_abs+_apply_one_encoder_instruction sha=2f6762605c3b at=0a183352 (fixed, QPACK-04) -/
+mirrors flare/qpack/dynamic.mojo#_relative_to_abs+_apply_one_encoder_instruction sha=2f6762605c3b at=12630564 (fixed, QPACK-04) -/
 def implDynRef (dropped ic ip : UInt64) : Outcome :=
   if ip ≥ ic - dropped then .streamError
   else .applied (ic - 1 - ip).toNat

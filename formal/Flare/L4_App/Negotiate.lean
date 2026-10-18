@@ -88,13 +88,13 @@ def parseQ (v : Bytes) : Nat :=
       | _ => 0
 
 /-- First `q=` / `Q=` in the parameter text; returns what follows `=`.
-mirrors flare/http/middleware.mojo#negotiate_encoding sha=e9b3c8932b97 at=da6fb43a -/
+mirrors flare/http/middleware.mojo#negotiate_encoding sha=e9b3c8932b97 at=98b092d2 -/
 def findQ : Bytes → Option Bytes
   | c :: d :: r => if (c = 113 ∨ c = 81) ∧ d = 61 then some r else findQ (d :: r)
   | _ => none
 
 /-- One stripped, non-empty entry → `(token, q)`.
-mirrors flare/http/middleware.mojo#negotiate_encoding sha=e9b3c8932b97 at=da6fb43a -/
+mirrors flare/http/middleware.mojo#negotiate_encoding sha=e9b3c8932b97 at=98b092d2 -/
 def parseEntry (entry : Bytes) : Tok × Nat :=
   let name := strip (entry.takeWhile (· ≠ 59))
   let rest := entry.dropWhile (· ≠ 59)
@@ -105,7 +105,7 @@ def parseEntry (entry : Bytes) : Tok × Nat :=
       | none => 1000
   (classify name, q)
 
-/-- mirrors flare/http/middleware.mojo#negotiate_encoding sha=e9b3c8932b97 at=da6fb43a -/
+/-- mirrors flare/http/middleware.mojo#negotiate_encoding sha=e9b3c8932b97 at=98b092d2 -/
 def parseHeader (h : Bytes) : List (Tok × Nat) :=
   ((splitComma h).map strip).filter (· ≠ []) |>.map parseEntry
 
@@ -116,7 +116,7 @@ def nc (x : UInt8) : Bool := x != 44
 
 /-- `for i in range(pos, n): if src[i] == 44: end = i; break` (with
 `end = n` when no comma follows).
-mirrors flare/http/middleware.mojo#negotiate_encoding sha=e9b3c8932b97 at=da6fb43a -/
+mirrors flare/http/middleware.mojo#negotiate_encoding sha=e9b3c8932b97 at=98b092d2 -/
 def scanComma (s : Bytes) (i : Nat) : Nat :=
   if h : i < s.length then
     if s[i] = 44 then i else scanComma s (i + 1)
@@ -147,7 +147,7 @@ theorem scanComma_ge (s : Bytes) (i : Nat) (hi : i ≤ s.length) : i ≤ scanCom
 /-- The `while pos < n` loop: the entry is `accept[pos:end]`, then
 `pos = end + 1`. Returns the raw entries in order (stripping and the
 empty-entry `continue` are applied by `parseHeaderMojo`).
-mirrors flare/http/middleware.mojo#negotiate_encoding sha=e9b3c8932b97 at=da6fb43a -/
+mirrors flare/http/middleware.mojo#negotiate_encoding sha=e9b3c8932b97 at=98b092d2 -/
 def mojoLoop (s : Bytes) (pos : Nat) : List Bytes :=
   if h : pos < s.length then
     (s.drop pos).take (scanComma s pos - pos) :: mojoLoop s (scanComma s pos + 1)

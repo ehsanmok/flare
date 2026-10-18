@@ -50,7 +50,7 @@ def is172Private (addr : Bytes) : Bool :=
     let o := octetLoop ((addr.drop 4).take (dot.toNat - 4))
     decide (16 ≤ o) && decide (o ≤ 31)
 
-/-- mirrors flare/net/address.mojo#IpAddr.is_private+IpAddr.is_multicast sha=8acd47fb9f1b at=0a183352 -/
+/-- mirrors flare/net/address.mojo#IpAddr.is_private+IpAddr.is_multicast sha=8acd47fb9f1b at=12630564 -/
 def isPrivate (ip : IpAddr) : Bool :=
   if ip.v6 then false
   else if startsWith ip.addr (str "10.") || startsWith ip.addr (str "192.168.") then true

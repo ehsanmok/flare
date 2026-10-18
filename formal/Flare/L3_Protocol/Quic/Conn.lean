@@ -76,7 +76,7 @@ def localClose (s : CState) : CState :=
 /-- One step of flare's machine; `none` = connection error (a server receiving
 HANDSHAKE_DONE, QUIC-09: `Connection.is_server` makes `on_handshake_done` raise
 PROTOCOL_VIOLATION). `handle_frame_buf` drops every frame once the connection is CLOSED.
-mirrors flare/quic/state.mojo#_ConnFrameHandler.on_path_response+_ConnFrameHandler.on_connection_close+_ConnFrameHandler.on_handshake_done+_ConnFrameHandler.on_datagram sha=9121cb50c3bd at=da6fb43a -/
+mirrors flare/quic/state.mojo#_ConnFrameHandler.on_path_response+_ConnFrameHandler.on_connection_close+_ConnFrameHandler.on_handshake_done+_ConnFrameHandler.on_datagram sha=9121cb50c3bd at=98b092d2 -/
 def implStep (role : Role) (s : CState) : Ev → Option CState
   | .frame f =>
     if s = .closed then some s

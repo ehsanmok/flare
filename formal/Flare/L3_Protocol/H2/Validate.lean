@@ -95,7 +95,7 @@ def loop (isTr : Bool) : List Header → Acc → Option Acc
   | [], a => some a
   | h :: t, a => if fieldOK isTr a h then loop isTr t (upd a h) else none
 
-/-- mirrors flare/http2/state.mojo#validate_request_fields sha=f17cbea1512b at=0a183352 -/
+/-- mirrors flare/http2/state.mojo#validate_request_fields sha=f17cbea1512b at=12630564 -/
 def final (isTr allowExt : Bool) (a : Acc) : Bool :=
   if isTr then true
   else if a.nMethod ≠ 1 then false

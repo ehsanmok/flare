@@ -109,7 +109,7 @@ def ecnCtrl (v6 : Bool) (ecn : Nat) : Bytes :=
 
 /-- the control buffer and `msg_controllen` (0: no control message):
 the GSO header when `seg_size > 0`, then the ECN header when `ecn != 0`.
-mirrors flare/udp/batch.mojo#send_segmented sha=d2238baabcf7 at=da6fb43a -/
+mirrors flare/udp/batch.mojo#send_segmented sha=d2238baabcf7 at=98b092d2 -/
 def sendCtrl (seg ecn : Nat) (v6 : Bool) : Bytes × Nat :=
   let g := if seg > 0 then gsoCtrl seg else []
   let e := if ecn ≠ 0 then ecnCtrl v6 ecn else []
@@ -170,7 +170,7 @@ theorem slots_disjoint (mp i j : Nat) (hij : i < j) : i * mp + mp ≤ j * mp := 
 
 /-- the byte count passed to `_alloc_zeroed` for the data region: the Mojo
 `Int` (64-bit) product `capacity * max_payload`.
-mirrors flare/udp/batch.mojo#BatchReceiver.__init__ sha=bb1d6f3144b3 at=da6fb43a (fixed, NET-11) -/
+mirrors flare/udp/batch.mojo#BatchReceiver.__init__ sha=bb1d6f3144b3 at=98b092d2 (fixed, NET-11) -/
 def allocSize (cap mp : Int) : Int := (Int64.ofInt cap * Int64.ofInt mp).toInt
 
 /-- Spec: the region covers every slot `[i*mp, (i+1)*mp)`, `i < cap`. -/
@@ -181,7 +181,7 @@ def I64MAX : Int := 2 ^ 63 - 1
 /-- the shipped constructor checks: both arguments positive,
 `capacity <= Int.MAX // max_payload` and `capacity <= Int.MAX // 64`
 (`_MMSGHDR` and `_CTRL`, the largest per-slot arrays).
-mirrors flare/udp/batch.mojo#BatchReceiver.__init__ sha=bb1d6f3144b3 at=da6fb43a (fixed, NET-11) -/
+mirrors flare/udp/batch.mojo#BatchReceiver.__init__ sha=bb1d6f3144b3 at=98b092d2 (fixed, NET-11) -/
 def accepts (cap mp : Int) : Prop :=
   0 < cap ∧ 0 < mp ∧ cap ≤ I64MAX / mp ∧ cap ≤ I64MAX / 64
 
