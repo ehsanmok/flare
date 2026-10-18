@@ -101,6 +101,7 @@ natural.
 | [`h2c_client.mojo`](../examples/advanced/h2c_client.mojo) | HTTP/2 cleartext client via the `Upgrade: h2c` + `HTTP2-Settings` dance (RFC 7540 §3.2): first request flows over h1 then carries forward to h2 |
 | [`client_pool.mojo`](../examples/advanced/client_pool.mojo) | `HttpClient.with_pool` — keyed idle reuse, per-origin caps, stale-conn retry |
 | [`ws_over_h2.mojo`](../examples/advanced/ws_over_h2.mojo) | RFC 8441 WebSockets-over-HTTP/2 (Extended CONNECT + `:protocol=websocket`) |
+| [`ws_over_h3.mojo`](../examples/advanced/ws_over_h3.mojo) | RFC 9220 WebSockets-over-HTTP/3: `attach_ws_h3` server and `WsOverH3Stream` client over live QUIC |
 | [`ws_permessage_deflate.mojo`](../examples/advanced/ws_permessage_deflate.mojo) | RFC 7692 `permessage-deflate` extension: offer / negotiate / compress / decompress |
 | [`alpn_dispatch_demo.mojo`](../examples/advanced/alpn_dispatch_demo.mojo) | ALPN -> wire-protocol dispatcher decisions: h1 / h2c / h2 / h3, including RFC 7301 §3.2 server-preference negotiation |
 | [`http3_server.mojo`](../examples/advanced/http3_server.mojo) | Serve the same `Handler` over HTTP/1.1 + HTTP/2 + HTTP/3 simultaneously: TCP listener for h1 / h2c / h2 alongside a UDP listener for h3 |
@@ -170,6 +171,7 @@ natural.
 | Speak h2c via the `Upgrade` dance from a client | [`h2c_client.mojo`](../examples/advanced/h2c_client.mojo) |
 | Reuse h1.1 connections via `HttpClient.with_pool` | [`client_pool.mojo`](../examples/advanced/client_pool.mojo) |
 | Tunnel WebSockets over HTTP/2 (RFC 8441) | [`ws_over_h2.mojo`](../examples/advanced/ws_over_h2.mojo) |
+| Tunnel WebSockets over HTTP/3 (RFC 9220) | [`ws_over_h3.mojo`](../examples/advanced/ws_over_h3.mojo) |
 | Compress WebSocket payloads with `permessage-deflate` | [`ws_permessage_deflate.mojo`](../examples/advanced/ws_permessage_deflate.mojo) |
 | Stand up a production-shaped server (RequestId + structured logs + graceful shutdown + healthz) | [`production_setup.mojo`](../examples/advanced/production_setup.mojo) |
 | Reuse markup via template inheritance (`{% block %}` / `{% extends %}`) | [`template_inheritance.mojo`](../examples/intermediate/template_inheritance.mojo) |

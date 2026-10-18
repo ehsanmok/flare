@@ -69,8 +69,8 @@ HMAC-SHA256 signed cookies, and signed ``Session`` stores.
 ```
 flare.io       - BufReader
 flare.ws       - WebSocket client + server (RFC 6455, permessage-deflate
-                 with context-takeover, WS-over-h2 via RFC 8441
-                 Extended CONNECT)
+                 with context-takeover, WS-over-h2 via RFC 8441 and
+                 WS-over-h3 via RFC 9220 Extended CONNECT)
 flare.http2    - HTTP/2 frame codec + HPACK (with table-driven Huffman
                  fast decoder) + h2c upgrade (RFC 9113 / 7541)
 flare.http     - HTTP/1.1 client + reactor server + Router /
@@ -110,7 +110,8 @@ flare.quic     - Sans-I/O QUIC v1 codec primitives (varint, long /
                  §13 connection + stream state machines, plus the live
                  ``QuicListener`` UDP reactor, the ``QuicClientConnection``
                  client driver (incl. resumption + 0-RTT EarlyData
-                 send flight), and the rustls QUIC TLS drive that
+                 send flight, NEW_TOKEN, ECN, ACK_FREQUENCY and path-MTU
+                 discovery), and the rustls QUIC TLS drive that
                  carry HTTP/3 end-to-end
 flare.http3       - Sans-I/O HTTP/3 frame codec, SETTINGS payload,
                  request-stream reader (``Http3RequestReader`` +
@@ -130,7 +131,8 @@ flare.qpack    - Sans-I/O static-only QPACK encoder / decoder for
                  HTTP/3 field sections (RFC 9204 Appendix A static
                  table + literal + Huffman, shared with HPACK)
 flare.crypto   - HMAC-SHA256, base64url
-flare.tls      - TLS 1.2/1.3 (OpenSSL, client + server, ALPN, session resumption)
+flare.tls      - TLS 1.2/1.3 (OpenSSL, client + server, ALPN, session resumption,
+                 SNI certificates, certificate hot reload)
 flare.tcp      - TcpStream + TcpListener (IPv4 + IPv6)
 flare.udp      - UdpSocket (IPv4 + IPv6)
 flare.uds      - UnixListener + UnixStream (AF_UNIX sidecar IPC);

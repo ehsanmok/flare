@@ -39,9 +39,9 @@ def main() raises:
 
 ## Why flare
 
-- **Batteries included:** HTTP/1.1, HTTP/2 and HTTP/3 (server and client), WebSocket, gRPC, TLS and mTLS, streaming, sessions, compression, CORS, static files, SSE, templates, caching and an OpenAPI emitter. Full inventory in [`docs/features.md`](docs/features.md).
+- **Batteries included:** HTTP/1.1, HTTP/2 and HTTP/3 (server and client), WebSocket (also over HTTP/2 and HTTP/3), gRPC, TLS and mTLS with SNI certificates, streaming, sessions, compression, CORS, static files, SSE, templates, caching and an OpenAPI emitter. Full inventory in [`docs/features.md`](docs/features.md).
 - **Composable by types, not callbacks:** `Handler` is a trait; `Router`, middleware and typed extractors compose by nesting structs, monomorphised into one direct call sequence per request type.
-- **Hard to misuse under load:** per-request `Cancel` tokens, graceful drain, sanitized 4xx/5xx, TLS cert reload, structured logging, Prometheus metrics and an in-process `TestClient[H]`.
+- **Hard to misuse under load:** per-request `Cancel` tokens, graceful drain, sanitized 4xx/5xx, TLS cert hot reload, structured logging, Prometheus metrics and an in-process `TestClient[H]`.
 - **Fast, with a tight tail:** thread-per-core reactor (`kqueue` / `epoll`, opt-in `io_uring`). At 4 workers the handler path reaches `0.96-1.00x` of `actix_web` and the static path `1.08-1.16x`, with p99 about 3 ms at the peak; see [Performance](#performance).
 - **Fuzzed and formally modelled:** 63 fuzz harnesses (9M+ runs, zero known crashes) and Lean 4 models of the codecs, state machines and scheduler, proved against the RFCs; see [Formal verification](#formal-verification).
 
@@ -194,7 +194,7 @@ The primitives the HTTP server is built on are public, for when HTTP isn't the r
 ```
 flare.http / http2 / http3   servers, clients, Router, middleware, extractors
 flare.ws  grpc  openapi      WebSocket, gRPC, OpenAPI
-flare.quic                   QUIC v1 (sans-I/O codec + live UDP reactor)
+flare.quic                   QUIC v1 (sans-I/O codec + live UDP reactor, ECN, PMTU discovery)
 flare.tls  crypto            TLS 1.2/1.3 (OpenSSL, rustls for QUIC), HMAC, base64url
 flare.tcp  udp  uds  dns     sockets
 flare.net  io                addresses, buffered readers
