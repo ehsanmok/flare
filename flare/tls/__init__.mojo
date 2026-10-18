@@ -53,6 +53,7 @@ from .error import (
 from .acceptor import (
     TlsAcceptor,
     TlsServerConfig,
+    TlsSniCert,
     TlsInfo,
     TlsServerError,
     TlsServerNotImplemented,

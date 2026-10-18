@@ -62,7 +62,7 @@ from ._h3_workers import (
     serve_h3,
 )
 from ..tls._server_ffi import ServerCtx
-from ..tls.acceptor import TlsAcceptor, TlsServerConfig
+from ..tls.acceptor import TlsAcceptor, TlsServerConfig, TlsSniCert
 
 
 # ── ShutdownReport ───────────────────────────────────────────────────────────
@@ -162,6 +162,9 @@ struct HttpServer(Movable):
     consumed by :meth:`serve` to spawn a per-connection
     :class:`flare.http._reactor.tls_conn_handle.TlsConnHandle`. Kept
     ``Optional`` so the plaintext server carries no TLS/OpenSSL cost."""
+    var _tls_certs: List[TlsSniCert]
+    """Every certificate pair the TLS context serves (host ``""`` is
+    the default), re-read by :meth:`reload_tls`."""
 
     var _ws_h3_hooks: Optional[WsH3Hooks]
     """Boxed RFC 9220 WebSocket-over-h3 sidecar, set by
@@ -200,6 +203,7 @@ struct HttpServer(Movable):
         self._h3_ctl = 0
         self._http3_listener = None
         self._tls_ctx = None
+        self._tls_certs = List[TlsSniCert]()
         self._ws_h2_hooks = None
         self._ws_h3_hooks = None
 
@@ -455,6 +459,7 @@ struct HttpServer(Movable):
             ctx.set_alpn(wire)
         var srv = HttpServer(listener^, config^)
         srv._tls_ctx = Optional[ServerCtx](ctx^)
+        srv._tls_certs.append(TlsSniCert("", cert_file, key_file))
         return srv^
 
     @staticmethod
@@ -473,10 +478,25 @@ struct HttpServer(Movable):
         raises here, at bind time.
         """
         var listener = TcpListener.bind(addr)
+        var certs = tls.sni_certs.copy()
+        certs.append(TlsSniCert("", tls.cert_file, tls.key_file))
         var ctx = TlsAcceptor(tls^).into_ctx()
         var srv = HttpServer(listener^, config^)
         srv._tls_ctx = Optional[ServerCtx](ctx^)
+        srv._tls_certs = certs^
         return srv^
+
+    def reload_tls(self) raises:
+        """Re-read every certificate and key file the server was bound
+        with and serve them to new handshakes. Safe to call from another
+        thread while :meth:`serve` runs; connections already up keep
+        their certificate. A pair that fails to load raises, and that
+        pair stays as it was."""
+        if not self._tls_ctx:
+            raise Error("HttpServer.reload_tls: not a TLS server")
+        for i in range(len(self._tls_certs)):
+            ref c = self._tls_certs[i]
+            self._tls_ctx.value().set_cert(c.host, c.cert_file, c.key_file)
 
     def has_http3(self) -> Bool:
         """Whether this server has an h3 UDP listener bound."""

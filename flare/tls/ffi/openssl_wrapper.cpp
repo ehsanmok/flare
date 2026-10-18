@@ -17,6 +17,9 @@
 #include <openssl/pem.h>
 #include <string.h>
 #include <string>
+#include <map>
+#include <memory>
+#include <mutex>
 
 /* POSIX for test server and socket utilities */
 #include <sys/socket.h>
@@ -588,55 +591,129 @@ flare_ssl_ctx_t flare_ssl_ctx_new_server(
     return static_cast<void*>(ctx);
 }
 
-int flare_ssl_ctx_reload(
-    flare_ssl_ctx_t ctx, const char* cert_path, const char* key_path
+/* Certificates a server context serves, by SNI host ("" is the default).
+ * The map is immutable and replaced whole under the mutex, and the cert
+ * callback installs the chosen entry on each connection, so a reload
+ * never touches state another thread's handshake is reading. */
+namespace {
+struct FlareCert {
+    X509* leaf = nullptr;
+    EVP_PKEY* key = nullptr;
+    STACK_OF(X509)* chain = nullptr;
+    ~FlareCert() {
+        if (leaf) X509_free(leaf);
+        if (key) EVP_PKEY_free(key);
+        if (chain) sk_X509_pop_free(chain, X509_free);
+    }
+};
+using CertMap = std::map<std::string, std::shared_ptr<FlareCert>>;
+struct CertStore {
+    std::mutex mu;
+    std::shared_ptr<const CertMap> certs;
+};
+
+int store_index() {
+    static int idx = -1;
+    static std::once_flag once;
+    std::call_once(once, [] {
+        idx = SSL_CTX_get_ex_new_index(
+            0, nullptr, nullptr, nullptr,
+            [](void*, void* ptr, CRYPTO_EX_DATA*, int, long, void*) {
+                delete static_cast<CertStore*>(ptr);
+            });
+    });
+    return idx;
+}
+
+std::string lower(const char* s) {
+    std::string out(s);
+    for (auto& c : out) c = (char)tolower((unsigned char)c);
+    return out;
+}
+
+int pick_cert(SSL* s, void* arg) {
+    auto* st = static_cast<CertStore*>(arg);
+    std::shared_ptr<const CertMap> m;
+    {
+        std::lock_guard<std::mutex> g(st->mu);
+        m = st->certs;
+    }
+    if (!m) return 1;
+    const char* sn = SSL_get_servername(s, TLSEXT_NAMETYPE_host_name);
+    auto it = m->end();
+    if (sn) {
+        std::string host = lower(sn);
+        it = m->find(host);
+        auto dot = host.find('.');
+        if (it == m->end() && dot != std::string::npos)
+            it = m->find("*" + host.substr(dot));
+    }
+    if (it == m->end()) it = m->find("");
+    if (it == m->end()) return 1;
+    const FlareCert& c = *it->second;
+    return SSL_use_cert_and_key(s, c.leaf, c.key, c.chain, 1) == 1 ? 1 : 0;
+}
+
+std::shared_ptr<FlareCert> load_cert(const char* cert_path, const char* key_path) {
+    auto c = std::make_shared<FlareCert>();
+    c->chain = sk_X509_new_null();
+    BIO* cb = BIO_new_file(cert_path, "r");
+    BIO* kb = BIO_new_file(key_path, "r");
+    bool ok = c->chain && cb && kb;
+    if (ok) ok = (c->leaf = PEM_read_bio_X509_AUX(cb, nullptr, nullptr, nullptr));
+    while (ok) {
+        X509* extra = PEM_read_bio_X509(cb, nullptr, nullptr, nullptr);
+        if (!extra) break;
+        if (!sk_X509_push(c->chain, extra)) { X509_free(extra); ok = false; }
+    }
+    if (ok) {
+        ERR_clear_error();  /* the loop ends on a benign "no start line" */
+        ok = (c->key = PEM_read_bio_PrivateKey(kb, nullptr, nullptr, nullptr));
+    }
+    if (ok) ok = X509_check_private_key(c->leaf, c->key) == 1;
+    if (cb) BIO_free(cb);
+    if (kb) BIO_free(kb);
+    if (!ok) { capture_openssl_errors(); return nullptr; }
+    return c;
+}
+}  // namespace
+
+int flare_ssl_ctx_set_cert(
+    flare_ssl_ctx_t ctx, const char* host, const char* cert_path,
+    const char* key_path
 ) {
     ERR_clear_error();
     SSL_CTX* c = static_cast<SSL_CTX*>(ctx);
-    if (!c || !cert_path || !key_path) {
-        set_error("flare_ssl_ctx_reload: ctx / cert / key required");
+    if (!c || !host || !cert_path || !key_path) {
+        set_error("flare_ssl_ctx_set_cert: ctx / host / cert / key required");
         return -1;
     }
-    /* Load and check everything before the live context is touched. The
-     * old code installed the chain, then the key, then checked them, all
-     * on the live SSL_CTX. A key that did not match the new chain failed
-     * the reload but had already replaced the key (OpenSSL drops the
-     * certificate when it does), so every later handshake failed. Now a
-     * failed reload leaves the context serving what it served before,
-     * and a good one installs chain and key in one call. */
-    X509* leaf = nullptr;
-    STACK_OF(X509)* chain = sk_X509_new_null();
-    EVP_PKEY* pkey = nullptr;
-    int rc = -1;
-    BIO* cb = BIO_new_file(cert_path, "r");
-    BIO* kb = BIO_new_file(key_path, "r");
-    if (!chain || !cb || !kb) { capture_openssl_errors(); goto done; }
-    leaf = PEM_read_bio_X509_AUX(cb, nullptr, nullptr, nullptr);
-    if (!leaf) { capture_openssl_errors(); goto done; }
-    for (;;) {
-        X509* extra = PEM_read_bio_X509(cb, nullptr, nullptr, nullptr);
-        if (!extra) break;
-        if (!sk_X509_push(chain, extra)) {
-            X509_free(extra); capture_openssl_errors(); goto done;
+    /* Loaded and checked before anything is installed: a bad pair leaves
+     * the context serving what it served. */
+    auto cert = load_cert(cert_path, key_path);
+    if (!cert) return -1;
+    int idx = store_index();
+    auto* st = static_cast<CertStore*>(SSL_CTX_get_ex_data(c, idx));
+    if (!st) {
+        st = new CertStore();
+        if (SSL_CTX_set_ex_data(c, idx, st) != 1) {
+            delete st;
+            capture_openssl_errors();
+            return -1;
         }
+        SSL_CTX_set_cert_cb(c, pick_cert, st);
     }
-    ERR_clear_error();  /* the loop ends on a benign "no start line" */
-    pkey = PEM_read_bio_PrivateKey(kb, nullptr, nullptr, nullptr);
-    if (!pkey) { capture_openssl_errors(); goto done; }
-    if (X509_check_private_key(leaf, pkey) != 1) {
-        capture_openssl_errors(); goto done;
-    }
-    if (SSL_CTX_use_cert_and_key(c, leaf, pkey, chain, 1) != 1) {
-        capture_openssl_errors(); goto done;
-    }
-    rc = 0;
-done:
-    if (cb) BIO_free(cb);
-    if (kb) BIO_free(kb);
-    if (leaf) X509_free(leaf);
-    if (pkey) EVP_PKEY_free(pkey);
-    if (chain) sk_X509_pop_free(chain, X509_free);
-    return rc;
+    std::lock_guard<std::mutex> g(st->mu);
+    auto next = std::make_shared<CertMap>(st->certs ? *st->certs : CertMap());
+    (*next)[lower(host)] = cert;
+    st->certs = next;
+    return 0;
+}
+
+int flare_ssl_ctx_reload(
+    flare_ssl_ctx_t ctx, const char* cert_path, const char* key_path
+) {
+    return flare_ssl_ctx_set_cert(ctx, "", cert_path, key_path);
 }
 
 int flare_ssl_ctx_check_private_key(flare_ssl_ctx_t ctx) {

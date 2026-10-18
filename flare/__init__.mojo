@@ -714,7 +714,7 @@ from .http.session import (
 
 # TLS
 from .tls.config import TlsConfig
-from .tls.acceptor import TlsAcceptor, TlsServerConfig
+from .tls.acceptor import TlsAcceptor, TlsServerConfig, TlsSniCert
 
 # Networking
 from .net.address import IpAddr, SocketAddr

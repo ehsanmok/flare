@@ -227,6 +227,15 @@ int flare_ssl_ctx_reload(
     flare_ssl_ctx_t ctx, const char* cert_path, const char* key_path
 );
 
+/* Serve cert_path / key_path to clients whose SNI is ``host`` ("" for the
+ * default, "*.example.com" for one-label wildcards), replacing any entry
+ * for it. Safe while other threads handshake on ctx; a bad pair changes
+ * nothing. 0 on success, -1 on failure. */
+int flare_ssl_ctx_set_cert(
+    flare_ssl_ctx_t ctx, const char* host, const char* cert_path,
+    const char* key_path
+);
+
 /* 1 when the context's certificate and private key match, else 0. */
 int flare_ssl_ctx_check_private_key(flare_ssl_ctx_t ctx);
 
