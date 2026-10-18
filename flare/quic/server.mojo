@@ -539,9 +539,10 @@ struct QuicListener(Movable):
     falls back to the per-datagram ``try_recv_from`` loop."""
     var _rx_ecn: Int
     """ECN codepoint of the datagram being dispatched (0 when unknown)."""
-    var _ecn_marking: Bool
-    """Sent datagrams are marked ECT(0) (``config.ecn``, until a
-    connection fails ECN validation)."""
+    var _tx_ecn: Int
+    """ECN codepoint for the next :meth:`send_to`; set by the 1-RTT
+    builder for a connection that marks, consumed by the send."""
+    var _gso_ecn: Int
 
     def __init__(
         out self,
@@ -621,7 +622,8 @@ struct QuicListener(Movable):
         self._fwd_lens = List[Int]()
         self._fwd_peers = List[SocketAddr]()
         self._rx_ecn = 0
-        self._ecn_marking = config.ecn and udp_batch_supported()
+        self._tx_ecn = 0
+        self._gso_ecn = 0
         self._rx_batch_ok = udp_batch_supported() and (
             getenv("FLARE_QUIC_NO_BATCH", "0") != "1"
         )
@@ -698,8 +700,8 @@ struct QuicListener(Movable):
             except:
                 pass
         var actual = sock.local_addr()
-        # Read clients' ECN marks; mark ours ECT(0) when asked.
-        sock.set_ecn(2 if config.ecn else 0)
+        # Read clients' ECN marks; ours are marked per packet.
+        sock.set_ecn(0)
         var acceptor = RustlsQuicAcceptor(config.rustls_config.copy())
         var cfg = config.copy()
         if cfg.num_workers > 1 and len(cfg.cid_route_key) == 0:
@@ -2349,6 +2351,7 @@ struct QuicListener(Movable):
         qc.conn.adv_max_streams_bidi = self.config.initial_max_streams_bidi
         qc.conn.adv_max_streams_uni = self.config.initial_max_streams_uni
         qc.conn.max_datagram_recv = self.config.max_datagram_frame_size
+        qc.ecn_mark = self.config.ecn and udp_batch_supported()
         qc.serial = self._next_serial
         self._next_serial += 1
         if retry_odcid:
@@ -2588,13 +2591,18 @@ struct QuicListener(Movable):
             return 1
         return max(1, min(max_ms, Int(next - now)))
 
-    def send_to(self, datagram: Span[UInt8, _], addr: SocketAddr) raises -> Int:
+    def send_to(
+        mut self, datagram: Span[UInt8, _], addr: SocketAddr
+    ) raises -> Int:
         """Emit a single fully-protected QUIC datagram on the
-        listener's UDP socket. Thin wrapper over
-        :meth:`flare.udp.socket.UdpSocket.send_to` so the
-        egress path has the same surface the unit tests stub.
-        Returns the byte count actually written (UDP either
-        sends the whole datagram or raises)."""
+        listener's UDP socket, ECN-marked when the 1-RTT packet just
+        built asked for it (``_tx_ecn``, consumed here). Returns the byte
+        count actually written (UDP either sends the whole datagram or
+        raises)."""
+        var ecn = self._tx_ecn
+        self._tx_ecn = 0
+        if ecn != 0:
+            return send_segmented(self._socket.fd(), addr, datagram, 0, ecn)
         return self._socket.send_to(datagram, addr)
 
     def _mark(mut self, slot: Int, bit: UInt8):
@@ -2908,7 +2916,7 @@ struct QuicListener(Movable):
             var dg = self._build_1rtt_response(slot, plaintext^)
             if len(dg) == 0:
                 return
-            _ = self.send_to(Span[UInt8, _](dg), self.peer_addrs[slot])
+            _ = self.send_to(Span[UInt8, _](dg), self.peer_addrs[slot].copy())
             self.connections[slot].close_frame = frame^
         except:
             return
@@ -2948,7 +2956,9 @@ struct QuicListener(Movable):
                 slot, self.connections[slot].close_frame.copy()
             )
             if len(dg) > 0:
-                _ = self.send_to(Span[UInt8, _](dg), self.peer_addrs[slot])
+                _ = self.send_to(
+                    Span[UInt8, _](dg), self.peer_addrs[slot].copy()
+                )
         except:
             pass
 
@@ -3535,8 +3545,11 @@ struct QuicListener(Movable):
         if not self._gso_active:
             _ = self.send_to(Span[UInt8, _](dg), peer)
             return
+        var ecn = self._tx_ecn
+        self._tx_ecn = 0
         if self._gso_count > 0 and (
             self._gso_peer != peer
+            or self._gso_ecn != ecn
             or len(dg) > self._gso_seg
             or len(self._gso_buf) % self._gso_seg != 0
             or self._gso_count >= _GSO_MAX_SEGMENTS
@@ -3545,6 +3558,7 @@ struct QuicListener(Movable):
         if self._gso_count == 0:
             self._gso_seg = len(dg)
             self._gso_peer = peer
+            self._gso_ecn = ecn
         self._gso_buf.extend(Span[UInt8, _](dg))
         self._gso_count += 1
 
@@ -3559,11 +3573,16 @@ struct QuicListener(Movable):
         var buf = List[UInt8]()
         swap(buf, self._gso_buf)
         if self._gso_count == 1:
+            self._tx_ecn = self._gso_ecn
             _ = self.send_to(Span[UInt8, _](buf), peer)
         else:
             try:
                 _ = send_segmented(
-                    self._socket.fd(), peer, Span[UInt8, _](buf), self._gso_seg
+                    self._socket.fd(),
+                    peer,
+                    Span[UInt8, _](buf),
+                    self._gso_seg,
+                    self._gso_ecn,
                 )
             except:
                 self._gso_ok = False
@@ -3571,6 +3590,7 @@ struct QuicListener(Movable):
                 var pos = 0
                 while pos < len(buf):
                     var end = min(pos + self._gso_seg, len(buf))
+                    self._tx_ecn = self._gso_ecn
                     _ = self.send_to(Span[UInt8, _](buf)[pos:end], peer)
                     pos = end
         swap(buf, self._gso_buf)
@@ -4040,6 +4060,7 @@ struct QuicListener(Movable):
             # shut for good (RFC 9002 sec 6.2.1: arm on every send).
             if self.connections[slot].pto_timer_id == UInt64(0):
                 self._rearm_pto_timer(slot)
+        self._tx_ecn = 2 if self.connections[slot].ecn_mark else 0
         return protected^
 
     def _build_1rtt_handshake_crypto(
@@ -4290,6 +4311,13 @@ struct QuicListener(Movable):
         # (RFC 8899 sec 4.3): fall back so the re-sends get through.
         if self.loss[slot].pto_count >= 1:
             self.connections[slot].pmtu.on_black_hole(_monotonic_ms())
+        # Marked packets that never come back acknowledged with ECN counts
+        # may be dropped for the mark (RFC 9000 sec 13.4.2.1): stop.
+        if (
+            self.loss[slot].pto_count >= 2
+            and not self.connections[slot].ecn_tx.counted
+        ):
+            self.connections[slot].ecn_mark = False
         var lost = self.loss[slot].detect_lost(_monotonic_ms())
         if len(lost) > 0:
             for i in range(len(lost)):
@@ -4349,7 +4377,7 @@ struct QuicListener(Movable):
         var now = _monotonic_ms()
         _ = self.loss[slot].on_ack_ranges(events.acked_ranges, now, next_pn)
         self.connections[slot].pmtu.on_acked(events.acked_ranges)
-        if self._ecn_marking:
+        if self.connections[slot].ecn_mark:
             # Only an ACK that moves the largest acknowledged is checked
             # (RFC 9000 sec 13.4.2.1): reordered ones carry older counts.
             var advanced = (
@@ -4360,12 +4388,7 @@ struct QuicListener(Movable):
                 lr.last_newly_acked if advanced else 0, events.ack_ecn
             ):
                 lr.cc.on_congestion_event(lr.last_acked_sent_ms, now)
-            if not self.connections[slot].ecn_tx.ok:
-                self._ecn_marking = False
-                try:
-                    self._socket.set_ecn(0)
-                except:
-                    pass
+            self.connections[slot].ecn_mark = self.connections[slot].ecn_tx.ok
         self._retransmit_lost(slot)
         self._rearm_pto_timer(slot)
 
@@ -4425,7 +4448,7 @@ struct QuicListener(Movable):
             dg = self._build_handshake_response(slot, frames=frames)
         if len(dg) == 0:
             return
-        _ = self.send_to(Span[UInt8, _](dg), self.peer_addrs[slot])
+        _ = self.send_to(Span[UInt8, _](dg), self.peer_addrs[slot].copy())
         self.connections[slot].amp_tx += len(dg)
 
     def _retransmit_lost(mut self, slot: Int) raises:

@@ -14,11 +14,14 @@ from .frame import EcnCounts
 
 struct EcnValidator(Copyable, Defaultable):
     var ok: Bool
+    var counted: Bool
+    """An ACK carrying counts has validated."""
     var ect0: UInt64
     var ce: UInt64
 
     def __init__(out self):
         self.ok = True
+        self.counted = False
         self.ect0 = 0
         self.ce = 0
 
@@ -42,6 +45,7 @@ struct EcnValidator(Copyable, Defaultable):
             self.ok = False
             return False
         var more_ce = c.ce > self.ce
+        self.counted = True
         self.ect0 = c.ect0
         self.ce = c.ce
         return more_ce

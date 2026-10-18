@@ -18,7 +18,7 @@ from flare.quic.frame import EcnCounts
 from flare.quic.server import QuicListener, QuicServerConfig
 from flare.tls import RustlsQuicConnector
 from flare.udp import UdpSocket
-from flare.udp.batch import BatchReceiver
+from flare.udp.batch import BatchReceiver, send_segmented
 
 
 comptime _FIXDIR: String = "tests/tls/fixtures/rustls-quic-client/"
@@ -35,6 +35,12 @@ def test_batch_receiver_reads_the_codepoint() raises:
         _ = tx.send_to("x".as_bytes(), rx.local_addr())
         assert_equal(batch.recv(rx.fd(), wait=True), 1)
         assert_equal(batch.ecn(0), cp)
+    # Per packet, whatever the socket's own setting (now 0).
+    _ = send_segmented(tx.fd(), rx.local_addr(), "x".as_bytes(), 0, 1)
+    assert_equal(batch.recv(rx.fd(), wait=True), 1)
+    assert_equal(batch.ecn(0), 1)
+    _ = tx^
+    _ = rx^
 
 
 def _counts(ect0: UInt64, ect1: UInt64, ce: UInt64) -> List[EcnCounts]:
@@ -103,15 +109,19 @@ def test_marking_stops_when_the_peer_reports_no_counts() raises:
     var p = _pair(True)
     ref listener = p[0]
     ref quic = p[1]
-    assert_true(listener._ecn_marking)
+    var marked = False
     for _ in range(60):
         _ = listener.tick(timeout_ms=10)
         _ = listener.drain_all_egress()
         _ = quic.poll(timeout_ms=10)
-        if quic.is_established() and not listener._ecn_marking:
+        if listener.connection_count() == 0:
+            continue
+        marked = marked or listener.connections[0].ecn_mark
+        if quic.is_established() and not listener.connections[0].ecn_mark:
             break
-    # The flare client sends plain ACKs: validation fails, marking stops.
-    assert_false(listener._ecn_marking)
+    assert_true(marked, "a connection starts out marking")
+    # The peer sends plain ACKs: validation fails, this connection stops.
+    assert_false(listener.connections[0].ecn_mark)
     listener.close()
     quic.close()
 

@@ -411,14 +411,16 @@ def send_segmented(
     addr: SocketAddr,
     data: Span[UInt8, _],
     seg_size: Int,
+    ecn: Int = 0,
 ) raises -> Int:
     """Send ``data`` to ``addr`` as GSO segments of ``seg_size`` bytes.
 
     One ``sendmsg`` hands the kernel the whole ``data`` buffer plus a
     ``UDP_SEGMENT`` control message; the kernel (or NIC) slices it into
     wire datagrams of ``seg_size`` bytes (the final one may be shorter).
-    The socket must already be 1-RTT-saturated to the same destination
-    for this to help; it is a pure egress optimization.
+    ``seg_size`` 0 sends one datagram. A non-zero ``ecn`` codepoint
+    (RFC 3168) marks every datagram via an ``IP_TOS`` / ``IPV6_TCLASS``
+    control message, whatever the socket's own setting.
 
     Returns bytes accepted by the kernel.
 
@@ -428,28 +430,41 @@ def send_segmented(
         NetworkError: any other libc errno.
     """
     debug_assert[assert_mode="safe"](
-        seg_size > 0 and seg_size <= 0xFFFF,
+        seg_size >= 0 and seg_size <= 0xFFFF,
         "send_segmented: seg_size out of range",
     )
     var sa = _build_sockaddr_in(addr)
     var sa_ptr = Int(sa[0])
     var sa_len = Int(sa[1])
     var iov = _alloc_zeroed(_IOVEC)
-    var ctrl = _alloc_zeroed(_CMSG_SPACE_GSO)
+    var ctrl = _alloc_zeroed(2 * _CMSG_SPACE_GSO)
     var hdr = _alloc_zeroed(_MSGHDR)
     _poke_u64(iov, 0, UInt64(Int(data.unsafe_ptr())))
     _poke_u64(iov, 8, UInt64(len(data)))
-    # cmsghdr { len=CMSG_LEN(2); level=SOL_UDP; type=UDP_SEGMENT } + u16 size
-    _poke_u64(ctrl, 0, UInt64(_CMSG_LEN_GSO))
-    _poke_u32(ctrl, 8, UInt32(Int(SOL_UDP)))
-    _poke_u32(ctrl, 12, UInt32(Int(UDP_SEGMENT)))
-    _poke_u16(ctrl, _CMSG_DATA_OFF, UInt16(seg_size))
+    var clen = 0
+    if seg_size > 0:
+        # cmsghdr { len=CMSG_LEN(2); level=SOL_UDP; type=UDP_SEGMENT } + u16
+        _poke_u64(ctrl, 0, UInt64(_CMSG_LEN_GSO))
+        _poke_u32(ctrl, 8, UInt32(Int(SOL_UDP)))
+        _poke_u32(ctrl, 12, UInt32(Int(UDP_SEGMENT)))
+        _poke_u16(ctrl, _CMSG_DATA_OFF, UInt16(seg_size))
+        clen = _CMSG_SPACE_GSO
+    if ecn != 0:
+        # cmsghdr { len=CMSG_LEN(4); IPPROTO_IP/IP_TOS or
+        # IPPROTO_IPV6/IPV6_TCLASS } + int
+        var c = ctrl.unsafe_offset(clen)
+        _poke_u64(c, 0, UInt64(_CMSG_HDR + 4))
+        _poke_u32(c, 8, UInt32(41) if addr.ip.is_v6() else UInt32(0))
+        _poke_u32(c, 12, UInt32(67) if addr.ip.is_v6() else UInt32(1))
+        _poke_u32(c, _CMSG_DATA_OFF, UInt32(ecn))
+        clen += _CMSG_SPACE_GSO
     _poke_u64(hdr, _OFF_NAME, UInt64(sa_ptr))
     _poke_u32(hdr, _OFF_NAMELEN, UInt32(sa_len))
     _poke_u64(hdr, _OFF_IOV, UInt64(Int(iov)))
     _poke_u64(hdr, _OFF_IOVLEN, UInt64(1))
-    _poke_u64(hdr, _OFF_CONTROL, UInt64(Int(ctrl)))
-    _poke_u64(hdr, _OFF_CONTROLLEN, UInt64(_CMSG_LEN_GSO))
+    if clen > 0:
+        _poke_u64(hdr, _OFF_CONTROL, UInt64(Int(ctrl)))
+        _poke_u64(hdr, _OFF_CONTROLLEN, UInt64(clen))
     var ret = _sendmsg(c_int(fd), hdr, c_int(0))
     var e = get_errno()
     sa[0].unsafe_free()
