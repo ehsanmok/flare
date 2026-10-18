@@ -709,9 +709,8 @@ def _read_bytes(
         raise Error("quic frame: negative byte count")
     if pos + n > len(buf):
         raise Error("quic frame: truncated payload")
-    var out = List[UInt8]()
-    for i in range(pos, pos + n):
-        out.append(buf[i])
+    var out = List[UInt8](capacity=n)
+    out.extend(buf[pos : pos + n])
     pos += n
     return out^
 

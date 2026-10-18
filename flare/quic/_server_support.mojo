@@ -101,6 +101,14 @@ def _ack_record(mut flat: List[UInt64], pn: UInt64):
     to one above the highest dropped number and is stored in the trailing
     slot, so :func:`_ack_contains` keeps treating them as received.
     """
+    # In-order arrival, the common case: extend the newest range in
+    # place instead of rebuilding and re-sorting every range.
+    if len(flat) >= 2 and pn >= flat[0]:
+        if pn <= flat[1]:
+            return
+        if pn == flat[1] + UInt64(1):
+            flat[1] = pn
+            return
     var floor = _ack_floor(flat)
     var lows = List[UInt64]()
     var highs = List[UInt64]()

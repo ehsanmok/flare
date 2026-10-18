@@ -474,7 +474,9 @@ struct _StreamReassembly(Copyable, Defaultable):
             if offset not in self.pending:
                 if self.pending_bytes + len(data) > _MAX_OUT_OF_ORDER_BYTES:
                     raise Error("h3: too many out-of-order stream bytes")
-                self.pending[offset] = List[UInt8](data)
+                var held = List[UInt8](capacity=len(data))
+                held.extend(data)
+                self.pending[offset] = held^
                 self.pending_bytes += len(data)
             return out^
         out.extend(data[Int(self.next_offset - offset) :])
@@ -846,8 +848,10 @@ struct Http3Connection(Copyable, Defaultable):
         # _Http3StreamState (inbox + headers + body) on every inbound
         # chunk is the dominant per-request cost under concurrency.
         ref state = self.streams[stream_id]
-        for i in range(len(chunk)):
-            state.inbox.append(chunk[i])
+        if len(state.inbox) == 0:
+            state.inbox = chunk^
+        else:
+            state.inbox.extend(Span[UInt8, _](chunk))
         var cursor = 0
         while cursor < len(state.inbox):
             var collector = _Http3EventCollector.new()
@@ -874,8 +878,7 @@ struct Http3Connection(Copyable, Defaultable):
                     state.headers = collector.headers.copy()
                     state.headers_complete = True
             if collector.data_fired:
-                for j in range(len(collector.data)):
-                    state.body.append(collector.data[j])
+                state.body.extend(Span[UInt8, _](collector.data))
             if collector.trailers_fired:
                 state.trailers = collector.trailers.copy()
             if collector.unknown_fired:
@@ -908,8 +911,7 @@ struct Http3Connection(Copyable, Defaultable):
         # chunk doesn't re-parse old bytes.
         if cursor > 0:
             var rest = List[UInt8](capacity=len(state.inbox) - cursor)
-            for k in range(cursor, len(state.inbox)):
-                rest.append(state.inbox[k])
+            rest.extend(Span[UInt8, _](state.inbox)[cursor:])
             state.inbox = rest^
 
     def signal_end_of_stream(mut self, stream_id: Int) raises:
