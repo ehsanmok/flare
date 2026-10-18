@@ -116,6 +116,17 @@ struct _StreamTx(Copyable):
 # -- Configuration carrier ----------------------------------------------
 
 
+@fieldwise_init
+struct Http3Tunnel(Copyable, ImplicitlyCopyable):
+    """An accepted extended CONNECT stream (RFC 9220). It names the
+    connection's serial as well as its slot, so a handle that outlives
+    its connection never reaches the next connection given the slot."""
+
+    var slot: Int
+    var stream_id: Int
+    var serial: UInt64
+
+
 struct QuicServerConfig(Copyable, Defaultable):
     """Bind-time configuration for the QUIC server reactor.
 
@@ -505,6 +516,11 @@ struct QuicConnection(Copyable):
     """DATAGRAM payloads queued for the next drain."""
     var dg_rx_bytes: Int
     var dg_tx_bytes: Int
+    var serial: UInt64
+    """Distinguishes this connection from others given the same slot."""
+    var fc_tunnel_credited: Dict[Int, UInt64]
+    """Per tunnel stream, the bytes already counted as consumed when the
+    application took them (:meth:`QuicListener.take_http3_tunnel`)."""
 
     def __init__(
         out self,
@@ -532,6 +548,8 @@ struct QuicConnection(Copyable):
         self.dg_tx = List[List[UInt8]]()
         self.dg_rx_bytes = 0
         self.dg_tx_bytes = 0
+        self.serial = 0
+        self.fc_tunnel_credited = Dict[Int, UInt64]()
         self.closing = False
         self.closing_rx = 0
         self.close_frame = List[UInt8]()

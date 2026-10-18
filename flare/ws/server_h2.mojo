@@ -25,6 +25,33 @@ from ..http2.server import Http2Connection
 from ..runtime.pool import Pool
 
 
+def pull_client_frame(
+    mut buf: List[UInt8], max_payload: Int
+) raises -> Optional[WsFrame]:
+    """Decode one client frame off the front of ``buf`` and drop its
+    bytes; ``None`` until ``buf`` holds a whole frame. Raises on a
+    malformed frame, one over ``max_payload`` (the message carries
+    ``WS_TOO_BIG_MARKER``), and an unmasked one: RFC 6455 sec 5.1 has a
+    server close the connection on it. Shared by the h2 and h3 carriers.
+    """
+    if len(buf) == 0:
+        return None
+    var dr: _DecodeResult
+    try:
+        dr = WsFrame.decode_one(Span[UInt8, _](buf), max_payload=max_payload)
+    except e:
+        var msg = String(e)
+        if msg.find("decode_one: need") >= 0 or msg.find("truncated") >= 0:
+            return None
+        raise e^
+    var consumed = dr.consumed
+    var got = dr^.take_frame()
+    if not got.masked:
+        raise Error("ws: unmasked client frame")
+    buf = List[UInt8](Span[UInt8, _](buf)[consumed:])
+    return got^
+
+
 struct WsOverH2ServerStream(Copyable):
     """Stream-keyed server adapter turning one h2 stream into a WS tunnel.
 
@@ -96,42 +123,22 @@ struct WsOverH2ServerStream(Copyable):
         # Readable edges (a WINDOW_UPDATE among them) come through here,
         # so this is where parked outbound bytes get their next chance.
         _ = self.flush(conn)
-        var data = conn.drain_stream_data(self.stream_id)
-        for i in range(len(data)):
-            self.read_buffer.append(data[i])
-        if len(self.read_buffer) == 0:
-            return None
-        var dr: _DecodeResult
+        self.read_buffer.extend(
+            Span[UInt8, _](conn.drain_stream_data(self.stream_id))
+        )
         try:
-            dr = WsFrame.decode_one(
-                Span[UInt8, _](self.read_buffer),
-                max_payload=self.max_frame_size,
-            )
+            var got = pull_client_frame(self.read_buffer, self.max_frame_size)
+            if got and got.value().opcode == WsOpcode.CLOSE:
+                self.closed = True
+            return got^
         except e:
-            var msg = String(e)
-            if msg.find("decode_one: need") >= 0 or msg.find("truncated") >= 0:
-                return None
-            if WS_TOO_BIG_MARKER in msg:
+            if WS_TOO_BIG_MARKER in String(e):
                 try:
                     self.close(conn, WsCloseCode.MESSAGE_TOO_BIG)
                 except:
-                    self.closed = True
+                    pass
+            self.closed = True
             raise e^
-        var consumed = dr.consumed
-        var got = dr^.take_frame()
-        # RFC 6455 sec 5.1: a server MUST close the connection on an
-        # unmasked client frame. The h1 server enforces it; this path did
-        # not.
-        if not got.masked:
-            self.closed = True
-            raise Error("WsOverH2ServerStream: unmasked client frame")
-        if got.opcode == WsOpcode.CLOSE:
-            self.closed = True
-        var rest = List[UInt8]()
-        for i in range(consumed, len(self.read_buffer)):
-            rest.append(self.read_buffer[i])
-        self.read_buffer = rest^
-        return got^
 
     def is_closed(imm self) -> Bool:
         return self.closed

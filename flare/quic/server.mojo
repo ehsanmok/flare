@@ -200,6 +200,7 @@ from ._loss_recovery import LossRecovery
 from ._worker_route import DatagramInbox, cid_owner, inbox_at
 from ._server_types import (
     ConnectionIdTable,
+    Http3Tunnel,
     QuicConnection,
     QuicServerConfig,
     _StreamTx,
@@ -297,6 +298,7 @@ struct QuicListener(Movable):
     runs at the end of every :meth:`advance_timers` call so
     idle-timed-out connections get reaped against the same
     monotonic clock the wheel uses."""
+    var _next_serial: UInt64
     var tls_acceptor: RustlsQuicAcceptor
     """Long-lived rustls QUIC acceptor built once at
     :meth:`bind` from :attr:`QuicServerConfig.rustls_config`.
@@ -518,6 +520,7 @@ struct QuicListener(Movable):
         self.config = config.copy()
         self.cid_table = ConnectionIdTable()
         self.connections = List[QuicConnection]()
+        self._next_serial = 1
         self.tls_acceptor = tls_acceptor^
         self.tls_sessions = List[_SessionSlot]()
         self.tls_egress_queues = List[List[UInt8]]()
@@ -1905,6 +1908,96 @@ struct QuicListener(Movable):
             _ = txs.pop(stream_id)
         return out^
 
+    # -- Extended CONNECT tunnels (RFC 9220) -------------------------------
+
+    def open_http3_tunnel(
+        mut self, slot: Int, stream_id: Int
+    ) raises -> Http3Tunnel:
+        """Accept the extended CONNECT request on ``stream_id`` (taken
+        with :meth:`take_http3_request`): queue a 200 HEADERS and keep the
+        stream open both ways."""
+        ref h3 = self.http3_connections[slot]
+        h3.emit_response(stream_id, Response(status=200))
+        self._append_http3_egress(
+            slot, stream_id, h3.take_response_frames(stream_id)
+        )
+        return Http3Tunnel(slot, stream_id, self.connections[slot].serial)
+
+    def is_http3_tunnel_request(self, slot: Int, stream_id: Int) -> Bool:
+        """Whether the request on ``stream_id`` is an extended CONNECT
+        (RFC 9220), ready before the client ends the stream."""
+        if slot < 0 or slot >= len(self.http3_connections):
+            return False
+        return self.http3_connections[slot].is_tunnel(stream_id)
+
+    def _tunnel_live(self, t: Http3Tunnel) -> Bool:
+        return (
+            t.slot >= 0
+            and t.slot < len(self.connections)
+            and self.connections[t.slot].serial == t.serial
+            and self.connections[t.slot].alive
+            and t.stream_id in self.connections[t.slot].h3_tx
+        )
+
+    def http3_tunnel_open(self, t: Http3Tunnel) -> Bool:
+        """Whether ``t`` still carries bytes both ways: neither side has
+        ended or reset it and its connection is up."""
+        if not self._tunnel_live(t):
+            return False
+        var s = self.connections[t.slot].conn.streams.get(UInt64(t.stream_id))
+        if not s or s.value().peer_reset or s.value().send_reset:
+            return False
+        var done = True
+        try:
+            done = self.connections[t.slot].h3_tx[t.stream_id].done
+        except:
+            pass
+        if done:
+            return False
+        try:
+            return not self.http3_connections[t.slot].stream_fin_received(
+                t.stream_id
+            )
+        except:
+            return False
+
+    def send_http3_tunnel(
+        mut self, t: Http3Tunnel, data: Span[UInt8, _]
+    ) raises -> Bool:
+        """Queue ``data`` as one DATA frame on ``t``; False when the
+        tunnel is closed. The drain sends it as flow control allows."""
+        if not self.http3_tunnel_open(t):
+            return False
+        encode_response_data(
+            data, self.connections[t.slot].h3_tx[t.stream_id].buf
+        )
+        return True
+
+    def take_http3_tunnel(mut self, t: Http3Tunnel) -> List[UInt8]:
+        """The bytes the peer sent on ``t`` since the last call. They
+        count as consumed, so connection credit keeps up with a
+        long-lived tunnel (RFC 9000 sec 4.2)."""
+        if not self._tunnel_live(t):
+            return List[UInt8]()
+        ref h3 = self.http3_connections[t.slot]
+        var data = h3.take_stream_body(t.stream_id)
+        var delivered = h3.delivered_offset(t.stream_id)
+        ref qc = self.connections[t.slot]
+        var prev = qc.fc_tunnel_credited.get(t.stream_id, UInt64(0))
+        if delivered > prev:
+            qc.fc_consumed += delivered - prev
+            qc.fc_tunnel_credited[t.stream_id] = delivered
+        return data^
+
+    def close_http3_tunnel(mut self, t: Http3Tunnel):
+        """End our side of ``t``: FIN after the queued bytes, then the
+        stream is reclaimed."""
+        if self._tunnel_live(t):
+            try:
+                self.connections[t.slot].h3_tx[t.stream_id].done = True
+            except:
+                pass
+
     def pump_http3_streams(mut self, cancel: Cancel) raises -> Int:
         """Advance every active HTTP/3 streaming response by one chunk.
 
@@ -2156,6 +2249,8 @@ struct QuicListener(Movable):
         qc.conn.adv_max_streams_bidi = self.config.initial_max_streams_bidi
         qc.conn.adv_max_streams_uni = self.config.initial_max_streams_uni
         qc.conn.max_datagram_recv = self.config.max_datagram_frame_size
+        qc.serial = self._next_serial
+        self._next_serial += 1
         if retry_odcid:
             qc.addr_validated = True  # the Retry token proved it
         var live = len(self.connections) - len(self.free_slots)
@@ -2733,7 +2828,9 @@ struct QuicListener(Movable):
         ref qc = self.connections[slot]
         if sid in qc.fc_stream_end:
             try:
-                qc.fc_consumed += qc.fc_stream_end.pop(sid)
+                qc.fc_consumed += qc.fc_stream_end.pop(
+                    sid
+                ) - qc.fc_tunnel_credited.pop(sid, UInt64(0))
             except:
                 pass
         if (sid & 0x3) == 0:

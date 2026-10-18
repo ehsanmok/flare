@@ -316,6 +316,12 @@ struct _Http3StreamState(Copyable, Defaultable):
     Guards against the reactor double-dispatching the same
     request through a Handler."""
 
+    var tunnel: Bool
+    """The HEADERS carry ``:protocol`` and extended CONNECT is enabled
+    (RFC 9220): the request is ready without a FIN, and the body that
+    follows is the tunnel's bytes (:meth:`Http3Connection.take_stream_body`).
+    """
+
     def __init__(out self):
         self.reader = Http3RequestReader.new()
         self.inbox = List[UInt8]()
@@ -329,6 +335,7 @@ struct _Http3StreamState(Copyable, Defaultable):
         self.outbox = List[UInt8]()
         self.response_emitted = False
         self.request_taken = False
+        self.tunnel = False
 
     @staticmethod
     def with_limits(max_field_section_bytes: UInt64) -> Self:
@@ -888,6 +895,10 @@ struct Http3Connection(Copyable, Defaultable):
                 else:
                     state.headers = collector.headers.copy()
                     state.headers_complete = True
+                    if self.config.enable_connect_protocol:
+                        for i in range(len(state.headers)):
+                            if state.headers[i].name == ":protocol":
+                                state.tunnel = True
             if collector.data_fired:
                 state.body.extend(Span[UInt8, _](collector.data))
             if collector.trailers_fired:
@@ -963,8 +974,10 @@ struct Http3Connection(Copyable, Defaultable):
                 continue
             if entry.value.protocol_error.byte_length() != 0:
                 continue
-            var done = entry.value.fin_received or (
-                entry.value.reader.state == H3_REQUEST_STATE_DONE
+            var done = (
+                entry.value.fin_received
+                or entry.value.tunnel
+                or entry.value.reader.state == H3_REQUEST_STATE_DONE
             )
             if not done:
                 continue
@@ -1042,6 +1055,25 @@ struct Http3Connection(Copyable, Defaultable):
             req.headers.append("cookie", cookie)
         state.request_taken = True
         return req^
+
+    def is_tunnel(self, stream_id: Int) -> Bool:
+        """Whether ``stream_id`` carries an extended CONNECT request."""
+        try:
+            return self.streams[stream_id].tunnel
+        except:
+            return False
+
+    def take_stream_body(mut self, stream_id: Int) -> List[UInt8]:
+        """The DATA payload bytes received on ``stream_id`` since the
+        request (or the last call) took them: an extended CONNECT
+        tunnel's inbound bytes."""
+        var out = List[UInt8]()
+        if stream_id in self.streams:
+            try:
+                swap(out, self.streams[stream_id].body)
+            except:
+                pass
+        return out^
 
     def emit_response(mut self, stream_id: Int, var response: Response) raises:
         """Encode ``response`` into the per-stream outbox so the

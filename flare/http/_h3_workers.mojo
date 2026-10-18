@@ -22,6 +22,12 @@ from ..quic.server import QuicListener
 from ..quic._server_support import _monotonic_ms
 from ..quic._worker_route import free_inbox_table, new_inbox_table
 from ..runtime._thread import ThreadHandle, _OpaquePtr
+from ..ws.server_h3 import (
+    WsH3Hooks,
+    WsOverH3ServerStream,
+    ws_h3_accept,
+    ws_h3_dispatch,
+)
 from .cancel import Cancel
 from .handler import Handler
 from .response import Response
@@ -117,9 +123,17 @@ def pump_h3_requests[
 
 def _serve_loop[
     H: Handler & Copyable
-](mut listener: QuicListener, mut handler: H, ctl: Int) raises:
+](
+    mut listener: QuicListener,
+    mut handler: H,
+    ctl: Int,
+    ws: Optional[WsH3Hooks] = None,
+) raises:
     """One worker's reactor loop, until the control cell says stop or a
-    requested drain has closed every connection."""
+    requested drain has closed every connection. ``ws`` takes the
+    WebSocket extended CONNECT streams (RFC 9220) before ``handler``
+    sees the rest."""
+    var tunnels = List[WsOverH3ServerStream]()
     while not listener._stopping and h3_control_get(ctl, 0) == 0:
         # Graceful drain: GOAWAY to every connection, then each closes
         # once its requests are answered (RFC 9114 sec 5.2); the loop
@@ -131,7 +145,11 @@ def _serve_loop[
             if listener.drain_step():
                 break
         _ = listener.tick(timeout_ms=listener.poll_timeout_ms())
+        if ws:
+            ws_h3_accept(ws.value(), listener, tunnels)
         _ = pump_h3_requests[H](listener, handler)
+        if ws:
+            ws_h3_dispatch(ws.value(), listener, tunnels)
         # Advance in-flight streaming responses by one chunk each so
         # their DATA rides this turn's drain.
         _ = listener.pump_http3_streams(Cancel.never())
@@ -164,15 +182,23 @@ def _worker_entry[H: Handler & Copyable](arg: _OpaquePtr) -> _OpaquePtr:
 
 def serve_h3[
     H: Handler & Copyable
-](mut first: QuicListener, mut handler: H, ctl: Int) raises:
+](
+    mut first: QuicListener,
+    mut handler: H,
+    ctl: Int,
+    ws: Optional[WsH3Hooks] = None,
+) raises:
     """Serve HTTP/3 on ``first`` and, for ``num_workers > 1``, on one
     more ``SO_REUSEPORT`` listener per extra worker, each on its own OS
     thread. Returns when every worker has stopped; the extra listeners
-    are closed and freed here."""
+    are closed and freed here. A WebSocket sidecar (``ws``) is one boxed
+    handler, so it runs single-worker."""
     var n = first.config.num_workers
     if n <= 1:
-        _serve_loop[H](first, handler, ctl)
+        _serve_loop[H](first, handler, ctl, ws)
         return
+    if ws:
+        raise Error("serve_http3: attach_ws_h3 needs num_workers = 1")
     first.config.inbox_table = new_inbox_table(n)
     var threads = alloc(Layout[ThreadHandle](count=n)).unsafe_leak()
     var ctxs = List[Int]()

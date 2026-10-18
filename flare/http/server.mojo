@@ -48,6 +48,7 @@ from .alpn_dispatch import (
 )
 from ..http2.server import Http2Config
 from ..ws.server_h2 import WsH2Handler, WsH2Hooks
+from ..ws.server_h3 import WsH3Handler, WsH3Hooks
 from ..errors import map_handler_error, log_handler_error
 from ..net import IpAddr, SocketAddr, NetworkError, BrokenPipe, Timeout
 from ..tcp import TcpListener, TcpStream
@@ -162,6 +163,9 @@ struct HttpServer(Movable):
     :class:`flare.http._reactor.tls_conn_handle.TlsConnHandle`. Kept
     ``Optional`` so the plaintext server carries no TLS/OpenSSL cost."""
 
+    var _ws_h3_hooks: Optional[WsH3Hooks]
+    """Boxed RFC 9220 WebSocket-over-h3 sidecar, set by
+    :meth:`attach_ws_h3`; freed when :meth:`serve_http3` returns."""
     var _ws_h2_hooks: Optional[WsH2Hooks]
     """Boxed RFC 8441 WebSocket-over-h2 sidecar, set by
     :meth:`attach_ws_h2` and consumed by :meth:`serve`. ``None`` (the
@@ -197,6 +201,7 @@ struct HttpServer(Movable):
         self._http3_listener = None
         self._tls_ctx = None
         self._ws_h2_hooks = None
+        self._ws_h3_hooks = None
 
     def __deinit__(deinit self):
         self._listener.close()
@@ -617,15 +622,39 @@ struct HttpServer(Movable):
             h3_control_set(ctl, 0, 1)
         self._h3_ctl = ctl
         try:
-            serve_h3[H](listener, handler, ctl)
+            serve_h3[H](listener, handler, ctl, self._ws_h3_hooks.copy())
         except e:
             self._h3_ctl = 0
             free_h3_control(ctl)
             self._http3_listener = listener^
+            self._drop_ws_h3_hooks()
             raise e^
         self._h3_ctl = 0
         free_h3_control(ctl)
         self._http3_listener = listener^
+        self._drop_ws_h3_hooks()
+
+    def attach_ws_h3[W: WsH3Handler](mut self, var ws_handler: W) raises:
+        """Serve WebSocket over HTTP/3 (RFC 9220) through ``ws_handler``:
+        extended CONNECT is advertised, and ``:protocol: websocket``
+        requests become tunnels handed to it while :meth:`serve_http3`'s
+        handler serves everything else. Another ``:protocol`` gets 501.
+        Call after :meth:`bind_with_http3` and before
+        :meth:`serve_http3`; single-worker, like :meth:`attach_ws_h2`."""
+        from flare.ws.server_h3 import make_ws_h3_hooks
+
+        if not self.has_http3():
+            raise Error("HttpServer.attach_ws_h3: no h3 listener bound")
+        if self._ws_h3_hooks:
+            raise Error("HttpServer.attach_ws_h3: a sidecar is attached")
+        self._http3_listener.value().config.http3.enable_connect_protocol = True
+        self._ws_h3_hooks = make_ws_h3_hooks[W](ws_handler^)
+
+    def _drop_ws_h3_hooks(mut self):
+        if self._ws_h3_hooks:
+            var h = self._ws_h3_hooks.value().copy()
+            h.destroy(h.addr)
+            self._ws_h3_hooks = None
 
     @staticmethod
     def _pump_listener_h3[
