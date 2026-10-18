@@ -115,8 +115,24 @@ comptime FRAME_TYPE_HANDSHAKE_DONE: Int = 0x1E
 comptime FRAME_TYPE_DATAGRAM_NOLEN: Int = 0x30
 comptime FRAME_TYPE_DATAGRAM_LEN: Int = 0x31
 
+# draft-ietf-quic-ack-frequency: how often the peer acknowledges.
+comptime FRAME_TYPE_ACK_FREQUENCY: Int = 0xAF
+comptime FRAME_TYPE_IMMEDIATE_ACK: Int = 0x1F
+
 
 # ── Typed frame payload structs ──────────────────────────────────────────────
+
+
+@fieldwise_init
+struct AckFrequencyFrame(Copyable):
+    """ACK_FREQUENCY (draft-ietf-quic-ack-frequency sec 4): acknowledge
+    after more than ``ack_eliciting_threshold`` ack-eliciting packets or
+    ``request_max_ack_delay`` microseconds, whichever comes first."""
+
+    var sequence_number: UInt64
+    var ack_eliciting_threshold: UInt64
+    var request_max_ack_delay: UInt64
+    var reordering_threshold: UInt64
 
 
 @fieldwise_init
@@ -456,6 +472,15 @@ trait FrameHandler(Deinitable, Movable):
         packet (0x30)."""
         ...
 
+    def on_ack_frequency(mut self, f: AckFrequencyFrame) raises:
+        """ACK_FREQUENCY (draft-ietf-quic-ack-frequency)."""
+        ...
+
+    def on_immediate_ack(mut self) raises:
+        """IMMEDIATE_ACK (draft-ietf-quic-ack-frequency): acknowledge
+        now."""
+        ...
+
 
 # ── Encoding helpers (varint append) ─────────────────────────────────────────
 
@@ -689,6 +714,18 @@ def encode_connection_close(
 
 def encode_handshake_done(mut out: List[UInt8]):
     out.append(UInt8(FRAME_TYPE_HANDSHAKE_DONE))
+
+
+def encode_ack_frequency(f: AckFrequencyFrame, mut out: List[UInt8]) raises:
+    _push_varint(out, UInt64(FRAME_TYPE_ACK_FREQUENCY))
+    _push_varint(out, f.sequence_number)
+    _push_varint(out, f.ack_eliciting_threshold)
+    _push_varint(out, f.request_max_ack_delay)
+    _push_varint(out, f.reordering_threshold)
+
+
+def encode_immediate_ack(mut out: List[UInt8]):
+    out.append(UInt8(FRAME_TYPE_IMMEDIATE_ACK))
 
 
 # ── Per-type parsers ─────────────────────────────────────────────────────────
@@ -966,5 +1003,17 @@ def parse_frame_into[
             dlen = len(buf) - pos
         var data = _read_bytes(buf, pos, dlen)
         handler.on_datagram(DatagramFrame(data=data^, has_length=has_len))
+        return pos
+    if t == FRAME_TYPE_ACK_FREQUENCY:
+        var seq = _read_varint(buf, pos)
+        var threshold = _read_varint(buf, pos)
+        var delay = _read_varint(buf, pos)
+        var reorder = _read_varint(buf, pos)
+        handler.on_ack_frequency(
+            AckFrequencyFrame(seq, threshold, delay, reorder)
+        )
+        return pos
+    if t == FRAME_TYPE_IMMEDIATE_ACK:
+        handler.on_immediate_ack()
         return pos
     raise Error("FRAME_ENCODING_ERROR: unknown frame type " + String(raw_type))

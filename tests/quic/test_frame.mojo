@@ -43,6 +43,9 @@ from flare.quic import (
     FRAME_TYPE_STREAM_DATA_BLOCKED,
     FRAME_TYPE_STREAMS_BLOCKED_BIDI,
     FRAME_TYPE_STREAMS_BLOCKED_UNI,
+    AckFrequencyFrame,
+    encode_ack_frequency,
+    encode_immediate_ack,
     DatagramFrame,
     FrameHandler,
     HandshakeDoneFrame,
@@ -160,6 +163,8 @@ struct _Recorder(FrameHandler, Movable):
 
     var datagram: DatagramFrame
     var datagram_seen: Bool
+    var ack_frequency_seq: Int
+    var immediate_acks: Int
 
     def on_padding(mut self, count: Int) raises:
         self.padding_count += count
@@ -242,6 +247,12 @@ struct _Recorder(FrameHandler, Movable):
         self.datagram = dg.copy()
         self.datagram_seen = True
 
+    def on_ack_frequency(mut self, f: AckFrequencyFrame) raises:
+        self.ack_frequency_seq = Int(f.sequence_number)
+
+    def on_immediate_ack(mut self) raises:
+        self.immediate_acks += 1
+
 
 def _empty_recorder() -> _Recorder:
     return _Recorder(
@@ -319,6 +330,8 @@ def _empty_recorder() -> _Recorder:
         connection_close_seen=False,
         datagram=DatagramFrame(data=List[UInt8](), has_length=False),
         datagram_seen=False,
+        ack_frequency_seq=-1,
+        immediate_acks=0,
     )
 
 
@@ -723,11 +736,10 @@ def test_unknown_frame_type_rejected() raises:
     var rec = _empty_recorder()
     var raised = False
     try:
-        # 0x1F decodes as a 1-byte varint (high bits 00) but is
-        # outside the v1 master table (last codepoint is 0x1E).
-        # The dispatcher itself raises FRAME_ENCODING_ERROR
+        # 0x2F decodes as a 1-byte varint (high bits 00) but no frame
+        # type has it. The dispatcher itself raises FRAME_ENCODING_ERROR
         # (RFC 9000 sec 12.4); no handler callback is involved.
-        _ = parse_frame_into(Span[UInt8, _](_bytes(0x1F)), rec)
+        _ = parse_frame_into(Span[UInt8, _](_bytes(0x2F)), rec)
     except e:
         raised = True
         assert_true("FRAME_ENCODING_ERROR" in String(e))
@@ -735,11 +747,11 @@ def test_unknown_frame_type_rejected() raises:
 
 
 def test_unknown_frame_type_rejected_for_every_codepoint() raises:
-    """QUIC-01: every codepoint outside the v1 table (the 0x1f..0x2f
-    and 0x32.. gaps, and multi-byte varint types) is rejected, never
-    consumed as a bare type varint."""
+    """QUIC-01: every codepoint outside the known table (the 0x20..0x2f
+    and 0x32.. gaps, and multi-byte varint types other than ACK_FREQUENCY)
+    is rejected, never consumed as a bare type varint."""
     var cases = List[List[UInt8]]()
-    for t in range(0x1F, 0x30):
+    for t in range(0x20, 0x30):
         cases.append(_bytes(t, 0x1C, 0x00, 0x00, 0x00))
     cases.append(_bytes(0x32, 0x00))
     cases.append(_bytes(0x40, 0x40, 0x00))  # 2-byte varint, type 0x40
@@ -754,6 +766,17 @@ def test_unknown_frame_type_rejected_for_every_codepoint() raises:
             assert_true("FRAME_ENCODING_ERROR" in String(e))
         assert_true(raised, "unknown frame type accepted, case " + String(i))
         assert_equal(rec.handshake_done_count, 0)
+
+
+def test_ack_frequency_frames_round_trip() raises:
+    var wire = List[UInt8]()
+    encode_ack_frequency(AckFrequencyFrame(7, 3, 25_000, 1), wire)
+    encode_immediate_ack(wire)
+    var rec = _empty_recorder()
+    var n = parse_frame_into(Span[UInt8, _](wire), rec)
+    assert_equal(rec.ack_frequency_seq, 7)
+    _ = parse_frame_into(Span[UInt8, _](wire)[n:], rec)
+    assert_equal(rec.immediate_acks, 1)
 
 
 def test_stream_count_frames_above_2p60_rejected() raises:
@@ -875,6 +898,7 @@ def main() raises:
     test_handshake_done_round_trip()
     test_unknown_frame_type_rejected()
     test_unknown_frame_type_rejected_for_every_codepoint()
+    test_ack_frequency_frames_round_trip()
     test_stream_count_frames_above_2p60_rejected()
     test_ack_reaching_below_zero_rejected()
     test_truncated_crypto_rejected()

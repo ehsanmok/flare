@@ -41,6 +41,7 @@ from .protection import (
 from ._ecn import EcnValidator
 from ._pmtud import PmtuDiscovery
 from .state import (
+    MIN_ACK_DELAY_US,
     CONN_STATE_CLOSED,
     Connection,
     ConnectionEvents,
@@ -972,6 +973,7 @@ def _encode_server_transport_params(
     tp.initial_max_streams_uni = Optional(config.initial_max_streams_uni)
     tp.active_connection_id_limit = Optional(UInt64(2))
     tp.max_udp_payload_size = Optional(config.max_udp_payload_size)
+    tp.min_ack_delay = Optional(MIN_ACK_DELAY_US)
     if config.max_datagram_frame_size > 0:
         tp.max_datagram_frame_size = Optional(config.max_datagram_frame_size)
     return encode_transport_parameters(tp)

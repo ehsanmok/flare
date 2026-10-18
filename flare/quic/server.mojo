@@ -124,8 +124,11 @@ from .state import (
     ConnectionEvents,
     connection_close,
     empty_events,
+    ack_due,
     mark_handshake_complete,
     mark_local_stream_opened,
+    note_ack_eliciting,
+    note_ack_sent,
 )
 from ..http3.server import (
     H3_DATAGRAM_ERROR,
@@ -1005,6 +1008,7 @@ struct QuicListener(Movable):
                     # (RFC 9000 sec 13.2.1).
                     if self.connections[slot].conn.ack_pending:
                         self.rx_1rtt_ack_pending[slot] = True
+                        note_ack_eliciting(self.connections[slot].conn, now_us)
                 except:
                     ok = False
                     self._close_after_state_error(slot)
@@ -3025,10 +3029,19 @@ struct QuicListener(Movable):
 
         # ACK (+ HANDSHAKE_DONE once + flow-control credit) leads
         # the first datagram. These frames are small and always fit.
+        var now_us = _monotonic_ms() * UInt64(1000)
         var owe_ack = (
             self.rx_1rtt_ack_pending[slot]
             and len(self.rx_1rtt_ranges[slot]) >= 2
         )
+        if owe_ack and not ack_due(self.connections[slot].conn, now_us):
+            # Held back as the peer asked (ACK_FREQUENCY) until its delay.
+            owe_ack = False
+            ref c = self.connections[slot].conn
+            self._arm_send_timer(
+                slot,
+                Int((c.ack_first_us + c.ack_max_delay_us - now_us) // 1000) + 1,
+            )
         var first_flight = (
             not self.handshake_done_sent[slot]
             and self.connections[slot].conn.handshake_complete
@@ -3102,7 +3115,9 @@ struct QuicListener(Movable):
                         self.connections[slot].conn,
                         UInt64(H3_SERVER_CONTROL_STREAM_ID),
                     )
-            self.rx_1rtt_ack_pending[slot] = False
+            if owe_ack:
+                self.rx_1rtt_ack_pending[slot] = False
+                note_ack_sent(self.connections[slot].conn)
             if not self.handshake_done_sent[slot] and slot < len(self.loss_hs):
                 # Handshake confirmed: the Handshake space is done
                 # (RFC 9001 sec 4.9.2).

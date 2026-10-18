@@ -34,6 +34,7 @@ from flare.quic.frame import (
     ConnectionCloseFrame,
     CryptoFrame,
     DataBlockedFrame,
+    AckFrequencyFrame,
     DatagramFrame,
     FrameHandler,
     MaxDataFrame,
@@ -137,6 +138,12 @@ struct _NoOpHandler(FrameHandler, Movable):
         self.dispatches += 1
 
     def on_datagram(mut self, dg: DatagramFrame) raises:
+        self.dispatches += 1
+
+    def on_ack_frequency(mut self, f: AckFrequencyFrame) raises:
+        self.dispatches += 1
+
+    def on_immediate_ack(mut self) raises:
         self.dispatches += 1
 
 

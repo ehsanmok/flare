@@ -14,6 +14,7 @@ to fit it (:func:`split_frames`), and probing resumes a minute later.
 
 from .frame import (
     AckFrame,
+    AckFrequencyFrame,
     ConnectionCloseFrame,
     CryptoFrame,
     DataBlockedFrame,
@@ -191,6 +192,12 @@ struct _Split(FrameHandler):
         pass
 
     def on_datagram(mut self, dg: DatagramFrame) raises:
+        pass
+
+    def on_ack_frequency(mut self, f: AckFrequencyFrame) raises:
+        pass
+
+    def on_immediate_ack(mut self) raises:
         pass
 
 

@@ -128,6 +128,10 @@ from .protection import (
     unprotect_initial_packet,
 )
 from .state import (
+    MIN_ACK_DELAY_US,
+    ack_due,
+    note_ack_eliciting,
+    note_ack_sent,
     CONN_STATE_CLOSED,
     CONN_STATE_CLOSING,
     CONN_STATE_DRAINING,
@@ -225,6 +229,7 @@ def _encode_client_transport_params(
     tp.initial_max_streams_uni = Optional(_CLIENT_MAX_STREAMS)
     tp.active_connection_id_limit = Optional(UInt64(2))
     tp.max_udp_payload_size = Optional(UInt64(max_udp_payload_size))
+    tp.min_ack_delay = Optional(MIN_ACK_DELAY_US)
     if max_datagram_frame_size > 0:
         tp.max_datagram_frame_size = Optional(max_datagram_frame_size)
     return encode_transport_parameters(tp)
@@ -658,7 +663,13 @@ struct QuicClientConnection(Movable):
         flight. Returns empty events on a clean timeout.
         """
         var events = empty_events()
-        self.sock.set_recv_timeout(timeout_ms)
+        var wait = timeout_ms
+        if self.rx_1rtt_ack_pending and self.conn.ack_freq_set:
+            # Wake for a held-back ACK's deadline.
+            var due = self.conn.ack_first_us + self.conn.ack_max_delay_us
+            var now = _monotonic_ms() * UInt64(1000)
+            wait = min(wait, Int((due - min(due, now)) // 1000) + 1)
+        self.sock.set_recv_timeout(wait)
         if self._rx:
             var n = self._rx.value().recv(self.sock.fd(), wait=True)
             if n == 0:
@@ -1099,6 +1110,9 @@ struct QuicClientConnection(Movable):
                 _ack_record(self.rx_1rtt_ranges, dec[1])
                 if self.conn.ack_pending:
                     self.rx_1rtt_ack_pending = True
+                    note_ack_eliciting(
+                        self.conn, _monotonic_ms() * UInt64(1000)
+                    )
                 if self._rx_ecn != 0:
                     # ECT(0) = 2, ECT(1) = 1, CE = 3 (RFC 9000 sec 13.4.1).
                     self.ecn_rx[
@@ -1345,11 +1359,15 @@ struct QuicClientConnection(Movable):
                 _ = self.sock.send_to(Span[UInt8, _](dg), self.peer)
                 self.tx_handshake_offset += UInt64(len(crypto))
                 self.rx_handshake_ack_pending = False
-        if self.have_1rtt_keys and (
-            self.rx_1rtt_ack_pending or len(self.tx_1rtt_crypto) > 0
-        ):
+        # An owed ACK waits as the server asked (ACK_FREQUENCY), unless a
+        # packet goes out anyway.
+        var ack_now = self.rx_1rtt_ack_pending and (
+            ack_due(self.conn, _monotonic_ms() * UInt64(1000))
+            or len(self.tx_1rtt_crypto) > 0
+        )
+        if self.have_1rtt_keys and (ack_now or len(self.tx_1rtt_crypto) > 0):
             var payload = List[UInt8]()
-            if len(self.rx_1rtt_ranges) >= 2:
+            if ack_now and len(self.rx_1rtt_ranges) >= 2:
                 var ack = _ack_from_ranges(self.rx_1rtt_ranges, UInt64(0))
                 ref e = self.ecn_rx
                 if e[0] + e[1] + e[2] > 0:
@@ -1370,7 +1388,9 @@ struct QuicClientConnection(Movable):
                 )
                 if len(dg) > 0:
                     _ = self.sock.send_to(Span[UInt8, _](dg), self.peer)
-            self.rx_1rtt_ack_pending = False
+            if ack_now:
+                self.rx_1rtt_ack_pending = False
+                note_ack_sent(self.conn)
 
     def _build_initial(
         mut self,

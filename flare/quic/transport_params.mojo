@@ -92,6 +92,9 @@ comptime TP_ID_RETRY_SCID: Int = 0x10
 comptime TP_ID_MAX_DATAGRAM_FRAME_SIZE: Int = 0x20
 """RFC 9221 §3: max DATAGRAM frame size the endpoint will accept.
 Absent or 0 means the peer MUST NOT send DATAGRAM frames."""
+comptime TP_ID_MIN_ACK_DELAY: Int = 0xFF04DE1B
+"""draft-ietf-quic-ack-frequency: the smallest ACK delay (microseconds)
+the endpoint can honour; present means it accepts ACK_FREQUENCY."""
 
 # Default values from RFC 9000 §18.2 (used when a parameter is
 # absent on the wire). Encoders should NOT emit a parameter whose
@@ -141,6 +144,7 @@ struct TransportParameters(Copyable):
     """RFC 9221 §3 max_datagram_frame_size (id 0x20). When populated
     and non-zero, the peer may send DATAGRAM frames up to this size;
     absent / 0 disables datagrams for this connection."""
+    var min_ack_delay: Optional[UInt64]
 
 
 def empty_transport_parameters() -> TransportParameters:
@@ -167,6 +171,7 @@ def empty_transport_parameters() -> TransportParameters:
         initial_source_connection_id=List[UInt8](),
         retry_source_connection_id=List[UInt8](),
         max_datagram_frame_size=None,
+        min_ack_delay=None,
     )
 
 
@@ -397,6 +402,10 @@ def encode_transport_parameters(
             TP_ID_MAX_DATAGRAM_FRAME_SIZE,
             params.max_datagram_frame_size.value(),
         )
+    if Bool(params.min_ack_delay):
+        _emit_varint_param(
+            out, TP_ID_MIN_ACK_DELAY, params.min_ack_delay.value()
+        )
     return out^
 
 
@@ -554,6 +563,8 @@ def decode_transport_parameters(
             out.max_datagram_frame_size = Optional[UInt64](
                 _read_param_varint(value)
             )
+        elif id == TP_ID_MIN_ACK_DELAY:
+            out.min_ack_delay = Optional[UInt64](_read_param_varint(value))
         # Any other id is silently dropped (RFC 9000 §7.4.2).
     return out^
 

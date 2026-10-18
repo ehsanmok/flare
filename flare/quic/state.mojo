@@ -55,6 +55,7 @@ from ._state_helpers import (
     frame_allowed_before_1rtt,
 )
 from .frame import (
+    AckFrequencyFrame,
     EcnCounts,
     AckFrame,
     AckRange,
@@ -340,10 +341,50 @@ struct Connection(Copyable):
     var new_token: List[UInt8]
     """The latest NEW_TOKEN token the server sent (client side, RFC 9000
     sec 8.1.3), for the Initial of a later connection to it."""
+    var ack_freq_set: Bool
+    """The peer sent ACK_FREQUENCY (draft-ietf-quic-ack-frequency): ACKs
+    follow its threshold and delay instead of going out with every
+    burst of packets."""
+    var ack_freq_seq: UInt64
+    """The lowest ACK_FREQUENCY sequence number still applied."""
+    var ack_threshold: UInt64
+    var ack_max_delay_us: UInt64
+    var ack_immediate: Bool
+    var ack_unacked: Int
+    """Ack-eliciting packets received since the last ACK was sent."""
+    var ack_first_us: UInt64
     var max_datagram_recv: UInt64
     """The ``max_datagram_frame_size`` we advertised (RFC 9221 sec 3); 0
     when we did not, and then any DATAGRAM frame is a PROTOCOL_VIOLATION,
     as is one larger than this."""
+
+
+comptime MIN_ACK_DELAY_US: UInt64 = 1000
+"""The ``min_ack_delay`` both ends advertise (draft-ietf-quic-ack-
+frequency): a requested ACK delay below it is refused."""
+
+
+def note_ack_eliciting(mut conn: Connection, now_us: UInt64):
+    """An ack-eliciting packet was received."""
+    if conn.ack_unacked == 0:
+        conn.ack_first_us = now_us
+    conn.ack_unacked += 1
+
+
+def ack_due(conn: Connection, now_us: UInt64) -> Bool:
+    """Whether an owed ACK goes out now: always, unless the peer asked
+    for fewer with ACK_FREQUENCY."""
+    if not conn.ack_freq_set or conn.ack_immediate:
+        return True
+    return (
+        UInt64(conn.ack_unacked) > conn.ack_threshold
+        or now_us >= conn.ack_first_us + conn.ack_max_delay_us
+    )
+
+
+def note_ack_sent(mut conn: Connection):
+    conn.ack_unacked = 0
+    conn.ack_immediate = False
 
 
 comptime MAX_QUEUED_DATAGRAM_BYTES: Int = 64 * 1024
@@ -388,6 +429,13 @@ def new_connection(
         next_local_uni=UInt64(3) if is_server else UInt64(2),
         peer_initial_max_stream_data=initial_max_data,
         new_token=List[UInt8](),
+        ack_freq_set=False,
+        ack_freq_seq=0,
+        ack_threshold=1,
+        ack_max_delay_us=25_000,
+        ack_immediate=False,
+        ack_unacked=0,
+        ack_first_us=0,
         max_datagram_recv=UInt64(0),
     )
 
@@ -908,6 +956,27 @@ struct _ConnFrameHandler(FrameHandler):
             )
         _arrive(self._conn()[], self.now_us, ack_eliciting=True)
         apply_handshake_done(self._conn()[], self._events()[])
+
+    def on_ack_frequency(mut self, f: AckFrequencyFrame) raises:
+        _arrive(self._conn()[], self.now_us, ack_eliciting=True)
+        if f.request_max_ack_delay < MIN_ACK_DELAY_US:
+            connection_close(
+                self._conn()[],
+                QUIC_PROTOCOL_VIOLATION,
+                "ACK_FREQUENCY delay below min_ack_delay",
+            )
+            raise Error("QUIC PROTOCOL_VIOLATION: ACK_FREQUENCY delay")
+        if f.sequence_number < self._conn()[].ack_freq_seq:
+            return  # an older request, superseded
+        ref c = self._conn()[]
+        c.ack_freq_seq = f.sequence_number + 1
+        c.ack_freq_set = True
+        c.ack_threshold = f.ack_eliciting_threshold
+        c.ack_max_delay_us = f.request_max_ack_delay
+
+    def on_immediate_ack(mut self) raises:
+        _arrive(self._conn()[], self.now_us, ack_eliciting=True)
+        self._conn()[].ack_immediate = True
 
     def on_datagram(mut self, dg: DatagramFrame) raises:
         # RFC 9221 §5: DATAGRAM frames are ack-eliciting; the payload
