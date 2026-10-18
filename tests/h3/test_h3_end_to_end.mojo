@@ -654,6 +654,45 @@ def test_http3_config_reaches_each_connection() raises:
     )
 
 
+def test_a_gap_within_flow_control_keeps_the_connection() raises:
+    """3 MiB arriving behind a 1-byte gap, inside the granted windows, is
+    held and delivered once the gap fills. The reassembly held only
+    2 MiB, while flow control let a peer send up to 16 MiB past a gap,
+    so a lossy upload was closed with H3_GENERAL_PROTOCOL_ERROR."""
+    var cfg = QuicServerConfig()
+    cfg.host = String("127.0.0.1")
+    cfg.port = UInt16(0)
+    cfg.initial_max_data = UInt64(8 * 1024 * 1024)
+    var listener = QuicListener.bind(cfg^)
+    var slot = _seed_slot(listener)
+    var body = List[UInt8](length=3 * 1024 * 1024, fill=UInt8(0x42))
+    var req = _build_post_request("/up", body)
+    var pos = 1
+    while pos < len(req):
+        var end = min(pos + 60_000, len(req))
+        var ev = empty_events()
+        ev.stream_chunks.append(
+            StreamFrame(
+                UInt64(0),
+                UInt64(pos),
+                List[UInt8](Span[UInt8, _](req)[pos:end]),
+                end == len(req),
+            )
+        )
+        listener._route_http3_stream_chunks(slot, ev)
+        pos = end
+    assert_true(listener.connections[slot].alive, "closed for the gap")
+    var first = empty_events()
+    first.stream_chunks.append(
+        StreamFrame(
+            UInt64(0), UInt64(0), List[UInt8](Span[UInt8, _](req)[0:1]), False
+        )
+    )
+    listener._route_http3_stream_chunks(slot, first)
+    assert_equal(len(listener.take_http3_completed_streams(slot)), 1)
+    assert_equal(len(listener.take_http3_request(slot, 0).body), len(body))
+
+
 def main() raises:
     test_get_request_dispatches_through_handler()
     test_post_request_body_echo()
@@ -667,4 +706,5 @@ def main() raises:
     test_stream_limits_and_flow_control_are_enforced()
     test_undecodable_field_section_closes_the_connection()
     test_http3_config_reaches_each_connection()
-    print("test_h3_end_to_end: 12 passed")
+    test_a_gap_within_flow_control_keeps_the_connection()
+    print("test_h3_end_to_end: 13 passed")

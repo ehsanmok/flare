@@ -424,8 +424,11 @@ struct _Http3EventCollector(Http3RequestEventHandler, Movable):
 # ── Per-connection driver ──────────────────────────────────────────────
 
 
-comptime _MAX_OUT_OF_ORDER_BYTES: Int = 1 << 21
-"""Most stream bytes held ahead of a gap, per stream (2 MiB)."""
+comptime _MAX_OUT_OF_ORDER_BYTES: Int = 1 << 24
+"""Most stream bytes held ahead of a gap, per stream (16 MiB): the
+largest receive window the QUIC server grants a stream, so a peer within
+flow control never trips it. Across streams the connection's MAX_DATA,
+granted only as requests are answered, bounds the total held."""
 
 
 struct _StreamReassembly(Copyable, Defaultable):
@@ -783,6 +786,14 @@ struct Http3Connection(Copyable, Defaultable):
                 self.feed_stream_chunk(stream_id, ready^)
         if fin_now and not is_uni:
             self.signal_end_of_stream(stream_id)
+
+    def delivered_offset(self, stream_id: Int) -> UInt64:
+        """Bytes of ``stream_id`` delivered in order so far (0 for a
+        stream not seen)."""
+        try:
+            return self.reassembly[stream_id].next_offset
+        except:
+            return UInt64(0)
 
     def has_stream(self, stream_id: Int) -> Bool:
         """Whether the driver currently tracks a carrier for

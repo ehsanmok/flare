@@ -1631,7 +1631,6 @@ struct QuicListener(Movable):
                     slot, QUIC_FLOW_CONTROL_ERROR, "stream data past MAX_DATA"
                 )
                 return
-            self._grant_stream_credit(slot, sid, end)
         # Pass 2: feed H3 in place. Mutating the slot through a ref
         # avoids deep-copying the whole Http3Connection (its per-stream
         # state Dict) on every inbound datagram -- the dominant
@@ -1666,12 +1665,21 @@ struct QuicListener(Movable):
             h3_reason = h3.connection_error_reason
         if h3_code != 0:
             self._close_for(slot, h3_code, h3_reason, application=True)
+            return
+        # Pass 3: stream credit, from the bytes delivered in order. The
+        # highest offset seen was used, so data past a gap earned more
+        # credit, and the peer could pile up more out-of-order bytes than
+        # the reassembly holds.
+        for i in range(len(events.stream_chunks)):
+            var sid = Int(events.stream_chunks[i].stream_id)
+            var delivered = self.http3_connections[slot].delivered_offset(sid)
+            self._grant_stream_credit(slot, sid, delivered)
 
     def _grant_stream_credit(mut self, slot: Int, sid: Int, end: UInt64):
-        """Keep a client stream's receive limit a window ahead of what
-        has arrived (RFC 9000 sec 4.2): once less than half the window
-        is left, raise the limit to ``end + window`` and queue a
-        MAX_STREAM_DATA. Without it an upload larger than the initial
+        """Keep a client stream's receive limit a window ahead of the
+        bytes delivered in order, ``end`` (RFC 9000 sec 4.2): once less
+        than half the window is left, raise the limit to ``end +
+        window`` and queue a MAX_STREAM_DATA. Without it an upload larger than the initial
         window stalled. Memory stays bounded by MAX_DATA, which is
         granted only as requests are answered. The window doubles, up to
         :data:`_MAX_STREAM_WINDOW`, when grants come faster than twice
