@@ -97,7 +97,12 @@ from flare.http3.response_writer import (
     encode_response_head,
     encode_response_trailers,
 )
-from flare.http.wire import Request, Response, trailer_field_allowed
+from flare.http.wire import (
+    BodyPipe,
+    Request,
+    Response,
+    trailer_field_allowed,
+)
 from flare.qpack import QpackHeader
 from flare.http2.state import validate_request_fields
 from flare.qpack.dynamic import (
@@ -238,6 +243,13 @@ struct Http3Config(Copyable, Defaultable):
     is answered 413 and the client asked to stop sending (RFC 9114 sec
     4.1.2). Default 10 MiB, as on h2."""
 
+    var stream_request_bodies: Bool
+    """Hand a request with a body to the handler on its HEADERS, the body
+    to follow through ``Request.body_stream()`` as it arrives, instead of
+    after the whole body is buffered; credit is granted as the handler
+    reads, so ``max_body_size`` does not apply. Default False: handlers
+    otherwise expect the whole body in ``Request.body``."""
+
     var h3_datagram: Bool
     """RFC 9297 -- advertise SETTINGS_H3_DATAGRAM and carry HTTP
     Datagrams on extended CONNECT tunnels. Needs QUIC DATAGRAM support
@@ -255,6 +267,7 @@ struct Http3Config(Copyable, Defaultable):
         self.qpack_blocked_streams = UInt64(0)
         self.enable_connect_protocol = False
         self.h3_datagram = False
+        self.stream_request_bodies = False
         self.max_body_size = UInt64(10 * 1024 * 1024)
         self.goaway_threshold_streams = UInt64((1 << 63) - 1)
 
@@ -337,6 +350,11 @@ struct _Http3StreamState(Copyable, Defaultable):
     """The body went over ``Http3Config.max_body_size``: the request is
     answered 413 instead of being served."""
 
+    var streaming: Bool
+    """``Http3Config.stream_request_bodies``: the request is handed over
+    on its HEADERS and its body flows through :attr:`pipe`."""
+    var pipe: Optional[ArcPointer[BodyPipe]]
+
     var tunnel: Bool
     """The HEADERS carry ``:protocol`` and extended CONNECT is enabled
     (RFC 9220): the request is ready without a FIN, and the body that
@@ -357,6 +375,8 @@ struct _Http3StreamState(Copyable, Defaultable):
         self.response_emitted = False
         self.request_taken = False
         self.too_large = False
+        self.streaming = False
+        self.pipe = None
         self.tunnel = False
 
     @staticmethod
@@ -773,7 +793,9 @@ struct Http3Connection(Copyable, Defaultable):
         response FIN has been emitted (so the server doesn't
         keep parser state around for a stream that's done)."""
         if stream_id in self.streams:
-            _ = self.streams.pop(stream_id)
+            var st = self.streams.pop(stream_id)
+            if st.pipe and not st.pipe.value()[].done:
+                st.pipe.value()[].failed = True
         if stream_id in self.reassembly:
             _ = self.reassembly.pop(stream_id)
         if (stream_id & 0x3) == 0 and stream_id >= self.closed_request_floor:
@@ -932,6 +954,9 @@ struct Http3Connection(Copyable, Defaultable):
                         for i in range(len(state.headers)):
                             if state.headers[i].name == ":protocol":
                                 state.tunnel = True
+                    if self.config.stream_request_bodies and not state.tunnel:
+                        state.streaming = True
+                        state.reader.max_body_bytes = UInt64.MAX
             if collector.data_fired:
                 state.body.extend(Span[UInt8, _](collector.data))
             if collector.trailers_fired:
@@ -969,6 +994,12 @@ struct Http3Connection(Copyable, Defaultable):
             var rest = List[UInt8](capacity=len(state.inbox) - cursor)
             rest.extend(Span[UInt8, _](state.inbox)[cursor:])
             state.inbox = rest^
+        if state.pipe:
+            ref p = state.pipe.value()[]
+            p.data.extend(Span[UInt8, _](state.body))
+            state.body.clear()
+            if state.protocol_error.byte_length() > 0:
+                p.failed = True
 
     def signal_end_of_stream(mut self, stream_id: Int) raises:
         """Signal that the QUIC layer observed FIN on
@@ -982,6 +1013,8 @@ struct Http3Connection(Copyable, Defaultable):
             return
         ref state = self.streams[stream_id]
         state.fin_received = True
+        if state.pipe:
+            state.pipe.value()[].done = True
 
     def take_completed_streams(self) raises -> List[Int]:
         """Return the IDs of streams that have a request ready
@@ -1013,6 +1046,7 @@ struct Http3Connection(Copyable, Defaultable):
                 continue
             var done = (
                 entry.value.too_large
+                or entry.value.streaming
                 or entry.value.fin_received
                 or entry.value.tunnel
                 or entry.value.reader.state == H3_REQUEST_STATE_DONE
@@ -1071,7 +1105,13 @@ struct Http3Connection(Copyable, Defaultable):
                 path = state.headers[i].value
         var body = List[UInt8]()
         swap(body, state.body)
+        var pipe = Optional[ArcPointer[BodyPipe]](None)
+        if state.streaming and not state.fin_received:
+            pipe = ArcPointer(BodyPipe(body^, False))
+            body = List[UInt8]()
+            state.pipe = pipe
         var req = Request(method=method^, url=path^, body=body^)
+        req.body_pipe = pipe^
         # Same rules as h2's take_request: repeated fields are appended,
         # cookie crumbs are joined (RFC 9114 sec 4.2.1), and :authority
         # becomes Host -- it used to be dropped, leaving Host-based
@@ -1108,6 +1148,17 @@ struct Http3Connection(Copyable, Defaultable):
             return self.streams[stream_id].tunnel
         except:
             return False
+
+    def body_backlog(self, stream_id: Int) -> Int:
+        """Body bytes of a streamed request received and not yet read by
+        its handler; -1 when the stream has no body being streamed."""
+        try:
+            ref st = self.streams[stream_id]
+            if st.pipe:
+                return len(st.pipe.value()[].data)
+        except:
+            pass
+        return -1
 
     def take_stream_body(mut self, stream_id: Int) -> List[UInt8]:
         """The DATA payload bytes received on ``stream_id`` since the

@@ -323,6 +323,8 @@ struct QuicListener(Movable):
     idle-timed-out connections get reaped against the same
     monotonic clock the wheel uses."""
     var _next_serial: UInt64
+    var _streamed_bodies: List[Http3Tunnel]
+    """Request streams whose bodies are streamed to their handlers."""
     var _dirty: List[Int]
     """Slots with egress queued outside packet processing, drained by
     the next :meth:`drain_all_egress`; idle slots are not visited."""
@@ -561,6 +563,7 @@ struct QuicListener(Movable):
         self.connections = List[QuicConnection]()
         self._next_serial = 1
         self._dirty = List[Int]()
+        self._streamed_bodies = List[Http3Tunnel]()
         self._ready = List[Int]()
         self._slot_marks = List[UInt8]()
         self.tls_acceptor = tls_acceptor^
@@ -1829,6 +1832,8 @@ struct QuicListener(Movable):
         # the reassembly holds.
         for i in range(len(events.stream_chunks)):
             var sid = Int(events.stream_chunks[i].stream_id)
+            if self.http3_connections[slot].body_backlog(sid) >= 0:
+                continue  # credited as its handler reads (_credit_bodies)
             var delivered = self.http3_connections[slot].delivered_offset(sid)
             self._grant_stream_credit(slot, sid, delivered)
 
@@ -1897,7 +1902,12 @@ struct QuicListener(Movable):
                 "take_http3_request: slot " + String(slot) + " out of range"
             )
         ref h3 = self.http3_connections[slot]
-        return h3.take_request(stream_id)
+        var req = h3.take_request(stream_id)
+        if req.body_pipe:
+            self._streamed_bodies.append(
+                Http3Tunnel(slot, stream_id, self.connections[slot].serial)
+            )
+        return req^
 
     def _append_http3_egress(
         mut self, slot: Int, stream_id: Int, var frames: List[UInt8]
@@ -2090,6 +2100,38 @@ struct QuicListener(Movable):
             except:
                 pass
 
+    def _credit_bodies(mut self):
+        """Grant stream and connection credit for streamed request bodies
+        as their handlers read them (RFC 9000 sec 4.2), so an unread
+        body holds at most one stream window."""
+        if len(self._streamed_bodies) == 0:
+            return
+        var keep = List[Http3Tunnel]()
+        for i in range(len(self._streamed_bodies)):
+            var t = self._streamed_bodies[i]
+            if (
+                t.slot >= len(self.connections)
+                or self.connections[t.slot].serial != t.serial
+            ):
+                continue
+            var backlog = self.http3_connections[t.slot].body_backlog(
+                t.stream_id
+            )
+            if backlog < 0:
+                continue
+            var end = self.http3_connections[t.slot].delivered_offset(
+                t.stream_id
+            ) - UInt64(backlog)
+            ref qc = self.connections[t.slot]
+            var prev = qc.fc_tunnel_credited.get(t.stream_id, UInt64(0))
+            if end > prev:
+                qc.fc_consumed += end - prev
+                qc.fc_tunnel_credited[t.stream_id] = end
+                self._grant_stream_credit(t.slot, t.stream_id, end)
+                self._mark(t.slot, 1)
+            keep.append(t)
+        self._streamed_bodies = keep^
+
     def pump_http3_streams(mut self, cancel: Cancel) raises -> Int:
         """Advance every active HTTP/3 streaming response by one chunk.
 
@@ -2105,6 +2147,7 @@ struct QuicListener(Movable):
         MAX_STREAM_DATA / MAX_DATA and the congestion window allow, so a
         fast source cannot outrun a slow reader.
         """
+        self._credit_bodies()
         if self._open_sources == 0:
             return 0
         var advanced = 0
