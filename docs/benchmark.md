@@ -2010,13 +2010,25 @@ servers. The Rust servers still run 4 workers; nginx, Go and `flare` run one.
 
 | Server | Req/s | σ% | p50 (ms) | p99 (ms) | p99.9 (ms) | p99.99 (ms) |
 |---|---:|---:|---:|---:|---:|---:|
-| quiche | 153,494 | 2.95 | 0.63 ± 0.00 | 0.86 ± 0.08 | 1.03 ± 0.07 | 3.28 ± 1.07 |
-| **flare_h3** | **129,635** | **0.61** | **0.76 ± 0.00** | **1.03 ± 0.03** | **1.19 ± 0.08** | **1.40 ± 0.22** |
+| **flare_h3** | **189,901** | **0.31** | **0.52 ± 0.00** | **0.95 ± 0.02** | **1.15 ± 0.03** | **1.34 ± 0.13** |
+| quiche | 152,064 | 2.92 | 0.63 ± 0.01 | 0.88 ± 0.03 | 1.02 ± 0.05 | 3.33 ± 0.10 |
 
-flare is at `0.84x` quiche with a tighter p99.99, the same ratio as the EPYC
-run with `--log-file` on (`61.9k` against `73.2k`). The HTTP/3 server is a
-single reactor that spawns no threads. quinn read `428 req/s` with 98 % of
+Re-run for 0.13.0 (`pixi run -e bench bench-h3-flare`, then
+`bench-h3-quiche`, same box): flare is at `1.25x` quiche, up from `0.84x`
+(`129,635` against `153,494`), with a lower p50 and p99.99. The gain is
+the 0.13.0 transport work: rustls packet functions resolved once, no
+per-byte copies on either path, ACK ranges retired without copies, GSO
+egress, one drain per receive burst. quinn read `428 req/s` with 98 % of
 streams errored, the known harness artifact, and stays excluded.
+
+Multi-worker (`QuicServerConfig.num_workers`, `FLARE_BENCH_WORKERS`), one run,
+h2load with 16 client threads x 1 connection x 100 streams, 10 s:
+
+| Workers | Req/s |
+|---:|---:|
+| 1 | 282,782 |
+| 4 | 958,690 |
+| 8 | 1,942,413 |
 
 ### HTTP/2 (h2c, 1 client, 100 streams)
 
