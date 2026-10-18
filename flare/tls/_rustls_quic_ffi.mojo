@@ -56,6 +56,55 @@ def _encode_alpn_wire(protos: List[String]) raises -> List[UInt8]:
     return out^
 
 
+# ── Per-packet entry points, resolved once ─────────────────────────────────
+
+comptime _PacketEncryptFn = def(
+    Int, c_int, UInt64, Int, Int, Int, Int, Int, Int, Int
+) thin abi("C") -> c_int
+comptime _PacketDecryptFn = def(
+    Int, c_int, UInt64, Int, Int, Int, Int, Int
+) thin abi("C") -> c_int
+comptime _HeaderProtectFn = def(Int, c_int, Int, Int, Int, Int, Int) thin abi(
+    "C"
+) -> c_int
+
+
+def _sym_addr(lib: OwnedDLHandle, name: String) -> Int:
+    var opt = lib.get_symbol[NoneType](name)
+    if not opt:
+        return 0
+    return Int(opt.value())
+
+
+def _as_fn[FT: TrivialRegisterPassable](addr: Int) -> FT:
+    return Pointer(to=addr).unsafe_bitcast[FT]()[]
+
+
+@fieldwise_init
+struct RustlsQuicPacketFns(ImplicitlyCopyable, Movable):
+    """Addresses of the four per-packet FFI entry points (AEAD seal /
+    open, header protect / unprotect), looked up once per library
+    handle. ``dlsym`` by name on every packet was the top cost of the
+    1-RTT path. A zero address (symbol missing) raises at call time,
+    the same failure :func:`dl_sym` reported before."""
+
+    var packet_encrypt: Int
+    var packet_decrypt: Int
+    var header_encrypt: Int
+    var header_decrypt: Int
+
+    def __init__(out self, lib: OwnedDLHandle):
+        self.packet_encrypt = _sym_addr(lib, "flare_rustls_quic_packet_encrypt")
+        self.packet_decrypt = _sym_addr(lib, "flare_rustls_quic_packet_decrypt")
+        self.header_encrypt = _sym_addr(lib, "flare_rustls_quic_header_encrypt")
+        self.header_decrypt = _sym_addr(lib, "flare_rustls_quic_header_decrypt")
+
+
+def _need(addr: Int, name: StaticString) raises:
+    if addr == 0:
+        raise Error(String("flare: FFI symbol not found: ") + name)
+
+
 # ── Acceptor lifecycle ───────────────────────────────────────────────────────
 
 
@@ -442,7 +491,7 @@ def _do_is_early_data_accepted(
 
 
 def _do_packet_encrypt(
-    imm lib: OwnedDLHandle,
+    fns: RustlsQuicPacketFns,
     session: Int,
     level: Int,
     packet_number: UInt64,
@@ -460,11 +509,8 @@ def _do_packet_encrypt(
     Raises if the FFI returns a non-zero code: rustls error
     text is in :func:`_do_last_error`.
     """
-    var f = dl_sym[
-        def(
-            Int, c_int, UInt64, Int, Int, Int, Int, Int, Int, Int
-        ) thin abi("C") -> c_int
-    ](lib, "flare_rustls_quic_packet_encrypt")
+    _need(fns.packet_encrypt, "flare_rustls_quic_packet_encrypt")
+    var f = _as_fn[_PacketEncryptFn](fns.packet_encrypt)
     var tag = List[UInt8](capacity=16)
     for _ in range(16):
         tag.append(UInt8(0))
@@ -499,7 +545,7 @@ def _do_packet_encrypt(
 
 
 def _do_packet_decrypt(
-    imm lib: OwnedDLHandle,
+    fns: RustlsQuicPacketFns,
     session: Int,
     level: Int,
     packet_number: UInt64,
@@ -514,9 +560,8 @@ def _do_packet_decrypt(
     Raises if rustls rejects the tag (the typical "wrong keys at
     this level" symptom).
     """
-    var f = dl_sym[
-        def(Int, c_int, UInt64, Int, Int, Int, Int, Int) thin abi("C") -> c_int
-    ](lib, "flare_rustls_quic_packet_decrypt")
+    _need(fns.packet_decrypt, "flare_rustls_quic_packet_decrypt")
+    var f = _as_fn[_PacketDecryptFn](fns.packet_decrypt)
     var plaintext_len: Int = 0
     # Keep the pointer in a named variable across the FFI call:
     # a throwaway ``Int(Pointer(to=...))`` temporary lets the
@@ -544,7 +589,7 @@ def _do_packet_decrypt(
 
 
 def _do_header_encrypt(
-    imm lib: OwnedDLHandle,
+    fns: RustlsQuicPacketFns,
     session: Int,
     level: Int,
     imm sample: List[UInt8],
@@ -565,9 +610,8 @@ def _do_header_encrypt(
     Int) so the caller can keep the byte cells on the stack and
     let rustls write through.
     """
-    var f = dl_sym[
-        def(Int, c_int, Int, Int, Int, Int, Int) thin abi("C") -> c_int
-    ](lib, "flare_rustls_quic_header_encrypt")
+    _need(fns.header_encrypt, "flare_rustls_quic_header_encrypt")
+    var f = _as_fn[_HeaderProtectFn](fns.header_encrypt)
     var rc = Int(
         f(
             session,
@@ -586,7 +630,7 @@ def _do_header_encrypt(
 
 
 def _do_header_decrypt(
-    imm lib: OwnedDLHandle,
+    fns: RustlsQuicPacketFns,
     session: Int,
     level: Int,
     imm sample: List[UInt8],
@@ -599,9 +643,8 @@ def _do_header_decrypt(
     bytes using rustls's ``Keys.remote.header.decrypt_in_place``.
     Same sample contract as :func:`_do_header_encrypt`.
     """
-    var f = dl_sym[
-        def(Int, c_int, Int, Int, Int, Int, Int) thin abi("C") -> c_int
-    ](lib, "flare_rustls_quic_header_decrypt")
+    _need(fns.header_decrypt, "flare_rustls_quic_header_decrypt")
+    var f = _as_fn[_HeaderProtectFn](fns.header_decrypt)
     var rc = Int(
         f(
             session,

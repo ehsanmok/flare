@@ -1178,7 +1178,7 @@ struct QuicListener(Movable):
             pn_local.append(datagram[pn_offset + i])
         var first_addr = Int(Pointer(to=first_local))
         _do_header_decrypt(
-            self.tls_acceptor._lib,
+            self.tls_acceptor._fns,
             handle,
             level,
             sample,
@@ -1218,7 +1218,7 @@ struct QuicListener(Movable):
         # the leading ``len(payload) - 16`` bytes; we slice that
         # directly rather than depend on the out-parameter readback.
         _ = _do_packet_decrypt(
-            self.tls_acceptor._lib,
+            self.tls_acceptor._fns,
             handle,
             level,
             packet_number,
@@ -2834,7 +2834,7 @@ struct QuicListener(Movable):
         # ImplicitlyCopyable and cannot be aliased into a local).
         var encrypted_payload = payload.copy()
         var tag = _do_packet_encrypt(
-            self.tls_acceptor._lib,
+            self.tls_acceptor._fns,
             handle,
             QuicEncryptionLevel.HANDSHAKE,
             pn,
@@ -2867,7 +2867,7 @@ struct QuicListener(Movable):
             pn_local.append(protected[pn_offset + i])
         var first_addr = Int(Pointer(to=first_local))
         _do_header_encrypt(
-            self.tls_acceptor._lib,
+            self.tls_acceptor._fns,
             handle,
             QuicEncryptionLevel.HANDSHAKE,
             sample,
@@ -2964,7 +2964,7 @@ struct QuicListener(Movable):
         # `self.tls_acceptor._lib` directly at each call.
         var encrypted_payload = plaintext^
         var tag = _do_packet_encrypt(
-            self.tls_acceptor._lib,
+            self.tls_acceptor._fns,
             handle,
             QuicEncryptionLevel.APPLICATION,
             pn,
@@ -2999,7 +2999,7 @@ struct QuicListener(Movable):
             pn_local.append(protected[pn_offset + i])
         var first_addr = Int(Pointer(to=first_local))
         _do_header_encrypt(
-            self.tls_acceptor._lib,
+            self.tls_acceptor._fns,
             handle,
             QuicEncryptionLevel.APPLICATION,
             sample,
