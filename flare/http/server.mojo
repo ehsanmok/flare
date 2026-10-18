@@ -626,7 +626,7 @@ struct HttpServer(Movable):
                         listener.begin_drain(self._h3_drain_ms)
                     if listener.drain_step():
                         break
-                _ = listener.tick(timeout_ms=100)
+                _ = listener.tick(timeout_ms=listener.poll_timeout_ms())
                 _ = self._pump_listener_h3[H](listener, handler)
                 # Advance any in-flight streaming responses by one chunk
                 # each so their DATA frames ride this loop turn's drain.

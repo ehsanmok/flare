@@ -489,6 +489,9 @@ struct QuicListener(Movable):
     var _gso_seg: Int
     var _gso_count: Int
     var _gso_peer: SocketAddr
+    var _rcv_timeout_ms: Int
+    """``SO_RCVTIMEO`` currently set on the socket (-1 before the first
+    :meth:`tick`)."""
     var _rx_batch_ok: Bool
     """Latched capability flag: ``True`` while the batched
     ``recvmmsg`` drain is usable. Flipped to ``False`` permanently on
@@ -558,6 +561,7 @@ struct QuicListener(Movable):
         self._gso_seg = 0
         self._gso_count = 0
         self._gso_peer = addr
+        self._rcv_timeout_ms = -1
         self._rx_batch_ok = udp_batch_supported() and (
             getenv("FLARE_QUIC_NO_BATCH", "0") != "1"
         )
@@ -2197,7 +2201,10 @@ struct QuicListener(Movable):
         Returns ``True`` if at least one datagram was dispatched,
         ``False`` if the initial ``recv_from`` timed out.
         """
-        self._socket.set_recv_timeout(timeout_ms)
+        if timeout_ms != self._rcv_timeout_ms:
+            # One setsockopt per change, not one per loop turn.
+            self._socket.set_recv_timeout(timeout_ms)
+            self._rcv_timeout_ms = timeout_ms
         var buf = List[UInt8]()
         buf.resize(Int(self.config.max_udp_payload_size), 0)
         var sender: SocketAddr
@@ -2263,6 +2270,17 @@ struct QuicListener(Movable):
             if nslot >= 0:
                 _ = self._drain_and_send(nslot)
         return True
+
+    def poll_timeout_ms(self, max_ms: Int = 100) -> Int:
+        """How long :meth:`tick` may block: until the next timer (PTO,
+        loss time, idle, closing) is due, at most ``max_ms`` and at least
+        1 ms (``SO_RCVTIMEO`` 0 would block forever). A fixed 100 ms wait
+        delayed every timer on a quiet connection by up to that long."""
+        var now = _monotonic_ms()
+        var next = self.timer_wheel.next_fire_ms()
+        if next <= now:
+            return 1
+        return max(1, min(max_ms, Int(next - now)))
 
     def send_to(self, datagram: Span[UInt8, _], addr: SocketAddr) raises -> Int:
         """Emit a single fully-protected QUIC datagram on the

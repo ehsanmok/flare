@@ -272,6 +272,19 @@ def test_live_connections_are_capped() raises:
     assert_equal(listener.connection_count(), 2)
 
 
+def test_poll_timeout_follows_the_next_timer() raises:
+    """The serve loop blocks no longer than until the next timer is due
+    (1..100 ms); a fixed 100 ms wait delayed a due PTO by up to 100 ms."""
+    var listener = _bind_loopback()
+    assert_equal(listener.poll_timeout_ms(), 100)
+    _ = listener.timer_wheel.schedule(after_ms=20, token=UInt64(1))
+    var t = listener.poll_timeout_ms()
+    assert_true(t >= 1 and t <= 20, "waits past the next timer")
+    _ = listener.timer_wheel.schedule(after_ms=0, token=UInt64(2))
+    assert_equal(listener.poll_timeout_ms(), 1)
+    listener.close()
+
+
 def main() raises:
     test_token_round_trip()
     test_encode_rejects_invalid_kind()
@@ -285,4 +298,5 @@ def main() raises:
     test_idle_timer_is_relative_to_the_real_clock()
     test_dead_slots_are_reclaimed_and_reused()
     test_live_connections_are_capped()
-    print("test_quic_timers: 12 passed")
+    test_poll_timeout_follows_the_next_timer()
+    print("test_quic_timers: 13 passed")
