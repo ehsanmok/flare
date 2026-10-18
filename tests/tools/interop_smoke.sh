@@ -34,7 +34,9 @@ cd "$ROOT"
 
 PORT="${INTEROP_PORT:-18690}"
 TLS_PORT="${INTEROP_TLS_PORT:-18691}"
+H3_PORT="${INTEROP_H3_PORT:-18692}"
 BIN="target/interop/flare_mc"
+H3_BIN="target/interop/flare_h3"
 STREAM_BIN="target/interop/flare_stream_client"
 CERT_DIR="build/tls-bench-certs"
 
@@ -92,9 +94,11 @@ fi
 
 SRV_PID=""
 TLS_PID=""
+H3_PID=""
 cleanup() {
     [[ -n "$SRV_PID" ]] && kill -9 "$SRV_PID" 2>/dev/null
     [[ -n "$TLS_PID" ]] && kill -9 "$TLS_PID" 2>/dev/null
+    [[ -n "$H3_PID" ]] && kill -9 "$H3_PID" 2>/dev/null
     return 0
 }
 trap cleanup EXIT INT TERM
@@ -181,6 +185,47 @@ if command -v h2load >/dev/null 2>&1; then
 else
     say "h2load over TLS"
     echo "skipped — h2load not installed"
+fi
+
+# ── HTTP/3 (QUIC) ───────────────────────────────────────────────────
+# An independent QUIC stack against the flare h3 server: curl with
+# --http3 when it was built with it, and h2load built against ngtcp2.
+echo "── HTTP/3 (QUIC + rustls) ──────────────────────────────────"
+if ! pixi run mojo build -I . benchmark/baselines/flare_h3/main.mojo \
+     -o "$H3_BIN" > target/interop/build_h3.log 2>&1; then
+    echo "H3 BUILD FAILED"; cat target/interop/build_h3.log; exit 1
+fi
+FLARE_BENCH_PORT="$H3_PORT" "$H3_BIN" > target/interop/h3_server.log 2>&1 &
+H3_PID=$!
+sleep 1
+if curl --version 2>/dev/null | grep -q HTTP3; then
+    say "curl --http3-only GET"
+    body=$(curl -sk --http3-only --max-time 10 \
+        "https://127.0.0.1:$H3_PORT/plaintext" 2>/dev/null)
+    if [[ "$body" == "Hello, World!" ]]; then okay "200"; else bad "got '$body'"; fi
+else
+    say "curl --http3-only GET"
+    echo "skipped — curl built without HTTP/3"
+fi
+ALPN_FLAG=""
+if h2load --help 2>&1 | grep -q -- '--alpn-list'; then
+    ALPN_FLAG="--alpn-list=h3"
+elif h2load --help 2>&1 | grep -q -- '--npn-list'; then
+    ALPN_FLAG="--npn-list=h3"
+fi
+if [[ -n "$ALPN_FLAG" ]] && h2load --help 2>&1 | grep -q -- 'h3'; then
+    say "h2load (ngtcp2) h3, 2 conns x 10 streams"
+    if h2load "$ALPN_FLAG" -n200 -c2 -m10 \
+         "https://127.0.0.1:$H3_PORT/plaintext" \
+         > target/interop/h2load_h3.log 2>&1 \
+       && grep -q ' 200 succeeded' target/interop/h2load_h3.log; then
+        okay "200 succeeded"
+    else
+        bad "see target/interop/h2load_h3.log"
+    fi
+else
+    say "h2load h3"
+    echo "skipped — h2load built without HTTP/3"
 fi
 
 echo
