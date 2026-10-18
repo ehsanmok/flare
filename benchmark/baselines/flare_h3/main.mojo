@@ -57,8 +57,15 @@ struct _PlaintextHandler(Copyable, Handler):
     comparison is honest (no asymmetric response sizes).
     """
 
+    var body: List[UInt8]
+    """Response body; empty means the 13-byte ``Hello, World!``."""
+
     def serve(self, req: Request) raises -> Response:
-        return ok(String("Hello, World!"))
+        if len(self.body) == 0:
+            return ok(String("Hello, World!"))
+        var resp = ok(String(""))
+        resp.body = self.body.copy()
+        return resp^
 
 
 def main() raises:
@@ -99,6 +106,11 @@ def main() raises:
     # on the UDP port only.
     var tcp_addr = SocketAddr(IpAddr.localhost(), UInt16(0))
     var srv = HttpServer.bind_with_http3(tcp_addr, udp_cfg^)
-    var handler = _PlaintextHandler()
+    # FLARE_BENCH_BODY_BYTES=N serves an N-byte body instead, for the
+    # bulk-transfer (per-packet path) measurement; read once at startup.
+    var body_bytes = Int(getenv("FLARE_BENCH_BODY_BYTES", "0"))
+    var handler = _PlaintextHandler(
+        List[UInt8](length=body_bytes, fill=UInt8(0x61))
+    )
     print("flare-h3 listening on 127.0.0.1:", port)
     srv.serve_http3[_PlaintextHandler](handler^)
