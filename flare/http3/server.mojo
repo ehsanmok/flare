@@ -93,11 +93,10 @@ from flare.http3.request_reader import (
 )
 from flare.http3.response_writer import (
     encode_response_data,
-    encode_response_headers,
+    encode_response_head,
 )
 from flare.http.wire import Request, Response
 from flare.qpack import QpackHeader
-from flare.http2.hpack import HpackHeader
 from flare.http2.state import validate_request_fields
 from flare.qpack.dynamic import (
     QpackDynamicTable,
@@ -980,12 +979,7 @@ struct Http3Connection(Copyable, Defaultable):
         # validate_request_fields. A request with no pseudo-headers used
         # to be served as GET /. Malformed raises; the dispatcher
         # answers 400.
-        var as_hpack = List[HpackHeader]()
-        for i in range(len(state.headers)):
-            as_hpack.append(
-                HpackHeader(state.headers[i].name, state.headers[i].value)
-            )
-        if not validate_request_fields(as_hpack, False, False):
+        if not validate_request_fields(state.headers, False, False):
             state.request_taken = True
             raise Error(
                 "Http3Connection.take_request: malformed request on stream "
@@ -994,20 +988,21 @@ struct Http3Connection(Copyable, Defaultable):
         var method = String("")
         var path = String("")
         for i in range(len(state.headers)):
-            var name = state.headers[i].name
-            var value = state.headers[i].value
+            ref name = state.headers[i].name
             if name == ":method":
-                method = String(value)
+                method = state.headers[i].value
             elif name == ":path":
-                path = String(value)
-        var req = Request(method=method^, url=path^, body=state.body.copy())
+                path = state.headers[i].value
+        var body = List[UInt8]()
+        swap(body, state.body)
+        var req = Request(method=method^, url=path^, body=body^)
         # Same rules as h2's take_request: repeated fields are appended,
         # cookie crumbs are joined (RFC 9114 sec 4.2.1), and :authority
         # becomes Host -- it used to be dropped, leaving Host-based
         # routing blind on h3.
         var cookie = String("")
         for i in range(len(state.headers)):
-            var name = state.headers[i].name
+            ref name = state.headers[i].name
             if name == ":authority":
                 req.headers.set("Host", String(state.headers[i].value))
                 continue
@@ -1049,25 +1044,7 @@ struct Http3Connection(Copyable, Defaultable):
                 " stream "
                 + String(stream_id)
             )
-        var headers = List[QpackHeader]()
-        for i in range(response.headers.len()):
-            var name = response.headers._keys[i]
-            var value = response.headers._values[i]
-            # RFC 9114 sec 4.2: connection-specific fields are malformed
-            # in HTTP/3, and a client must reject a response carrying
-            # one. They were copied through from handlers written for
-            # h1 (Connection: close, Transfer-Encoding: chunked).
-            var lower = String(name).lower()
-            if (
-                lower == "connection"
-                or lower == "keep-alive"
-                or lower == "proxy-connection"
-                or lower == "transfer-encoding"
-                or lower == "upgrade"
-            ):
-                continue
-            headers.append(QpackHeader(String(name), String(value)))
-        encode_response_headers(response.status, headers, state.outbox)
+        encode_response_head(response.status, response.headers, state.outbox)
         if len(response.body) != 0:
             encode_response_data(Span[UInt8, _](response.body), state.outbox)
         state.response_emitted = True

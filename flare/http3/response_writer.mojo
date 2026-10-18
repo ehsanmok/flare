@@ -42,8 +42,9 @@ References:
 from std.collections import List
 from std.collections.span import Span
 
-from flare.http.proto.ascii import ascii_lower
-from flare.qpack import QpackHeader, encode_field_section
+from flare.http.proto.ascii import ascii_eq_ignore_case, ascii_lower
+from flare.http.wire import HeaderMap
+from flare.qpack import QpackHeader, encode_field_line, encode_field_section
 
 from .frame import H3_FRAME_TYPE_DATA, H3_FRAME_TYPE_HEADERS, encode_http3_frame
 
@@ -88,6 +89,56 @@ def encode_response_headers(
     encode_http3_frame(
         H3_FRAME_TYPE_HEADERS, Span[UInt8, _](qpack_payload), out
     )
+
+
+def _is_connection_specific(name: String) -> Bool:
+    """RFC 9114 sec 4.2: fields that are malformed in HTTP/3."""
+    return (
+        ascii_eq_ignore_case(name, "connection")
+        or ascii_eq_ignore_case(name, "keep-alive")
+        or ascii_eq_ignore_case(name, "proxy-connection")
+        or ascii_eq_ignore_case(name, "transfer-encoding")
+        or ascii_eq_ignore_case(name, "upgrade")
+    )
+
+
+def _has_upper(s: String) -> Bool:
+    var p = s.unsafe_ptr()
+    for i in range(s.byte_length()):
+        if p[unsafe_offset=i] >= 65 and p[unsafe_offset=i] <= 90:
+            return True
+    return False
+
+
+def encode_response_head(
+    status: Int, headers: HeaderMap, mut out: List[UInt8]
+) raises:
+    """:func:`encode_response_headers` straight from a handler's
+    :class:`HeaderMap`: the field lines go into one buffer with no
+    per-header copy (a name is lowercased only when it has upper-case
+    bytes), and connection-specific fields, which handlers written for
+    HTTP/1.1 set, are dropped (RFC 9114 sec 4.2)."""
+    if status < 100 or status > 599:
+        raise Error("h3 writer: invalid HTTP status " + String(status))
+    var section = List[UInt8](capacity=64)
+    section.append(UInt8(0x00))
+    section.append(UInt8(0x00))
+    encode_field_line(":status", String(status), section)
+    for i in range(headers.len()):
+        ref name = headers._keys[i]
+        if name.byte_length() > 0 and name.as_bytes()[0] == UInt8(ord(":")):
+            raise Error(
+                "h3 writer: pseudo-header '"
+                + name
+                + "' not allowed in application headers"
+            )
+        if _is_connection_specific(name):
+            continue
+        if _has_upper(name):
+            encode_field_line(ascii_lower(name), headers._values[i], section)
+        else:
+            encode_field_line(name, headers._values[i], section)
+    encode_http3_frame(H3_FRAME_TYPE_HEADERS, Span[UInt8, _](section), out)
 
 
 def encode_response_data(

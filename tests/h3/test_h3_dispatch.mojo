@@ -322,9 +322,11 @@ def test_response_drops_connection_specific_fields() raises:
     var out = c.take_response_frames(0)
     var f = decode_http3_frame(Span[UInt8, _](out))
     var fields = decode_field_section(Span[UInt8, _](f.payload))
+    assert_equal(fields[0].name, ":status")
+    assert_equal(fields[0].value, "200")
     var names = List[String]()
     for h in fields:
-        names.append(String(h.name).lower())
+        names.append(String(h.name))  # on the wire, already lowercase
     assert_false("connection" in names)
     assert_false("transfer-encoding" in names)
     assert_true("x-keep" in names)
