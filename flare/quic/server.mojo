@@ -3347,6 +3347,11 @@ struct QuicListener(Movable):
                 _monotonic_ms(),
                 size=UInt64(len(protected)),
             )
+            # An ACK that retired everything left no PTO armed; without
+            # one, a flight lost whole would hold the congestion window
+            # shut for good (RFC 9002 sec 6.2.1: arm on every send).
+            if self.connections[slot].pto_timer_id == UInt64(0):
+                self._rearm_pto_timer(slot)
         return protected^
 
     def _build_1rtt_handshake_crypto(
@@ -3588,6 +3593,20 @@ struct QuicListener(Movable):
             self._cancel_pto_timer(slot)
             return
         var peer = self.peer_addrs[slot]
+        # The loss-time timer (RFC 9002 sec 6.1.2) shares this one: a
+        # packet past the time threshold is lost, not a probe's business.
+        var lost = self.loss[slot].detect_lost(_monotonic_ms())
+        if len(lost) > 0:
+            for i in range(len(lost)):
+                if len(lost[i]) == 0:
+                    continue
+                var dg = self._build_1rtt_response(
+                    slot, lost[i].copy(), ack_eliciting=True
+                )
+                if len(dg) > 0:
+                    _ = self.send_to(Span[UInt8, _](dg), peer)
+            self._rearm_pto_timer(slot)
+            return
         # A handshake still in flight probes its earliest space first
         # (RFC 9002 sec 6.2.1): re-send that space's oldest CRYPTO.
         if slot < len(self.loss_hs):
@@ -3754,6 +3773,9 @@ struct QuicListener(Movable):
             return
         self._cancel_pto_timer(slot)
         var deadline = self.loss[slot].pto_deadline()
+        var lt = self.loss[slot].loss_deadline()
+        if lt != 0 and (deadline == 0 or lt < deadline):
+            deadline = lt
         if slot < len(self.loss_hs):
             var di = self.loss_init[slot].pto_deadline()
             var dh = self.loss_hs[slot].pto_deadline()

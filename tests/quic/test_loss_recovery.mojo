@@ -199,6 +199,22 @@ def test_ack_of_an_unsent_packet_declares_nothing_lost() raises:
     assert_equal(lr.outstanding(), 2)
 
 
+def test_loss_deadline_is_the_time_threshold() raises:
+    """RFC 9002 sec 6.1.2: a packet below the largest acked that the
+    packet threshold has not caught is lost at sent + 9/8 RTT."""
+    var lr = LossRecovery()
+    lr.on_sent(UInt64(0), _frames(0xA0), UInt64(0))
+    lr.on_sent(UInt64(1), _frames(0xA1), UInt64(0))
+    assert_equal(lr.loss_deadline(), UInt64(0), "nothing acked yet")
+    var acked = List[UInt64]()
+    acked.append(UInt64(1))
+    _ = lr.on_ack(acked, UInt64(16))  # RTT sample 16 ms
+    assert_equal(lr.loss_deadline(), UInt64(18))  # 0 + 16 * 9 / 8
+    assert_equal(len(lr.detect_lost(UInt64(17))), 0)
+    assert_equal(len(lr.detect_lost(UInt64(18))), 1)
+    assert_equal(lr.loss_deadline(), UInt64(0))
+
+
 def main() raises:
     test_ack_retires_and_resets_backoff()
     test_ack_gap_leaves_lost_packet_outstanding()
@@ -210,4 +226,5 @@ def main() raises:
     test_ack_based_loss_detection_packet_threshold()
     test_cc_reduces_window_on_loss()
     test_ack_of_an_unsent_packet_declares_nothing_lost()
-    print("test_loss_recovery: 10 passed")
+    test_loss_deadline_is_the_time_threshold()
+    print("test_loss_recovery: 11 passed")

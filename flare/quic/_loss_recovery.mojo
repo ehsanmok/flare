@@ -273,6 +273,30 @@ struct LossRecovery(Movable):
         self.sent = keep^
         return lost^
 
+    def loss_deadline(self) -> UInt64:
+        """When the earliest in-flight packet sent before the largest
+        acknowledged one passes the time threshold and becomes lost (RFC
+        9002 sec 6.1.2); 0 when none can. Without this timer such a
+        packet waited for the PTO, which a tail loss on a small window
+        turns into one PTO per lost packet."""
+        if not self.has_largest_acked:
+            return UInt64(0)
+        var rtt = max(self.smoothed_rtt, self.latest_rtt)
+        if rtt == 0:
+            rtt = self.base_pto_ms
+        var thresh = max(
+            rtt * _K_TIME_THRESHOLD_NUM // _K_TIME_THRESHOLD_DEN,
+            _K_GRANULARITY_MS,
+        )
+        var earliest = UInt64(0)
+        for i in range(len(self.sent)):
+            if self.sent[i].pn >= self.largest_acked:
+                continue
+            var t = self.sent[i].time_ms + thresh
+            if earliest == 0 or t < earliest:
+                earliest = t
+        return earliest
+
     def _oldest_index(self) -> Int:
         """Index of the in-flight packet with the smallest send time
         (the one a PTO would probe first). -1 if none."""
