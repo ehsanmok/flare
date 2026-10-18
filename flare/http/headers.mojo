@@ -85,6 +85,28 @@ def _check_injection(key: String, value: String) raises:
             raise HeaderInjectionError(key, value)
 
 
+def trailer_field_allowed(name: String) -> Bool:
+    """Whether a trailer field may be kept: not one that frames, routes,
+    authenticates or describes the content (RFC 9110 sec 6.5.1)."""
+    var n = name.lower()
+    return not (
+        n == "content-length"
+        or n == "transfer-encoding"
+        or n == "trailer"
+        or n == "te"
+        or n == "host"
+        or n == "authorization"
+        or n == "proxy-authorization"
+        or n == "cookie"
+        or n == "set-cookie"
+        or n == "content-encoding"
+        or n == "content-type"
+        or n == "content-range"
+        or n == "expect"
+        or n == "range"
+    )
+
+
 struct HeaderMap(Movable, Writable):
     """An ordered, case-insensitive HTTP header collection.
 

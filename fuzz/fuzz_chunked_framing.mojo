@@ -23,10 +23,12 @@ Run:
 
 from mozz import fuzz, FuzzConfig
 
+from flare.http.headers import HeaderMap
 from flare.http.proto.chunked import (
     CHUNKED_INCOMPLETE,
     CHUNKED_MALFORMED,
     decode_chunked_body,
+    decode_chunked_trailers,
     header_says_chunked,
     request_te_framing,
     scan_chunked_end,
@@ -61,6 +63,14 @@ def target(data: List[UInt8]) raises:
             "decoded body exceeded max_body after a successful scan: "
             + String(len(out))
         )
+
+    # Trailer parsing never panics on an accepted buffer; a malformed
+    # field line raises (a 400 upstream).
+    var trailers = HeaderMap()
+    try:
+        decode_chunked_trailers(Span[UInt8, _](data)[:end], 0, trailers)
+    except:
+        pass
 
     # The header scanner shares the same byte-walking shape; run it on
     # the same input so malformed header blocks are covered too.

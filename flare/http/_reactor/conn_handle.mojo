@@ -99,6 +99,7 @@ from flare.http.proto.chunked import (
     TE_CHUNKED,
     TE_UNSUPPORTED,
     decode_chunked_body,
+    decode_chunked_trailers,
     request_te_framing,
     scan_chunked_resume,
 )
@@ -905,6 +906,11 @@ struct ConnHandle(Movable):
                     self.headers_end,
                     req.body,
                 )
+                decode_chunked_trailers(
+                    Span[UInt8, _](self.read_buf)[: self.body_total],
+                    self.headers_end,
+                    req.trailers,
+                )
         except:
             self._queue_error(400, "Bad Request")
             return self._transition_to_writing()
@@ -1085,6 +1091,11 @@ struct ConnHandle(Movable):
                     self.headers_end,
                     req.body,
                 )
+                decode_chunked_trailers(
+                    Span[UInt8, _](self.read_buf)[: self.body_total],
+                    self.headers_end,
+                    req.trailers,
+                )
         except:
             self._queue_error(400, "Bad Request")
             return self._transition_to_writing()
@@ -1158,6 +1169,11 @@ struct ConnHandle(Movable):
                     Span[UInt8, _](self.read_buf)[: self.body_total],
                     self.headers_end,
                     req.body,
+                )
+                decode_chunked_trailers(
+                    Span[UInt8, _](self.read_buf)[: self.body_total],
+                    self.headers_end,
+                    req.trailers,
                 )
         except:
             self._queue_error(400, "Bad Request")

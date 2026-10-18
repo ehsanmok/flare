@@ -76,6 +76,9 @@ struct Request(Movable):
     var url: String
     var headers: HeaderMap
     var body: List[UInt8]
+    var trailers: HeaderMap
+    """Trailer fields sent after the body (RFC 9110 sec 6.5); fields that
+    may not appear in a trailer are dropped."""
     var version: String
     var peer: SocketAddr
     """Kernel-reported peer ``SocketAddr``. See struct docstring."""
@@ -131,6 +134,7 @@ struct Request(Movable):
         self.url = url
         self.headers = HeaderMap()
         self.body = body.copy()
+        self.trailers = HeaderMap()
         self.version = version
         self.peer = peer
         self.expose_errors = expose_errors

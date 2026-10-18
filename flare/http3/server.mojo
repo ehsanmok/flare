@@ -97,7 +97,7 @@ from flare.http3.response_writer import (
     encode_response_head,
     encode_response_trailers,
 )
-from flare.http.wire import Request, Response
+from flare.http.wire import Request, Response, trailer_field_allowed
 from flare.qpack import QpackHeader
 from flare.http2.state import validate_request_fields
 from flare.qpack.dynamic import (
@@ -1055,7 +1055,7 @@ struct Http3Connection(Copyable, Defaultable):
         # answers 400.
         if not validate_request_fields(
             state.headers, False, self.config.enable_connect_protocol
-        ):
+        ) or not validate_request_fields(state.trailers, True, False):
             state.request_taken = True
             raise Error(
                 "Http3Connection.take_request: malformed request on stream "
@@ -1094,6 +1094,11 @@ struct Http3Connection(Copyable, Defaultable):
             req.headers.append(state.headers[i].name, state.headers[i].value)
         if cookie.byte_length() > 0:
             req.headers.append("cookie", cookie)
+        for i in range(len(state.trailers)):
+            if trailer_field_allowed(state.trailers[i].name):
+                req.trailers.append(
+                    state.trailers[i].name, state.trailers[i].value
+                )
         state.request_taken = True
         return req^
 

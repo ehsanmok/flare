@@ -24,6 +24,8 @@ front end would end the line (and so the body) somewhere else.
 
 from std.collections import List
 
+from flare.http.headers import HeaderMap, trailer_field_allowed
+
 
 comptime CHUNKED_INCOMPLETE: Int = -1
 """``scan_chunked_end``: more bytes needed."""
@@ -354,6 +356,57 @@ def scan_chunked_resume(
         pos = next_pos
         cursor = pos
         decoded_total += size
+
+
+def _line_end(buf: Span[UInt8, _], pos: Int) raises -> Int:
+    for i in range(pos, len(buf) - 1):
+        if buf[i] == UInt8(13) and buf[i + 1] == UInt8(10):
+            return i
+    raise Error("chunked: truncated line")
+
+
+def decode_chunked_trailers(
+    buf: Span[UInt8, _], start: Int, mut trailers: HeaderMap
+) raises:
+    """Append the trailer fields of the chunked body at ``start`` that may
+    be kept (:func:`trailer_field_allowed`) to ``trailers``. A trailer
+    line that is not ``name: value`` with a token name raises. Assumes
+    :func:`scan_chunked_end` accepted the buffer."""
+    var pos = start
+    while True:
+        var eol = _line_end(buf, pos)
+        var size = 0
+        for j in range(pos, eol):
+            if buf[j] == UInt8(59):
+                break
+            size = size * 16 + _hex_val(buf[j])
+        pos = eol + 2
+        if size == 0:
+            break
+        pos += size + 2
+    while True:
+        var eol = _line_end(buf, pos)
+        if eol == pos:
+            return
+        var colon = -1
+        for j in range(pos, eol):
+            if buf[j] == UInt8(58):
+                colon = j
+                break
+            if buf[j] <= 32 or buf[j] >= 127:
+                break
+        if colon <= pos:
+            raise Error("chunked: malformed trailer field")
+        var vs = colon + 1
+        var ve = eol
+        while vs < ve and (buf[vs] == 32 or buf[vs] == 9):
+            vs += 1
+        while ve > vs and (buf[ve - 1] == 32 or buf[ve - 1] == 9):
+            ve -= 1
+        var name = String(unsafe_from_utf8=buf[pos:colon])
+        if trailer_field_allowed(name):
+            trailers.append(name, String(unsafe_from_utf8=buf[vs:ve]))
+        pos = eol + 2
 
 
 def decode_chunked_body(

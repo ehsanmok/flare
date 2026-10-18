@@ -31,7 +31,13 @@ callback.
 
 from std.collections import Dict, Optional
 
-from flare.http.wire import HeaderMap, Method, Request, Response
+from flare.http.wire import (
+    HeaderMap,
+    Method,
+    Request,
+    Response,
+    trailer_field_allowed,
+)
 
 from .frame import (
     Frame,
@@ -352,6 +358,7 @@ struct Http2Connection(Defaultable, Movable):
             s.headers.append(HpackHeader(lk, req.headers._values[j]))
         for j in range(len(req.body)):
             s.data.append(req.body[j])
+        s.initial_header_count = len(s.headers)
         s.headers_complete = True
         s.data_complete = True
         out.conn.streams[1] = s^
@@ -557,7 +564,10 @@ struct Http2Connection(Defaultable, Movable):
         # send cookies as one field per crumb (RFC 9113 sec 8.2.3), so a
         # handler behind h2 saw only the last cookie.
         var cookie = String("")
-        for i in range(len(s.headers)):
+        for i in range(s.initial_header_count, len(s.headers)):
+            if trailer_field_allowed(s.headers[i].name):
+                req.trailers.append(s.headers[i].name, s.headers[i].value)
+        for i in range(s.initial_header_count):
             var n = s.headers[i].name
             var v = s.headers[i].value
             if n == ":method":
