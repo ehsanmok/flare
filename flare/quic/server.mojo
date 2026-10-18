@@ -68,6 +68,7 @@ from .frame import (
     NewTokenFrame,
     PathResponseFrame,
     ResetStreamFrame,
+    StopSendingFrame,
     StreamDataBlockedFrame,
     StreamFrame,
     DatagramFrame,
@@ -86,6 +87,7 @@ from .frame import (
     encode_path_response,
     encode_ping,
     encode_reset_stream,
+    encode_stop_sending,
     encode_stream_data_blocked,
 )
 from .packet import (
@@ -1937,10 +1939,13 @@ struct QuicListener(Movable):
             self._open_sources += 1
             return
         ref h3 = self.http3_connections[slot]
+        var early = not h3.stream_fin_received(stream_id)
         h3.emit_response(stream_id, response^)
         var frames = h3.take_response_frames(stream_id)
         self._append_http3_egress(slot, stream_id, frames^)
         self.connections[slot].h3_tx[stream_id].done = True
+        if early:
+            self.connections[slot].stop_tx.append(stream_id)
 
     def take_http3_response_egress(
         mut self, slot: Int, stream_id: Int
@@ -3079,6 +3084,19 @@ struct QuicListener(Movable):
                 fin=False,
             )
             self.connections[slot].ctrl_off += UInt64(len(frames))
+
+        # Answered before the request ended: ask the client to stop.
+        for i in range(len(self.connections[slot].stop_tx)):
+            if budget - len(plaintext) < 24:
+                if self._flush_1rtt(slot, plaintext, peer, budget):
+                    emitted = True
+            encode_stop_sending(
+                StopSendingFrame(
+                    UInt64(self.connections[slot].stop_tx[i]), _H3_NO_ERROR
+                ),
+                plaintext,
+            )
+        self.connections[slot].stop_tx.clear()
 
         # Replacements for CIDs the peer retired (RFC 9000 sec 5.1.2).
         while (

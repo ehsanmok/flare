@@ -233,6 +233,11 @@ struct Http3Config(Copyable, Defaultable):
     advertising it obliges the server to accept such requests (RFC 8441
     sec 3), and it used to be advertised while every one was refused."""
 
+    var max_body_size: UInt64
+    """Largest request body buffered for a handler. A request with more
+    is answered 413 and the client asked to stop sending (RFC 9114 sec
+    4.1.2). Default 10 MiB, as on h2."""
+
     var h3_datagram: Bool
     """RFC 9297 -- advertise SETTINGS_H3_DATAGRAM and carry HTTP
     Datagrams on extended CONNECT tunnels. Needs QUIC DATAGRAM support
@@ -250,6 +255,7 @@ struct Http3Config(Copyable, Defaultable):
         self.qpack_blocked_streams = UInt64(0)
         self.enable_connect_protocol = False
         self.h3_datagram = False
+        self.max_body_size = UInt64(10 * 1024 * 1024)
         self.goaway_threshold_streams = UInt64((1 << 63) - 1)
 
 
@@ -327,6 +333,10 @@ struct _Http3StreamState(Copyable, Defaultable):
     Guards against the reactor double-dispatching the same
     request through a Handler."""
 
+    var too_large: Bool
+    """The body went over ``Http3Config.max_body_size``: the request is
+    answered 413 instead of being served."""
+
     var tunnel: Bool
     """The HEADERS carry ``:protocol`` and extended CONNECT is enabled
     (RFC 9220): the request is ready without a FIN, and the body that
@@ -346,6 +356,7 @@ struct _Http3StreamState(Copyable, Defaultable):
         self.outbox = List[UInt8]()
         self.response_emitted = False
         self.request_taken = False
+        self.too_large = False
         self.tunnel = False
 
     @staticmethod
@@ -753,6 +764,7 @@ struct Http3Connection(Copyable, Defaultable):
         var state = _Http3StreamState.with_limits(
             self.config.max_field_section_size
         )
+        state.reader.max_body_bytes = self.config.max_body_size
         state.reader.qpack_table = self.qpack_table
         self.streams[stream_id] = state^
 
@@ -885,6 +897,8 @@ struct Http3Connection(Copyable, Defaultable):
         # _Http3StreamState (inbox + headers + body) on every inbound
         # chunk is the dominant per-request cost under concurrency.
         ref state = self.streams[stream_id]
+        if state.reader.state == H3_REQUEST_STATE_DONE:
+            return  # nothing more is read; it used to pile up in the inbox
         if len(state.inbox) == 0:
             state.inbox = chunk^
         else:
@@ -926,6 +940,7 @@ struct Http3Connection(Copyable, Defaultable):
                 state.unknown_frames.append(collector.unknown_frame_type)
             if collector.error_fired:
                 state.protocol_error = String(collector.error_message)
+                state.too_large = "body above limit" in state.protocol_error
                 # The server advertises no blocked streams, so a field
                 # section that cannot be decoded now is a connection
                 # error, not a stream-local one that left the request
@@ -991,10 +1006,14 @@ struct Http3Connection(Copyable, Defaultable):
                 continue
             if not entry.value.headers_complete:
                 continue
-            if entry.value.protocol_error.byte_length() != 0:
+            if (
+                entry.value.protocol_error.byte_length() != 0
+                and not entry.value.too_large
+            ):
                 continue
             var done = (
-                entry.value.fin_received
+                entry.value.too_large
+                or entry.value.fin_received
                 or entry.value.tunnel
                 or entry.value.reader.state == H3_REQUEST_STATE_DONE
             )
@@ -1019,6 +1038,9 @@ struct Http3Connection(Copyable, Defaultable):
                 "Http3Connection.take_request: request already taken on stream "
                 + String(stream_id)
             )
+        if state.too_large:
+            state.request_taken = True
+            raise Error("Http3Connection.take_request: request body too large")
         if not state.headers_complete:
             raise Error(
                 "Http3Connection.take_request: HEADERS frame not yet parsed on"

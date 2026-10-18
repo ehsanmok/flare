@@ -525,6 +525,10 @@ struct QuicConnection(Copyable):
     """DATAGRAM payloads queued for the next drain."""
     var dg_rx_bytes: Int
     var dg_tx_bytes: Int
+    var stop_tx: List[Int]
+    """Streams answered before the client finished its request: each is
+    sent STOP_SENDING (H3_NO_ERROR) so the rest of the upload stops
+    (RFC 9114 sec 4.1.2)."""
     var ecn_rx: List[UInt64]
     """ECT(0), ECT(1) and CE counts of 1-RTT packets received, reported
     in ACK_ECN frames (RFC 9000 sec 13.4.1)."""
@@ -565,6 +569,7 @@ struct QuicConnection(Copyable):
         self.dg_tx_bytes = 0
         self.serial = 0
         self.pmtu = PmtuDiscovery()
+        self.stop_tx = List[Int]()
         self.ecn_rx = List[UInt64](length=3, fill=0)
         self.ecn_tx = EcnValidator()
         self.fc_tunnel_credited = Dict[Int, UInt64]()

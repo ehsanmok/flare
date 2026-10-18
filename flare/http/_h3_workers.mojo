@@ -96,8 +96,11 @@ def _serve_h3_stream[
             log_handler_error(request_id, String(e))
             var mapped = map_handler_error(String(e), expose)
             resp = Response(status=mapped.status, reason=mapped.reason)
-    except:
-        resp = Response(status=400, reason="Bad Request")
+    except e:
+        if "too large" in String(e):
+            resp = Response(status=413, reason="Content Too Large")
+        else:
+            resp = Response(status=400, reason="Bad Request")
     try:
         listener.emit_http3_response(slot, stream_id, resp^)
     except:
