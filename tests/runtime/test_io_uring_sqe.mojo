@@ -39,7 +39,7 @@ Coverage:
 Sanitiser-friendly: every prep / accessor / decoder honours
 ``debug_assert[assert_mode="safe"]`` for non-NULL buffer + in-
 range offsets / fds (see
-``.cursor/rules/sanitizers-and-bounds-checking.mdc``).
+``.agent/rules/sanitizers-and-bounds-checking.mdc``).
 """
 
 from std.memory import Layout, Pointer, alloc

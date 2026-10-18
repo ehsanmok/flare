@@ -1,0 +1,33 @@
+---
+description: Lean verification factory for flare. Anchors tie Lean models to Mojo symbols, a spec guard locks what proofs mean, and difftests run the Lean models against the Mojo code. Read when editing flare/ Mojo code or anything under formal/.
+globs: flare/**/*.mojo,formal/**
+alwaysApply: false
+---
+
+# Lean verification factory
+
+flare's Mojo code is mirrored by Lean 4 models under `formal/Flare/`. Three tools keep them honest; the `formal-drift` pre-commit hook runs all three.
+
+- **Anchors.** A model's doc comment names the Mojo symbols it mirrors and a hash of their normalized source: `mirrors flare/quic/varint.mojo#decode_varint sha=2fbdb2fed88f at=59bda50f`. When the Mojo changes, the anchor goes stale.
+  - `python3 formal/scripts/anchors.py who-models flare/x.mojo:LINE` lists the models of the code you are about to change.
+  - `python3 formal/scripts/anchors.py check --base HEAD` lists the anchors your change made stale.
+  - `python3 formal/scripts/anchors.py make 'flare/x.mojo#Struct.method'` prints a fresh anchor for a new model.
+- **Tiers** (`formal/tiers.toml`). If a `pinned` model goes stale, the commit is blocked. A stale `tracked` model only produces a warning. `archived` models are never checked (currently none).
+- **Spec guard** (`formal/spec.lock`). Theorem statements and spec definitions are locked: `spec*`/`*Spec` names, `Prop`-valued defs, `*Spec.lean`/`*Rfc.lean` files, and anything whose doc comment contains `[spec]`. Proofs and impl models are free to change.
+- **Difftest** (`formal/difftest/`). `python3 formal/difftest/run.py --affected --base HEAD` runs the Lean oracle and the Mojo driver on the same generated inputs and minimizes any disagreement.
+
+## Hard rules for agents
+
+1. Never weaken a claim to get a proof through. Do not edit a theorem statement, a spec definition or `formal/spec.lock`, and never run `formal-spec-lock` or `spec_guard.py --lock`. If a spec looks wrong, stop and ask the user.
+2. Never refresh an anchor (`anchors.py refresh`) unless the impl model actually mirrors the current Mojo code and `lake build` passes.
+3. A proof that breaks after a code change is either a stale model or a real bug. Decide which before editing proofs: look for a concrete counterexample (`decide` on a small input) and run the difftest. A real bug follows the Issues convention in `formal/README.md`: report the concrete counterexample, fix the code with a regression test in `tests/`, then bring the model in line with the fixed code. Models do not keep pre-fix variants.
+4. No `sorry`, `admit`, `axiom` or `native_decide`.
+5. Do not bypass the hook with `FORMAL_SKIP=1` unless the user asks you to.
+
+## Which skill to use
+
+- You changed Mojo code that a model mirrors, the hook blocked a commit, or the stop hook asked for a sync: use the `formal-sync` skill (or run `/formal-verify`).
+- A large change (hundreds or thousands of lines) to protocol, parser or resource-accounting logic: use the `formal-kernel` skill, which ships a small Lean-verified kernel with the change.
+- Adding an oracle target, or a difftest reported a mismatch: use the `formal-difftest` skill.
+
+Lean toolchain: `pixi run -e formal lake build` (run in `formal/`). Mojo: `pixi run mojo -I . <file>`.

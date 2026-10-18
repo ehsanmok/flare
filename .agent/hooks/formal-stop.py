@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
-"""Cursor `stop` hook: when the agent finishes a turn that left pinned Lean
-models stale (or touched formal/spec.lock), send it back with a follow-up.
+"""Stop hook: when the agent finishes a turn that left pinned Lean models
+stale (or touched formal/spec.lock), send it back with a follow-up.
+
+Speaks both hook dialects: Cursor `stop` (wired in .cursor/hooks.json) and
+Claude Code `Stop` (wired in .claude/settings.json).
 
 Fails open: any error prints `{}` so a broken toolchain never traps the agent.
 """
@@ -19,7 +22,10 @@ def main():
         event = json.load(sys.stdin)
     except ValueError:
         event = {}
-    if event.get("status", "completed") != "completed":
+    claude = event.get("hook_event_name") == "Stop"
+    if claude and event.get("stop_hook_active"):
+        return {}  # already sent back once; Claude Code has no loop_limit of its own
+    if not claude and event.get("status", "completed") != "completed":
         return {}
 
     if sh("git", "cat-file", "-e", "HEAD:formal/tiers.toml").returncode != 0:
@@ -47,7 +53,7 @@ def main():
         more = f"\n- ... and {len(rows) - 15} more" if len(rows) > 15 else ""
         problems.append(
             f"Your change left {len(rows)} pinned Lean model anchor(s) stale:\n{listed}{more}\n"
-            "Follow the formal-sync skill (.cursor/skills/formal-sync/SKILL.md): update each "
+            "Follow the formal-sync skill (.agent/skills/formal-sync/SKILL.md): update each "
             "impl model to mirror the new Mojo code, re-prove with `lake build`, run "
             "`python3 formal/difftest/run.py --affected --base HEAD`, then refresh the anchors. "
             "If a proof fails because the new code violates a spec, stop and report it as a bug."
@@ -55,7 +61,10 @@ def main():
 
     if not problems:
         return {}
-    return {"followup_message": "Formal factory check:\n\n" + "\n\n".join(problems)}
+    message = "Formal factory check:\n\n" + "\n\n".join(problems)
+    if claude:
+        return {"decision": "block", "reason": message}
+    return {"followup_message": message}
 
 
 if __name__ == "__main__":

@@ -344,7 +344,7 @@ def _realtime_seconds() -> Int:
     ``debug_assert[assert_mode="safe"]`` makes that failure
     visible in tests + ``ASSERT=safe`` builds without aborting
     release builds — see
-    ``.cursor/rules/sanitizers-and-bounds-checking.mdc`` §4.6.
+    ``.agent/rules/sanitizers-and-bounds-checking.mdc`` §4.6.
     """
     var buf = stack_allocation[16, UInt8]()
     for i in range(16):

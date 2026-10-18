@@ -32,7 +32,7 @@ What this module provides
 * **``IoUringCqe``** — 16-byte CQE byte-buffer wrapper with
   ``user_data() / res() / flags()`` accessors.
 * **Codec invariants** asserted under ``-D ASSERT=safe`` per
-  the ``.cursor/rules/sanitizers-and-bounds-checking.mdc``
+  the ``.agent/rules/sanitizers-and-bounds-checking.mdc``
   guide: pointer non-NULL on construction, opcode in the
   documented range, fd ≥ 0 on prep_* helpers that take an fd.
 

@@ -415,7 +415,7 @@ def _read_u32_le(buf: Pointer[UInt8, _], offset: Int) -> Int:
 
     Bounds-checked under ``-D ASSERT=safe``: ``offset`` must
     name a 4-byte window inside the 120-byte params buffer.
-    See ``.cursor/rules/sanitizers-and-bounds-checking.mdc``
+    See ``.agent/rules/sanitizers-and-bounds-checking.mdc``
     §4.4 for the FFI-buffer-read pattern.
     """
     debug_assert[assert_mode="safe"](

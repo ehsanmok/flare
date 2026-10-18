@@ -8,7 +8,7 @@
 # JIT (`mojo run --sanitize address ...`) is not supported by the
 # Mojo toolchain because the JIT cannot resolve the `__asan_*` /
 # `__tsan_*` runtime symbols statically. See
-# `.cursor/rules/sanitizers-and-bounds-checking.mdc` §1.1.
+# `.agent/rules/sanitizers-and-bounds-checking.mdc` §1.1.
 #
 # Driven by `pixi run tests-asan` / `pixi run tests-tsan` from
 # `pixi.toml`. Standalone usage:
@@ -66,7 +66,7 @@ esac
 
 # ── default test inventories ────────────────────────────────────
 # Curated lists — keep in sync with the `tests-asan` / `tests-tsan`
-# sections in `.cursor/rules/sanitizers-and-bounds-checking.mdc`.
+# sections in `.agent/rules/sanitizers-and-bounds-checking.mdc`.
 ASAN_TESTS=(
   # v0.9 A3 — ByteReader/ByteWriter bounds-checked cursors (Span +
   # memcpy + sub-span borrows); ASan validates no OOB on the read path.

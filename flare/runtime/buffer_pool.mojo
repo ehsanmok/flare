@@ -354,7 +354,7 @@ struct BufferPool(Movable):
         # via FFI / unsafe code) shouldn't take the server down.
         # Under `-D ASSERT=all` the explicit invariant is exercised
         # in tests/test_safety_asserts.mojo. See
-        # `.cursor/rules/sanitizers-and-bounds-checking.mdc` §4.7
+        # `.agent/rules/sanitizers-and-bounds-checking.mdc` §4.7
         # for when "fault-tolerant" beats "fail-fast" at API
         # boundaries.
         if idx == _OVERSIZE_CLASS:

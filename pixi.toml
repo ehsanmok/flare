@@ -639,9 +639,9 @@ test-bufring-ledger = "mojo -I . tests/http/test_bufring_ledger.mojo"  # buffer-
 test-uring-bufring-buffers = "mojo -I . tests/http/test_uring_bufring_buffers.mojo"  # regression: buffer-ring loop returns the provided buffer of every recv CQE, including completions for connections already gone (two-write h2-opening churn, 20 x 64 conns over a 256-buffer pool); no-op skip on non-io_uring hosts
 test-uring-bufring-partial = "mojo -I . tests/http/test_uring_bufring_partial.mojo"  # regression: a request split across receive completions (split body, >8 KiB body, pipelined + split) is answered by the buffer-ring loop without stalling other connections, in sync-send and FLARE_SUBMIT_SEND=1 modes; no-op skip on non-io_uring hosts
 test-static-multicore   = "mojo -I . tests/http/test_static_multicore.mojo"       # End-to-end HttpServer.serve_static(resp, n) through StaticScheduler + run_reactor_loop_static_shared; forks a child server with 4 workers, drives 8x50 sequential keep-alive churn + 8x30 concurrent fan-out; validates the multi-worker static fast path. 2 tests, cross-platform (no io_uring dependency).
-test-safety-asserts  = "mojo -I . tests/runtime/test_safety_asserts.mojo"             # v0.7 — bounds-check + debug_assert[assert_mode="safe"] guards on FFI substrate (run under -D ASSERT=all to exercise; see .cursor/rules/sanitizers-and-bounds-checking.mdc, ~14 tests)
+test-safety-asserts  = "mojo -I . tests/runtime/test_safety_asserts.mojo"             # v0.7 — bounds-check + debug_assert[assert_mode="safe"] guards on FFI substrate (run under -D ASSERT=all to exercise; see .agent/rules/sanitizers-and-bounds-checking.mdc, ~14 tests)
 
-# ── Sanitizer + assertion harness (see .cursor/rules/sanitizers-and-bounds-checking.mdc) ──
+# ── Sanitizer + assertion harness (see .agent/rules/sanitizers-and-bounds-checking.mdc) ──
 # tests-asserts-all: run the full functional suite with -D ASSERT=all, so
 #                    every debug_assert (both assert_mode="safe" and the
 #                    default flavour) compiles in. Catches O(n) invariants

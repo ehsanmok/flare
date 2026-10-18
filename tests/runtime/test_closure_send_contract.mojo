@@ -25,7 +25,7 @@ here:
    worker side. See ``flare/runtime/blocking.mojo``.
 
 The capturing-closure / unified-closure runtime path is documented
-as Mojo-blocked in ``.cursor/rules/development.mdc`` § Mojo-blocked
+as Mojo-blocked in ``.agent/rules/development.mdc`` § Mojo-blocked
 items remaining; the re-probe target is "drop the manually-tracked
 shape table here once the compiler accepts the additional shapes".
 """
@@ -156,7 +156,7 @@ def test_shape_block_in_pool_propagates_raise() raises:
 # ── Negative-shape contract: documented Mojo-blocked path ───────────────────
 #
 # These are the shapes that DO NOT compile on Mojo
-# and are documented in ``.cursor/rules/development.mdc`` §
+# and are documented in ``.agent/rules/development.mdc`` §
 # Mojo-blocked items remaining. We do not try to compile them in this
 # file; the test module itself is the documentation that we attempted
 # them via probe and they failed.

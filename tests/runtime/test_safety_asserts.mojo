@@ -20,7 +20,7 @@ guard, so that:
    the iovec array).
 
 This is the contract test for the safety net documented in
-``.cursor/rules/sanitizers-and-bounds-checking.mdc``. Adding a
+``.agent/rules/sanitizers-and-bounds-checking.mdc``. Adding a
 new ``debug_assert[assert_mode="safe"]`` to flare? Add a happy-
 path exerciser here so the next ``pixi run tests-asserts-all``
 catches a regression.

@@ -183,7 +183,7 @@ struct IoVecBuf(Movable):
                ``call_location[inline_count=2]()``); the per-call
                cost of inlining ``set`` here would bloat every
                keep-alive serialiser site without a measurable win.
-               See ``.cursor/rules/sanitizers-and-bounds-checking.mdc``
+               See ``.agent/rules/sanitizers-and-bounds-checking.mdc``
                §3 / §4 for the rationale.
             ptr: ``iov_base`` value (typically
                  ``Int(some_buffer.unsafe_ptr())``).

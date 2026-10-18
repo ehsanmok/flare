@@ -167,7 +167,7 @@ python3 formal/difftest/run.py --targets bufring_ledger.trace   # one target
 pixi run -e formal difftest-soak                                # fresh seeds for 10 minutes
 ```
 
-`difftest/targets.py` maps each target to its anchored Mojo symbols and Lean models; that mapping drives `--affected`. To add a target, see `.cursor/skills/formal-difftest/SKILL.md`.
+`difftest/targets.py` maps each target to its anchored Mojo symbols and Lean models; that mapping drives `--affected`. To add a target, see `.agent/skills/formal-difftest/SKILL.md`.
 
 Most targets are single calls into the L1 codecs. Three targets drive state over a whole trace and compare the end result:
 
@@ -185,7 +185,7 @@ A change of thousands of lines is not verified line by line. Instead it ships wi
 - an oracle target and difftest driver;
 - a record in `obligations/<id>.toml`. The record names the kernel, the call sites that must route through it, the theorems, the difftest targets, and what the proof does not cover.
 
-`obligations/uring-bufring-ledger.toml` is the worked example, a retrospective for issue #37. `classify_recv` (`flare/http/_bufring_ledger.mojo`) decides what the io_uring buffer-ring loop does with each receive completion. `Kernels/BufLedger.lean` proves that every completion holding a provided buffer gives it back exactly once, so the ring never drains. When the bug is re-injected into the Mojo kernel, the difftest flags about two thirds of random traces and minimizes them to a 3-byte one (`difftest/regressions/bufring_ledger.trace.txt`). The workflow is in `.cursor/skills/formal-kernel/SKILL.md`.
+`obligations/uring-bufring-ledger.toml` is the worked example, a retrospective for issue #37. `classify_recv` (`flare/http/_bufring_ledger.mojo`) decides what the io_uring buffer-ring loop does with each receive completion. `Kernels/BufLedger.lean` proves that every completion holding a provided buffer gives it back exactly once, so the ring never drains. When the bug is re-injected into the Mojo kernel, the difftest flags about two thirds of random traces and minimizes them to a 3-byte one (`difftest/regressions/bufring_ledger.trace.txt`). The workflow is in `.agent/skills/formal-kernel/SKILL.md`.
 
 ## The factory loop
 
@@ -199,14 +199,14 @@ A comment-only or formatting change passes in a few seconds; a change to modelle
 
 When the hook blocks, bring the models in line (or let an agent do it):
 
-1. In Cursor, run `/formal-verify`, or follow `.cursor/skills/formal-sync/SKILL.md` by hand. Update each stale impl model to mirror the new code, re-prove, run the affected difftests, then `anchors.py refresh` the anchors.
+1. In Cursor or Claude Code, run `/formal-verify`, or follow `.agent/skills/formal-sync/SKILL.md` by hand. Update each stale impl model to mirror the new code, re-prove, run the affected difftests, then `anchors.py refresh` the anchors.
 2. If a proof breaks because the theorem is now false, either the model is stale or the code has a real bug. A concrete counterexample settles which. A real bug follows the **Issues** convention above. Nobody weakens a theorem to make it pass. The spec guard catches it if someone tries, and only a human re-locks.
-3. For a large change to logic that no model covers, `who-models` returns nothing. Propose a verified kernel (`.cursor/skills/formal-kernel/SKILL.md`).
+3. For a large change to logic that no model covers, `who-models` returns nothing. Propose a verified kernel (`.agent/skills/formal-kernel/SKILL.md`).
 
-The Cursor side lives in `.cursor/`:
+The agent side lives in the agent-agnostic `.agent/`. `.cursor/` and `.claude/` symlink its `skills/` and `commands/`, and wire its hooks through `.cursor/hooks.json` and `.claude/settings.json`:
 - Three skills: `formal-sync`, `formal-kernel`, `formal-difftest`.
 - The `/formal-verify` command.
-- Two hooks. A `stop` hook sends the agent back if its turn left pinned anchors stale or touched `spec.lock`. A shell hook denies `formal-spec-lock` and asks before `FORMAL_SKIP=1` or `git commit --no-verify`.
+- Two hooks, each speaking both Cursor's and Claude Code's hook format. A `stop` hook sends the agent back if its turn left pinned anchors stale or touched `spec.lock`. A shell hook denies `formal-spec-lock` and asks before `FORMAL_SKIP=1` or `git commit --no-verify`.
 
 `pixi run -e formal formal-status` shows where everything stands.
 
