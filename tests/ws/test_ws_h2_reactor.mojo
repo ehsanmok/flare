@@ -126,14 +126,19 @@ def _echo_once(port: UInt16) raises -> String:
     return ""
 
 
-def _serve(workers: Int) raises -> Tuple[Int, UInt16]:
-    var srv = HttpServer.bind(SocketAddr.localhost(0))
-    var port = UInt16(srv.local_addr().port)
+def _serve(workers: Int, addrs: Int = 1) raises -> Tuple[Int, List[UInt16]]:
+    var bind_to = List[SocketAddr]()
+    for _ in range(addrs):
+        bind_to.append(SocketAddr.localhost(0))
+    var srv = HttpServer.bind(bind_to^)
+    var ports = List[UInt16]()
+    for a in srv.local_addrs():
+        ports.append(UInt16(a.port))
     var pid = fork()
     if pid == 0:
         try:
             srv.attach_ws_h2(_EchoWsH2())
-            if workers == 1:
+            if workers == 0:
                 srv.serve(_OkHandler())
             else:
                 srv.serve(_OkHandler(), num_workers=workers, pin_cores=False)
@@ -141,32 +146,45 @@ def _serve(workers: Int) raises -> Tuple[Int, UInt16]:
             pass
         exit()
     usleep(300_000)
-    return (pid, port)
+    return (pid, ports^)
+
+
+def _echoes(workers: Int, addrs: Int = 1, rounds: Int = 1) raises -> Int:
+    var s = _serve(workers, addrs)
+    var echoed = 0
+    for _ in range(rounds):
+        for p in s[1]:
+            if _echo_once(p) == "echo:ping":
+                echoed += 1
+    _ = kill(s[0], SIGKILL)
+    waitpid(s[0])
+    return echoed
 
 
 def test_ws_h2_reactor() raises:
     print("test_ws_h2_reactor")
-    var s = _serve(1)
-    var got = _echo_once(s[1])
-    _ = kill(s[0], SIGKILL)
-    waitpid(s[0])
-    assert_equal(got, "echo:ping")
+    assert_equal(_echoes(0), 1)
+
+
+def test_ws_h2_with_one_worker_given() raises:
+    """``serve(h, num_workers=1)`` used to drop the sidecar."""
+    assert_equal(_echoes(1), 1)
+
+
+def test_ws_h2_on_every_address() raises:
+    """A multi-address single-worker server used to refuse the sidecar."""
+    assert_equal(_echoes(0, addrs=2), 2)
 
 
 def test_ws_h2_on_several_workers() raises:
     """Every worker serves tunnels with its own copy of the sidecar; the
     multi-worker path used to drop it."""
-    var s = _serve(4)
-    var echoed = 0
-    for _ in range(8):
-        if _echo_once(s[1]) == "echo:ping":
-            echoed += 1
-    _ = kill(s[0], SIGKILL)
-    waitpid(s[0])
-    assert_equal(echoed, 8)
+    assert_equal(_echoes(4, rounds=8), 8)
 
 
 def main() raises:
     test_ws_h2_reactor()
+    test_ws_h2_with_one_worker_given()
+    test_ws_h2_on_every_address()
     test_ws_h2_on_several_workers()
-    print("test_ws_h2_reactor: 2 passed")
+    print("test_ws_h2_reactor: 4 passed")

@@ -288,9 +288,8 @@ struct HttpServer(Movable):
         first, because ``SO_REUSEPORT`` only composes with other
         ``SO_REUSEPORT`` sockets and these are plain binds.
 
-        Still single-listener: the WebSocket-over-h2 sidecar and
-        ``serve_streaming``, both of which raise when extras are
-        present rather than leaving an address unserved.
+        Still single-listener: ``serve_streaming``, which raises when
+        extras are present rather than leaving an address unserved.
 
         Args:
             addrs: One or more local addresses to listen on.
@@ -738,78 +737,11 @@ struct HttpServer(Movable):
             Error: If a worker fails to spawn when
                 ``num_workers >= 2``.
         """
-        from ._server_reactor_impl import run_uring_bufring_reactor_loop
-        from ._unified_reactor_impl import run_unified_reactor_loop
         from .handler import FnHandler
-        from flare.runtime.uring_reactor import use_uring_backend
-        from std.sys.info import CompilationTarget
-
-        from ._unified_reactor_impl import run_unified_reactor_loop_multi
 
         var h = FnHandler(handler)
         if num_workers <= 1:
-            self._stopping = False
-            # OPT-IN via FLARE_BUFRING_HANDLER=1 OR
-            # ServerConfig.use_bufring=True; the env var is read
-            # once at startup and OR-equalled into the field so
-            # later dispatch reads only the field.
-            if not self.config.use_bufring:
-                self.config.use_bufring = _resolve_bufring_handler_env()
-            # The bufring path is HTTP/1.1-only by design, and
-            # single-listener-only -- we fall through to the
-            # unified loop when extras are attached so
-            # multi-listener users get the proper accept demux.
-            #
-            # It stays default-off because it cannot stream, NOT
-            # because it is unstable. The old "crashes under
-            # sustained 64-conn wrk2 load" note was stale: the
-            # root cause was the IoUringDriver SQE mmap sized
-            # from the ring_entries OFFSET instead of the COUNT
-            # (one page, 64 slots), which is fixed. Re-probed at
-            # v0.10 -- 64 conns for 30 s and 60 s and 128 conns
-            # for 30 s, ~8M requests total, no crash.
-            #
-            # What does keep it opt-in: the send path buffers a
-            # whole response before submitting, so a streaming
-            # body cannot interleave with recv processing (see
-            # ``_drive_handler_with_submit_send``). Default-on is
-            # not defensible in a release whose headline is
-            # streaming.
-            comptime if CompilationTarget.is_linux():
-                if (
-                    use_uring_backend()
-                    and self.config.use_bufring
-                    and len(self._extra_listener_fds) == 0
-                    and not self._tls_ctx
-                ):
-                    run_uring_bufring_reactor_loop(
-                        self._listener, self.config, h, self._stopping
-                    )
-                    return
-            # Unified reactor loop: every accepted connection is
-            # auto-dispatched to either the HTTP/1.1 ConnHandle or
-            # the HTTP/2 Http2ConnHandle based on whether its first
-            # 24 bytes match the RFC 9113 §3.4 client preface.
-            if len(self._extra_listener_fds) > 0:
-                self._reject_tls_with_extra_listeners()
-                run_unified_reactor_loop_multi(
-                    self._listener,
-                    self._extra_listener_fds,
-                    self.config,
-                    self.config.h2.copy(),
-                    h,
-                    self._stopping,
-                )
-            else:
-                run_unified_reactor_loop(
-                    self._listener,
-                    self.config,
-                    self.config.h2.copy(),
-                    h,
-                    self._stopping,
-                    None,
-                    self._tls_ctx_addr(),
-                )
+            self._serve_one(h)
         else:
             self._serve_multicore[FnHandler](h^, num_workers, pin_cores)
 
@@ -837,11 +769,14 @@ struct HttpServer(Movable):
             NetworkError: On fatal listener errors; per-connection
                 errors close the offending connection silently.
         """
+        self._serve_one(handler)
+
+    def _serve_one[H: Handler](mut self, ref handler: H) raises:
+        """The single-worker reactor: io_uring buffer ring when opted in,
+        else the unified h1/h2 loop over every bound listener, with the
+        WebSocket-over-h2 sidecar when one is attached."""
         from ._server_reactor_impl import run_uring_bufring_reactor_loop
-        from ._unified_reactor_impl import (
-            run_unified_reactor_loop,
-            run_unified_reactor_loop_multi,
-        )
+        from ._unified_reactor_impl import run_unified_reactor_loop
         from flare.runtime.uring_reactor import use_uring_backend
         from std.sys.info import CompilationTarget
 
@@ -854,43 +789,28 @@ struct HttpServer(Movable):
                 and self.config.use_bufring
                 and len(self._extra_listener_fds) == 0
                 and not self._tls_ctx
+                and not self._ws_h2_hooks
             ):
                 run_uring_bufring_reactor_loop[H](
                     self._listener, self.config, handler, self._stopping
                 )
                 return
-        if len(self._extra_listener_fds) > 0:
-            self._reject_tls_with_extra_listeners()
-            if self._ws_h2_hooks:
-                raise Error(
-                    "HttpServer.serve: a WebSocket-over-h2 sidecar is"
-                    " single-listener; multiple bind addresses are not"
-                    " supported with attach_ws_h2 yet."
-                )
-            run_unified_reactor_loop_multi[H](
+        var hooks = Optional[WsH2Hooks](None)
+        if self._ws_h2_hooks:
+            hooks = Optional[WsH2Hooks](self._ws_h2_hooks.value().copy())
+        try:
+            run_unified_reactor_loop(
                 self._listener,
-                self._extra_listener_fds,
                 self.config,
                 self.config.h2.copy(),
                 handler,
                 self._stopping,
+                hooks,
+                self._tls_ctx_addr(),
+                self._extra_listener_fds,
             )
-        else:
-            var hooks = Optional[WsH2Hooks](None)
-            if self._ws_h2_hooks:
-                hooks = Optional[WsH2Hooks](self._ws_h2_hooks.value().copy())
-            try:
-                run_unified_reactor_loop(
-                    self._listener,
-                    self.config,
-                    self.config.h2.copy(),
-                    handler,
-                    self._stopping,
-                    hooks,
-                    self._tls_ctx_addr(),
-                )
-            finally:
-                self._drop_ws_h2_hooks()
+        finally:
+            self._drop_ws_h2_hooks()
 
     def _drop_ws_h2_hooks(mut self):
         """Release the boxed WS-over-h2 sidecar, if one was attached.
@@ -921,26 +841,6 @@ struct HttpServer(Movable):
                 + " serves a single listener and cannot serve the extra"
                 " addresses given to bind(List[SocketAddr]); bind one"
                 " address, or use serve(), which serves every listener"
-            )
-
-    @always_inline
-    def _reject_tls_with_extra_listeners(self) raises:
-        """Raise when TLS is bound alongside the extra :meth:`bind` listeners.
-
-        ``run_unified_reactor_loop_multi`` takes no TLS context, so the
-        extra-listener path can only serve cleartext. The combination is
-        not reachable today -- :meth:`bind_tls` binds exactly one address
-        and never populates ``_extra_listener_fds`` -- so this guards a
-        future wiring mistake rather than a live one. It fails loudly
-        because the alternative is a silent downgrade to plaintext on a
-        port the caller asked to be HTTPS, which is the shape of the bug
-        this guard was added with.
-        """
-        if self._tls_ctx:
-            raise Error(
-                "HttpServer.serve: TLS is not supported alongside"
-                " extra bind listeners; bind a single TLS listener"
-                " instead"
             )
 
     def attach_ws_h2[W: WsH2Handler](mut self, var ws_handler: W) raises:
@@ -1135,61 +1035,8 @@ struct HttpServer(Movable):
             Error: If a worker fails to spawn when
                 ``num_workers >= 2``.
         """
-        from ._server_reactor_impl import run_uring_bufring_reactor_loop
-        from ._unified_reactor_impl import run_unified_reactor_loop
-        from flare.runtime.uring_reactor import use_uring_backend
-        from std.sys.info import CompilationTarget
-
-        from ._unified_reactor_impl import run_unified_reactor_loop_multi
-
         if num_workers <= 1:
-            self._stopping = False
-            if not self.config.use_bufring:
-                self.config.use_bufring = _resolve_bufring_handler_env()
-            # io_uring buffer-ring path is OPT-IN via
-            # ``ServerConfig.use_bufring`` (or the
-            # ``FLARE_BUFRING_HANDLER=1`` env var resolved at
-            # startup). HTTP/1.1-only by design and
-            # single-listener-only. See the matching comment in
-            # the plain-def overload above for why it stays
-            # opt-in -- it is the no-streaming limitation, not
-            # the load crash that note used to claim.
-            comptime if CompilationTarget.is_linux():
-                if (
-                    use_uring_backend()
-                    and self.config.use_bufring
-                    and len(self._extra_listener_fds) == 0
-                    and not self._tls_ctx
-                ):
-                    run_uring_bufring_reactor_loop[H](
-                        self._listener, self.config, handler, self._stopping
-                    )
-                    return
-            # Unified reactor loop: every accepted connection is
-            # auto-dispatched to either the HTTP/1.1 ConnHandle
-            # or the HTTP/2 Http2ConnHandle based on the first 24
-            # bytes (RFC 9113 §3.4 preface peek). Same handler
-            # callback is used for both wires.
-            if len(self._extra_listener_fds) > 0:
-                self._reject_tls_with_extra_listeners()
-                run_unified_reactor_loop_multi[H](
-                    self._listener,
-                    self._extra_listener_fds,
-                    self.config,
-                    self.config.h2.copy(),
-                    handler,
-                    self._stopping,
-                )
-            else:
-                run_unified_reactor_loop(
-                    self._listener,
-                    self.config,
-                    self.config.h2.copy(),
-                    handler,
-                    self._stopping,
-                    None,
-                    self._tls_ctx_addr(),
-                )
+            self._serve_one(handler)
         else:
             self._serve_multicore[H](handler^, num_workers, pin_cores)
 

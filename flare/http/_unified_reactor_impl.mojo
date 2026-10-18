@@ -1294,6 +1294,7 @@ def run_unified_reactor_loop[
     ref stopping: Bool,
     ws_hooks: Optional[WsH2Hooks] = None,
     tls_ctx_addr: Int = 0,
+    extra_fds: List[Int] = List[Int](),
 ) raises:
     """Single-threaded reactor loop that auto-dispatches HTTP/1.1 vs
     HTTP/2 per connection.
@@ -1311,65 +1312,18 @@ def run_unified_reactor_loop[
             via a fresh :class:`Pointer` so the optimiser
             cannot LICM-hoist the load (the multicore Scheduler
             mutates it from another thread).
+        ws_hooks: WebSocket-over-h2 sidecar, if one is attached.
+        tls_ctx_addr: ``SSL_CTX`` for TLS connections, 0 for cleartext.
+        extra_fds: Listeners on the additional addresses given to
+            :meth:`HttpServer.bind`; borrowed, closed by the server.
 
     Delegates to :func:`_run_unified_loop_for_fd[H, False]` after
     extracting the listener fd; identical to the shared variant
     except for ``register`` vs ``register_exclusive``.
     """
-    listener._socket.set_nonblocking(True)
-    _run_unified_loop_for_fd[H, False](
-        Int(listener._socket.fd),
-        config,
-        h2_config^,
-        handler,
-        stopping,
-        0,
-        ws_hooks,
-        tls_ctx_addr,
-    )
-
-
-# ── Unified reactor loop -- multi-listener (single-worker) ─────────────────
-
-
-def run_unified_reactor_loop_multi[
-    H: Handler
-](
-    mut primary: TcpListener,
-    extra_fds: List[Int],
-    config: ServerConfig,
-    var h2_config: Http2Config,
-    ref handler: H,
-    ref stopping: Bool,
-) raises:
-    """Single-worker reactor loop demuxing accepts across N listener fds.
-
-    Same shape and semantics as :func:`run_unified_reactor_loop`
-    (HTTP/1.1 + HTTP/2 auto-dispatch via the RFC 9113 §3.4
-    preface peek), with one structural difference: every listener
-    fd is registered with the reactor under ``token = fd`` so the
-    accept loop can route incoming events to the correct listener.
-    Connection events keep the existing ``token = client_fd``
-    convention; ``conns`` is the disambiguator (a token is a
-    listener fd iff it's not a key in ``conns``).
-
-    Args:
-        primary: First listener (the address returned by
-            :meth:`HttpServer.local_addr`). Closed by the
-            ``HttpServer`` owner; the loop only borrows.
-        extra_fds: Raw fds for the additional listeners attached
-            via :meth:`HttpServer.bind` with a list of addresses. Owned by the caller
-            (typically ``HttpServer._extra_listener_fds``); closed
-            by ``HttpServer.__deinit__``. The loop only borrows them
-            for ``accept(2)``.
-        config: HTTP/1.1 server configuration.
-        h2_config: HTTP/2 SETTINGS for h2 peers.
-        handler: User's request handler.
-        stopping: External stop flag.
-    """
     from flare.net.socket import RawSocket, INVALID_FD, AF_INET, SOCK_STREAM
 
-    primary._socket.set_nonblocking(True)
+    listener._socket.set_nonblocking(True)
     for i in range(len(extra_fds)):
         # Wrap the fd in a temp RawSocket purely so we can call
         # set_nonblocking via the existing platform-aware path
@@ -1385,83 +1339,17 @@ def run_unified_reactor_loop_multi[
         except:
             pass
 
-    var reactor = Reactor()
-    var wheel = TimerWheel(now_ms=UInt64(_monotonic_ms()))
-    var conns = Dict[Int, Int]()
-    var timers = Dict[Int, UInt64]()
-
-    var primary_fd = primary._socket.fd
-    var listener_fds = Dict[Int, Bool]()
-    listener_fds[Int(primary_fd)] = True
-    reactor.register(primary_fd, UInt64(Int(primary_fd)), INTEREST_READ)
-    var gate = ListenerGate()
-    gate.add(Int(primary_fd), UInt64(Int(primary_fd)))
-    for i in range(len(extra_fds)):
-        var f = c_int(extra_fds[i])
-        listener_fds[Int(f)] = True
-        reactor.register(f, UInt64(Int(f)), INTEREST_READ)
-        gate.add(Int(f), UInt64(Int(f)))
-
-    var events = List[Event]()
-    var stopping_addr = Int(Pointer[Bool, _](to=stopping))
-    while not load_stop_flag(stopping_addr):
-        events.clear()
-        try:
-            _ = reactor.poll(_poll_timeout_ms(wheel), events)
-        except:
-            break
-
-        var now_ms = UInt64(_monotonic_ms())
-        var fired_fds = List[Int]()
-        var fired_ids = List[UInt64]()
-        _collect_fired_timers(now_ms, wheel, timers, fired_fds, fired_ids)
-
-        for i in range(len(events)):
-            var evt = events[i]
-            if evt.is_wakeup():
-                continue
-            var fd = Int(evt.token)
-            if fd in listener_fds:
-                _accept_loop_unified_fd(
-                    fd,
-                    reactor,
-                    conns,
-                    wheel,
-                    timers,
-                    config.idle_timeout_ms,
-                    config.max_connections,
-                )
-                continue
-            if fd not in conns:
-                continue
-            var packed = conns[fd]
-            _unified_handle_conn_event(
-                fd,
-                packed,
-                evt.is_readable(),
-                evt.is_writable(),
-                handler,
-                config,
-                h2_config,
-                conns,
-                reactor,
-                wheel,
-                timers,
-                peer_hup=evt.is_hup(),
-            )
-
-        # Deadlines that passed while this poll's events were pending are
-        # enforced only now: a connection that had a request waiting was
-        # served above and re-armed its timer, so it is spared.
-        var expired = _expired_idle_conns(fired_fds, fired_ids, conns, timers)
-        for i in range(len(expired)):
-            _cleanup_conn_unified(expired[i], conns, timers, reactor, wheel)
-        gate.sync(reactor, len(conns), config.max_connections)
-
-    # Graceful shutdown: flip Cancel.SHUTDOWN, then close all live
-    # conns. Listener fds are closed by ``HttpServer.__deinit__`` -- the
-    # loop only borrows.
-    _ = _drain_remaining_conns_unified(conns, timers, reactor, wheel)
+    _run_unified_loop_for_fd[H, False](
+        Int(listener._socket.fd),
+        config,
+        h2_config^,
+        handler,
+        stopping,
+        0,
+        ws_hooks,
+        tls_ctx_addr,
+        extra_fds,
+    )
 
 
 # ── Unified reactor loop -- shared listener (multi-worker) ──────────────────
