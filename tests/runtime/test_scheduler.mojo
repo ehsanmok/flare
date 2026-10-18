@@ -31,6 +31,7 @@ from std.testing import assert_true, assert_equal, TestSuite
 from flare.net import SocketAddr
 from flare.runtime import Frontend, Scheduler, default_worker_count
 from flare.tcp import TcpListener
+from flare.runtime._balance import _HEADER_SLOTS, _W_STRIDE
 from flare.runtime._asyncrt import asyncrt_leases_held, asyncrt_worker_capacity
 from flare.runtime._libc_time import libc_nanosleep_ms
 from flare.runtime._thread import _KIND_OS
@@ -482,7 +483,14 @@ def _drain_with_one_stuck(extras: List[SocketAddr]) raises:
     while _ld(cells + 16) < 0:
         _ = libc_nanosleep_ms(1)
     var stuck_primary = Int(_ld(cells + 16))
+    var group = s._balance_addr
     var reports = s.drain(timeout_ms=300)
+    # glibc hands a just-freed block back to the next same-size alloc.
+    var probe = alloc(
+        Layout[Int64](count=_HEADER_SLOTS + 2 * _W_STRIDE)
+    ).unsafe_leak()
+    var group_freed = group != 0 and Int(probe) == group
+    probe.unsafe_free()
     var detached = 0
     for i in range(len(reports)):
         if reports[i].drained == 0:
@@ -500,6 +508,7 @@ def _drain_with_one_stuck(extras: List[SocketAddr]) raises:
                 open_joined += 1
     _st(cells + 8, 1)  # let the stuck worker go
     assert_equal(detached, 1)
+    assert_true(not group_freed, "the balancing group was freed under a worker")
     assert_equal(open_joined, 0, "a joined worker's listener stayed open")
     assert_equal(
         open_stuck, 1 + len(extras), "the stuck worker's listeners were closed"

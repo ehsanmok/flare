@@ -938,6 +938,9 @@ struct Scheduler[F: Frontend](Movable):
             # Freeing it handed the cell to the next allocation, which
             # could store False and keep the worker serving forever.
             self._stopping_addr = 0
+            # The accept-balancing group too: the worker publishes into it
+            # every iteration and locks it on the way out.
+            self._balance_addr = 0
 
         # Step 4: free everything (stats cells are read above first).
         self._free_resources()
