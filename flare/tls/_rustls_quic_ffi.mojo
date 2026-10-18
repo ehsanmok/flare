@@ -290,9 +290,7 @@ def _do_take_crypto(
     4 KiB with a deep chain).
     """
     var cap = 4096
-    var out = List[UInt8](capacity=cap)
-    for _ in range(cap):
-        out.append(UInt8(0))
+    var out = List[UInt8](length=cap, fill=0)
     var written: Int = 0
     var written_ptr = Pointer(to=written)
     var rc = _take_crypto_call(lib, session, level, out, cap, Int(written_ptr))
@@ -303,20 +301,15 @@ def _do_take_crypto(
     # If the buffer was fully consumed, the next chunk may still be
     # waiting (rustls splits at our cap). Loop until the FFI reports
     # written < cap, meaning nothing further is pending at this level.
-    var collected = List[UInt8]()
-    for i in range(written):
-        collected.append(out[i])
+    var collected = List[UInt8](Span[UInt8, _](out)[:written])
     while written == cap:
-        for j in range(cap):
-            out[j] = UInt8(0)
         written = 0
         rc = _take_crypto_call(lib, session, level, out, cap, Int(written_ptr))
         if rc != 0:
             raise Error(
                 String("flare_rustls_quic_take_crypto failed: rc=") + String(rc)
             )
-        for i in range(written):
-            collected.append(out[i])
+        collected.extend(Span[UInt8, _](out)[:written])
     return collected^
 
 
