@@ -2,6 +2,7 @@
 
 from std.testing import assert_equal, assert_true, assert_false, TestSuite
 from flare.http2 import (
+    Http2ClientConfig,
     Http2ClientConnection,
     HpackHeader,
     HpackEncoder,
@@ -141,8 +142,47 @@ def _h2_credit(wire: List[UInt8], sid: Int) raises -> Int:
     return credit
 
 
-def test_h2_streaming_credit_follows_body_drains() raises:
+def test_h2_client_opens_large_receive_windows() raises:
+    """The preface advertises a 4 MiB stream window and opens the
+    connection window to 16 MiB; the 64 KiB defaults held a download
+    to 64 KiB per round trip."""
     var conn = Http2ClientConnection()
+    var out = conn.drain()
+    var frames = List[UInt8](Span[UInt8, _](out)[24:])  # past the preface
+    assert_equal(_h2_credit(frames, 0), (16 << 20) - 65535)
+    assert_equal(conn.conn.initial_window_size, 4 << 20)
+    assert_equal(conn.conn.recv_window, 16 << 20)
+    var found = False
+    var pos = 24
+    while pos + 9 <= len(out):
+        var f = parse_frame(Span[UInt8, _](out)[pos:]).value().copy()
+        if f.header.type.value == FrameType.SETTINGS().value:
+            var i = 0
+            while i + 6 <= len(f.payload):
+                var id = Int(f.payload[i]) << 8 | Int(f.payload[i + 1])
+                var v = (
+                    Int(f.payload[i + 2]) << 24
+                    | Int(f.payload[i + 3]) << 16
+                    | Int(f.payload[i + 4]) << 8
+                    | Int(f.payload[i + 5])
+                )
+                if id == 4:
+                    found = v == (4 << 20)
+                i += 6
+        pos += 9 + f.header.length
+    assert_true(found, "SETTINGS_INITIAL_WINDOW_SIZE is not 4 MiB")
+
+
+def _small_window_client() raises -> Http2ClientConnection:
+    """A client advertising the RFC 9113 default 65535-byte stream
+    window, so these cases can fill it with a few frames."""
+    var cfg = Http2ClientConfig()
+    cfg.initial_window_size = 65535
+    return Http2ClientConnection.with_config(cfg^)
+
+
+def test_h2_streaming_credit_follows_body_drains() raises:
+    var conn = _small_window_client()
     var empty = List[UInt8]()
     conn.send_request(
         1, "GET", "https", "example.test", "/", List[HpackHeader](), Span(empty)
@@ -175,7 +215,7 @@ def test_h2_streaming_credit_follows_body_drains() raises:
 
 
 def test_h2_undrained_stream_cannot_exceed_receive_window() raises:
-    var conn = Http2ClientConnection()
+    var conn = _small_window_client()
     var empty = List[UInt8]()
     conn.send_request(
         1, "GET", "https", "example.test", "/", List[HpackHeader](), Span(empty)

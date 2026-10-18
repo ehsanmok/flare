@@ -61,9 +61,16 @@ struct Http2Response(Movable):
 # ── Http2ClientConfig ─────────────────────────────────────────────────────
 
 
-comptime _DEFAULT_CLIENT_INITIAL_WINDOW_SIZE: Int = 65535
-"""RFC 9113 §6.5.2 default. The client's per-stream receive
-window size; used to flow-control inbound response DATA frames."""
+comptime _DEFAULT_CLIENT_INITIAL_WINDOW_SIZE: Int = 4 << 20
+"""The client's per-stream receive window (SETTINGS_INITIAL_WINDOW_SIZE),
+4 MiB as Go's HTTP/2 transport uses. The RFC 9113 §6.5.2 default of
+64 KiB held a download to 64 KiB per round trip, about 5 Mbit/s at a
+100 ms RTT."""
+
+comptime CLIENT_CONNECTION_WINDOW: Int = 16 << 20
+"""The client's connection-level receive window, opened with a
+WINDOW_UPDATE in the preface (the protocol starts it at 65535 and only
+WINDOW_UPDATE raises it, RFC 9113 §6.9.2)."""
 
 comptime _DEFAULT_CLIENT_MAX_FRAME_SIZE: Int = 16384
 """RFC 9113 §6.5.2 default + minimum. Largest frame payload

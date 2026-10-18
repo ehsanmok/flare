@@ -88,6 +88,7 @@ from .hpack import HpackHeader
 from .state import Connection, Http2Error, Http2ErrorCode, Stream, StreamState
 
 from ._client_types import (
+    CLIENT_CONNECTION_WINDOW,
     Http2ClientConfig,
     Http2Response,
     _h2_response_to_http,
@@ -208,6 +209,7 @@ struct Http2ClientConnection(Defaultable, Movable):
         self.outbox = List[UInt8]()
         self.greeted = False
         self.config = Http2ClientConfig()
+        self.conn.initial_window_size = self.config.initial_window_size
         self._next_sid = 1
         self._stream_errors = Dict[Int, Int]()
         self._pending_body = Dict[Int, List[UInt8]]()
@@ -361,6 +363,15 @@ struct Http2ClientConnection(Defaultable, Movable):
         var bytes = encode_frame(f^)
         for i in range(len(bytes)):
             self.outbox.append(bytes[i])
+        # Open the connection-level receive window past its 65535 start.
+        self.outbox.extend(
+            encode_frame(
+                Connection._window_update_frame(
+                    0, CLIENT_CONNECTION_WINDOW - 65535
+                )
+            )
+        )
+        self.conn.recv_window = CLIENT_CONNECTION_WINDOW
         self.greeted = True
 
     def _append_setting(self, mut buf: List[UInt8], id: Int, value: Int):

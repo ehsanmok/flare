@@ -87,8 +87,9 @@ def _next_frame(
 
 def _drop_preface_and_settings_chatter(mut bytes: List[UInt8]) raises:
     """Skip the 24-byte client preface plus any leading SETTINGS
-    frames (initial + ACKs) so the next ``_next_frame`` call sees
-    the application HEADERS we care about."""
+    frames (initial + ACKs) and the connection WINDOW_UPDATE so the
+    next ``_next_frame`` call sees the application HEADERS we care
+    about."""
     var rest = List[UInt8]()
     for i in range(24, len(bytes)):
         rest.append(bytes[i])
@@ -98,7 +99,11 @@ def _drop_preface_and_settings_chatter(mut bytes: List[UInt8]) raises:
         if not maybe:
             return
         var f = maybe.value().copy()
-        if Int(f.header.type.value) != Int(FrameType.SETTINGS().value):
+        var t = Int(f.header.type.value)
+        if t != Int(FrameType.SETTINGS().value) and not (
+            t == Int(FrameType.WINDOW_UPDATE().value)
+            and f.header.stream_id == 0
+        ):
             return
         var consumed = 9 + f.header.length
         var rest2 = List[UInt8]()
