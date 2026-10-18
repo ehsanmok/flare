@@ -256,6 +256,9 @@ from test_ws_h2 import (
 from test_ws_h2_reactor import (
     test_ws_h2_reactor as test_ws_h2_reactor__test_ws_h2_reactor,
 )
+from test_ws_h2_reactor import (
+    test_ws_h2_on_several_workers as test_ws_h2_reactor__test_ws_h2_on_several_workers,
+)
 from test_ws_h2_roundtrip import (
     test_ws_h2_roundtrip as test_ws_h2_roundtrip__test_ws_h2_roundtrip,
 )
@@ -559,6 +562,7 @@ def main() raises:
     ]()
     # tests/ws/test_ws_h2_reactor.mojo
     suite.test[test_ws_h2_reactor__test_ws_h2_reactor]()
+    suite.test[test_ws_h2_reactor__test_ws_h2_on_several_workers]()
     # tests/ws/test_ws_h2_roundtrip.mojo
     suite.test[test_ws_h2_roundtrip__test_ws_h2_roundtrip]()
     suite.test[

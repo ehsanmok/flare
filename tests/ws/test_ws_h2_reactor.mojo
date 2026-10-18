@@ -95,64 +95,78 @@ def _pull(mut client: Http2ClientConnection, mut s: TcpStream) raises -> Bool:
         return False  # recv timeout -- nothing more this round
 
 
-def test_ws_h2_reactor() raises:
-    print("test_ws_h2_reactor")
-    var srv = HttpServer.bind(SocketAddr.localhost(0))
-    var port = srv.local_addr().port
-
-    var pid = fork()
-    if pid == 0:
-        try:
-            srv.attach_ws_h2(_EchoWsH2())
-            srv.serve(_OkHandler())
-        except:
-            pass
-        exit()
-    usleep(300_000)
-
+def _echo_once(port: UInt16) raises -> String:
+    """Open a tunnel on a fresh connection, send ``ping``, return the
+    echo's text (empty if none came)."""
     var client_stream = TcpStream.connect(SocketAddr.localhost(port))
     client_stream._socket.set_recv_timeout(400)
-
     var ccfg = Http2ClientConfig()
     ccfg.enable_connect_protocol = True
     var client = Http2ClientConnection.with_config(ccfg^)
-
     # Preface + SETTINGS exchange until the server advertises Extended CONNECT.
     for _i in range(16):
         _flush(client, client_stream)
         _ = _pull(client, client_stream)
         if client.peer_supports_extended_connect():
             break
-    assert_true(
-        client.peer_supports_extended_connect(),
-        "server must advertise SETTINGS_ENABLE_CONNECT_PROTOCOL",
-    )
-
-    # Open the tunnel and send a masked TEXT frame.
+    if not client.peer_supports_extended_connect():
+        return ""
     var sid = client.next_stream_id()
     bootstrap_ws_over_h2(
         client, sid, String("example.com"), String("/chat"), String("AAAA")
     )
     var client_ws = WsOverH2Stream(sid)
     client_ws.send_frame(client, WsFrame.text("ping"))
-
-    # Pump until the echo reply decodes client-side.
-    var got = Optional[WsFrame]()
     for _i in range(32):
         _flush(client, client_stream)
         _ = _pull(client, client_stream)
-        got = client_ws.try_pull_frame(client)
+        var got = client_ws.try_pull_frame(client)
         if got:
-            break
+            return got.value().text_payload()
+    return ""
 
-    _ = kill(pid, SIGKILL)
-    waitpid(pid)
 
-    assert_true(Bool(got), "client must decode the server echo reply")
-    assert_equal(got.value().opcode, WsOpcode.TEXT)
-    assert_equal(got.value().text_payload(), "echo:ping")
-    print("test_ws_h2_reactor: 1 passed")
+def _serve(workers: Int) raises -> Tuple[Int, UInt16]:
+    var srv = HttpServer.bind(SocketAddr.localhost(0))
+    var port = UInt16(srv.local_addr().port)
+    var pid = fork()
+    if pid == 0:
+        try:
+            srv.attach_ws_h2(_EchoWsH2())
+            if workers == 1:
+                srv.serve(_OkHandler())
+            else:
+                srv.serve(_OkHandler(), num_workers=workers, pin_cores=False)
+        except:
+            pass
+        exit()
+    usleep(300_000)
+    return (pid, port)
+
+
+def test_ws_h2_reactor() raises:
+    print("test_ws_h2_reactor")
+    var s = _serve(1)
+    var got = _echo_once(s[1])
+    _ = kill(s[0], SIGKILL)
+    waitpid(s[0])
+    assert_equal(got, "echo:ping")
+
+
+def test_ws_h2_on_several_workers() raises:
+    """Every worker serves tunnels with its own copy of the sidecar; the
+    multi-worker path used to drop it."""
+    var s = _serve(4)
+    var echoed = 0
+    for _ in range(8):
+        if _echo_once(s[1]) == "echo:ping":
+            echoed += 1
+    _ = kill(s[0], SIGKILL)
+    waitpid(s[0])
+    assert_equal(echoed, 8)
 
 
 def main() raises:
     test_ws_h2_reactor()
+    test_ws_h2_on_several_workers()
+    print("test_ws_h2_reactor: 2 passed")

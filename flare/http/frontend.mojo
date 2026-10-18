@@ -41,6 +41,7 @@ from flare.http.streaming_server import StreamHandler
 from flare.http2.server import Http2Config
 from flare.runtime.frontend import Frontend
 from flare.runtime.uring_reactor import use_uring_backend
+from flare.ws.server_h2 import WsH2Hooks
 
 
 struct HttpFrontend[H: Handler & Copyable](Copyable, Frontend):
@@ -79,6 +80,9 @@ struct HttpFrontend[H: Handler & Copyable](Copyable, Frontend):
     ``SSL_new``). Every worker borrows the one the server owns, so
     cloning the frontend per worker stays cheap and there is a single
     context to reload certificates into."""
+    var ws_hooks: Optional[WsH2Hooks]
+    """The server's WebSocket-over-h2 sidecar; each worker serves a copy
+    of it (:meth:`WsH2Hooks.clone`)."""
 
     def __init__(
         out self,
@@ -87,6 +91,7 @@ struct HttpFrontend[H: Handler & Copyable](Copyable, Frontend):
         var h2_config: Http2Config = Http2Config(),
         auto_protocol: Bool = False,
         tls_ctx_addr: Int = 0,
+        ws_hooks: Optional[WsH2Hooks] = None,
     ):
         """Build a frontend with the given handler + config combo.
 
@@ -110,6 +115,7 @@ struct HttpFrontend[H: Handler & Copyable](Copyable, Frontend):
         self.h2_config = h2_config^
         self.auto_protocol = auto_protocol
         self.tls_ctx_addr = tls_ctx_addr
+        self.ws_hooks = ws_hooks.copy()
 
     def requires_per_worker_listener(self) -> Bool:
         """The io_uring buffer-ring path needs per-worker listeners.
@@ -161,16 +167,24 @@ struct HttpFrontend[H: Handler & Copyable](Copyable, Frontend):
                     )
                     return
             if self.auto_protocol or self.tls_ctx_addr != 0 or extra_fds:
-                run_unified_reactor_loop_shared[Self.H](
-                    listener_fd,
-                    self.config,
-                    self.h2_config.copy(),
-                    self.handler,
-                    stopping,
-                    stats_addr,
-                    self.tls_ctx_addr,
-                    extra_fds,
-                )
+                var ws = Optional[WsH2Hooks](None)
+                if self.ws_hooks:
+                    ws = self.ws_hooks.value().clone()
+                try:
+                    run_unified_reactor_loop_shared[Self.H](
+                        listener_fd,
+                        self.config,
+                        self.h2_config.copy(),
+                        self.handler,
+                        stopping,
+                        stats_addr,
+                        self.tls_ctx_addr,
+                        extra_fds,
+                        ws,
+                    )
+                finally:
+                    if ws:
+                        ws.value().destroy_thunk(ws.value().addr)
             else:
                 run_reactor_loop_shared[Self.H](
                     listener_fd,

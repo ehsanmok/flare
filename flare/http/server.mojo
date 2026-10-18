@@ -660,7 +660,7 @@ struct HttpServer(Movable):
         requests become tunnels handed to it while :meth:`serve_http3`'s
         handler serves everything else. Another ``:protocol`` gets 501.
         Call after :meth:`bind_with_http3` and before
-        :meth:`serve_http3`; single-worker, like :meth:`attach_ws_h2`."""
+        :meth:`serve_http3`; each worker serves its own copy."""
         from flare.ws.server_h3 import make_ws_h3_hooks
 
         if not self.has_http3():
@@ -951,10 +951,10 @@ struct HttpServer(Movable):
         websocket`` tunnels to this sidecar. Advertising
         ``SETTINGS_ENABLE_CONNECT_PROTOCOL`` is turned on for you.
 
-        Call before :meth:`serve`. The sidecar is boxed once and shared
-        across every tunnel on the worker, which is why this is
-        single-listener and single-worker: ``serve`` raises if extra
-        listeners are bound or more than one worker is asked for.
+        Call before :meth:`serve`. One instance serves every tunnel on a
+        worker; with several workers each serves its own copy. A
+        single-worker server bound to several addresses cannot carry it
+        (``serve`` raises).
 
         **Changed in v0.11.** This replaces the two-handler
         ``serve(handler, ws_handler)`` overload (removed in v0.12). The old shape made a
@@ -1227,6 +1227,7 @@ struct HttpServer(Movable):
             self.config.h2.copy(),
             auto_protocol=True,
             tls_ctx_addr=self._tls_ctx_addr(),
+            ws_hooks=self._ws_h2_hooks.copy(),
         )
         var scheduler = Scheduler[HttpFrontend[H]].start(
             addr=addr,
@@ -1253,6 +1254,7 @@ struct HttpServer(Movable):
             _ = libc_nanosleep_ms(50)
 
         scheduler.shutdown()
+        self._drop_ws_h2_hooks()
 
     def serve_cancellable[
         CH: CancelHandler

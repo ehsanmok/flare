@@ -155,9 +155,11 @@ struct _Client(Movable):
         return ""
 
 
-def _serve() raises -> Tuple[Int, SocketAddr]:
+def _serve(workers: Int = 1) raises -> Tuple[Int, SocketAddr]:
+    var cfg = _server_cfg()
+    cfg.num_workers = workers
     var srv = HttpServer.bind_with_http3(
-        SocketAddr(IpAddr.localhost(), UInt16(0)), _server_cfg()
+        SocketAddr(IpAddr.localhost(), UInt16(0)), cfg^
     )
     srv.attach_ws_h3(_Echo())
     var addr = srv.local_http3_addr()
@@ -188,6 +190,24 @@ def test_websocket_over_h3_echoes_and_closes() raises:
     assert_equal(close.opcode, WsOpcode.CLOSE)
     assert_false(close.masked, "a server never masks (RFC 6455 sec 5.3)")
     assert_true(c.fin, "the server ended the stream after its CLOSE")
+
+
+def test_websocket_over_h3_on_several_workers() raises:
+    """Every worker serves tunnels with its own copy of the sidecar;
+    attach_ws_h3 used to need a single worker."""
+    var s = _serve(4)
+    var echoed = 0
+    for _ in range(8):
+        var c = _Client(s[1], "websocket")
+        c.send_ws(WsFrame.text("hi"))
+        c.pump(until_frames=2)
+        var fs = c.frames()
+        if len(fs) >= 2:
+            var echo = WsFrame.decode_one(Span[UInt8, _](fs[1][1]))
+            if echo^.take_frame().text_payload() == "hi":
+                echoed += 1
+    kill_forked_server(s[0])
+    assert_equal(echoed, 8)
 
 
 def test_another_protocol_gets_501() raises:

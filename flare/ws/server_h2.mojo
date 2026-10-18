@@ -215,6 +215,7 @@ comptime _WsCloseThunk = def(
     Int, mut WsOverH2ServerStream, mut Http2Connection
 ) raises thin -> None
 comptime _WsDestroyThunk = def(Int) thin -> None
+comptime _WsCloneThunk = def(Int) raises thin -> Int
 
 
 def _ws_h2_open_thunk[
@@ -248,6 +249,10 @@ def _ws_h2_destroy_thunk[W: WsH2Handler](addr: Int) -> None:
     Pool[W].free(addr)
 
 
+def _ws_h2_clone_thunk[W: WsH2Handler](addr: Int) raises -> Int:
+    return Pool[W].alloc_move(Pool[W].get_ptr(addr)[].copy())
+
+
 struct WsH2Hooks(Copyable):
     """Opaque, non-owning boxed WS-over-h2 handler + its thunks.
 
@@ -264,6 +269,7 @@ struct WsH2Hooks(Copyable):
     var msg_thunk: _WsMsgThunk
     var close_thunk: _WsCloseThunk
     var destroy_thunk: _WsDestroyThunk
+    var clone_thunk: _WsCloneThunk
 
     def __init__(
         out self,
@@ -272,12 +278,21 @@ struct WsH2Hooks(Copyable):
         msg_thunk: _WsMsgThunk,
         close_thunk: _WsCloseThunk,
         destroy_thunk: _WsDestroyThunk,
+        clone_thunk: _WsCloneThunk,
     ):
         self.addr = addr
         self.open_thunk = open_thunk
         self.msg_thunk = msg_thunk
         self.close_thunk = close_thunk
         self.destroy_thunk = destroy_thunk
+        self.clone_thunk = clone_thunk
+
+    def clone(self) raises -> Self:
+        """Hooks over a fresh boxed copy of the handler (one per worker);
+        the caller destroys it."""
+        var out = self.copy()
+        out.addr = self.clone_thunk(self.addr)
+        return out^
 
 
 def make_ws_h2_hooks[W: WsH2Handler](var handler: W) raises -> WsH2Hooks:
@@ -294,4 +309,5 @@ def make_ws_h2_hooks[W: WsH2Handler](var handler: W) raises -> WsH2Hooks:
         msg_thunk=_ws_h2_msg_thunk[W],
         close_thunk=_ws_h2_close_thunk[W],
         destroy_thunk=_ws_h2_destroy_thunk[W],
+        clone_thunk=_ws_h2_clone_thunk[W],
     )

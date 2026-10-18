@@ -129,6 +129,7 @@ comptime _MsgThunk = def(
     Int, mut WsOverH3ServerStream, mut QuicListener, WsFrame
 ) raises thin -> None
 comptime _DestroyThunk = def(Int) thin -> None
+comptime _CloneThunk = def(Int) raises thin -> Int
 
 
 def _open_thunk[
@@ -155,6 +156,10 @@ def _destroy_thunk[W: WsH3Handler](addr: Int):
     Pool[W].free(addr)
 
 
+def _clone_thunk[W: WsH3Handler](addr: Int) raises -> Int:
+    return Pool[W].alloc_move(Pool[W].get_ptr(addr)[].copy())
+
+
 struct WsH3Hooks(Copyable):
     """A boxed :trait:`WsH3Handler` and its thunks. Copies are
     non-owning; the owner runs ``destroy`` once."""
@@ -164,6 +169,7 @@ struct WsH3Hooks(Copyable):
     var msg: _MsgThunk
     var close: _OpenThunk
     var destroy: _DestroyThunk
+    var clone_box: _CloneThunk
 
     def __init__(
         out self,
@@ -172,12 +178,21 @@ struct WsH3Hooks(Copyable):
         msg: _MsgThunk,
         close: _OpenThunk,
         destroy: _DestroyThunk,
+        clone_box: _CloneThunk,
     ):
         self.addr = addr
         self.open = open
         self.msg = msg
         self.close = close
         self.destroy = destroy
+        self.clone_box = clone_box
+
+    def clone(self) raises -> Self:
+        """Hooks over a fresh boxed copy of the handler (one per worker);
+        the caller destroys it."""
+        var out = self.copy()
+        out.addr = self.clone_box(self.addr)
+        return out^
 
 
 def make_ws_h3_hooks[W: WsH3Handler](var handler: W) raises -> WsH3Hooks:
@@ -189,6 +204,7 @@ def make_ws_h3_hooks[W: WsH3Handler](var handler: W) raises -> WsH3Hooks:
         _msg_thunk[W],
         _close_thunk[W],
         _destroy_thunk[W],
+        _clone_thunk[W],
     )
 
 

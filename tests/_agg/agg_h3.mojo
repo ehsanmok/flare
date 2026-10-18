@@ -344,6 +344,9 @@ from test_h3_websocket import (
     test_websocket_over_h3_echoes_and_closes as test_h3_websocket__test_websocket_over_h3_echoes_and_closes,
 )
 from test_h3_websocket import (
+    test_websocket_over_h3_on_several_workers as test_h3_websocket__test_websocket_over_h3_on_several_workers,
+)
+from test_h3_websocket import (
     test_another_protocol_gets_501 as test_h3_websocket__test_another_protocol_gets_501,
 )
 from test_h3_websocket import (
@@ -688,6 +691,7 @@ def main() raises:
     ]()
     # tests/h3/test_h3_websocket.mojo
     suite.test[test_h3_websocket__test_websocket_over_h3_echoes_and_closes]()
+    suite.test[test_h3_websocket__test_websocket_over_h3_on_several_workers]()
     suite.test[test_h3_websocket__test_another_protocol_gets_501]()
     suite.test[test_h3_websocket__test_stale_tunnel_handle_is_refused]()
     # tests/h3/test_request_reader.mojo

@@ -165,19 +165,26 @@ struct _WorkerCtx[H: Handler & Copyable](Movable):
     var listener: QuicListener
     var handler: Self.H
     var ctl: Int
+    var ws: Optional[WsH3Hooks]
+    """This worker's own copy of the WebSocket sidecar, if any."""
 
     def __init__(
-        out self, var listener: QuicListener, var handler: Self.H, ctl: Int
+        out self,
+        var listener: QuicListener,
+        var handler: Self.H,
+        ctl: Int,
+        ws: Optional[WsH3Hooks],
     ):
         self.listener = listener^
         self.handler = handler^
         self.ctl = ctl
+        self.ws = ws.copy()
 
 
 def _worker_entry[H: Handler & Copyable](arg: _OpaquePtr) -> _OpaquePtr:
     var ctx = arg.unsafe_bitcast[_WorkerCtx[H]]()
     try:
-        _serve_loop[H](ctx[].listener, ctx[].handler, ctx[].ctl)
+        _serve_loop[H](ctx[].listener, ctx[].handler, ctx[].ctl, ctx[].ws)
     except:
         pass  # this worker's connections end; the others keep serving
     return arg
@@ -194,14 +201,12 @@ def serve_h3[
     """Serve HTTP/3 on ``first`` and, for ``num_workers > 1``, on one
     more ``SO_REUSEPORT`` listener per extra worker, each on its own OS
     thread. Returns when every worker has stopped; the extra listeners
-    are closed and freed here. A WebSocket sidecar (``ws``) is one boxed
-    handler, so it runs single-worker."""
+    are closed and freed here. Each extra worker serves its own copy of
+    the WebSocket sidecar (``ws``)."""
     var n = first.config.num_workers
     if n <= 1:
         _serve_loop[H](first, handler, ctl, ws)
         return
-    if ws:
-        raise Error("serve_http3: attach_ws_h3 needs num_workers = 1")
     first.config.inbox_table = new_inbox_table(n)
     var threads = alloc(Layout[ThreadHandle](count=n)).unsafe_leak()
     var ctxs = List[Int]()
@@ -213,8 +218,13 @@ def serve_h3[
             cfg.worker_id = w
             cfg.port = first.local_addr().port
             var ctx = alloc(Layout[_WorkerCtx[H]](count=1)).unsafe_leak()
+            var mine = Optional[WsH3Hooks](None)
+            if ws:
+                mine = ws.value().clone()
             ctx.unsafe_write(
-                _WorkerCtx[H](QuicListener.bind(cfg^), handler.copy(), ctl)
+                _WorkerCtx[H](
+                    QuicListener.bind(cfg^), handler.copy(), ctl, mine
+                )
             )
             ctxs.append(Int(ctx))
             threads.unsafe_offset(started).unsafe_write(
@@ -223,7 +233,7 @@ def serve_h3[
                 )
             )
             started += 1
-        _serve_loop[H](first, handler, ctl)
+        _serve_loop[H](first, handler, ctl, ws)
     except e:
         err = String(e)
     h3_control_set(ctl, 0, 1)
@@ -239,6 +249,8 @@ def serve_h3[
             unsafe_from_address=ctxs[i]
         ).unsafe_bitcast[_WorkerCtx[H]]()
         ctx[].listener.close()
+        if ctx[].ws:
+            ctx[].ws.value().destroy(ctx[].ws.value().addr)
         ctx.unsafe_deinit_pointee()
         ctx.unsafe_bitcast[UInt8]().free()
     free_inbox_table(first.config.inbox_table, n)

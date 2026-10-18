@@ -1478,6 +1478,7 @@ def run_unified_reactor_loop_shared[
     stats_addr: Int = 0,
     tls_ctx_addr: Int = 0,
     extra_fds: List[Int] = List[Int](),
+    ws_hooks: Optional[WsH2Hooks] = None,
 ) raises:
     """Multi-worker variant of :func:`run_unified_reactor_loop`.
 
@@ -1504,7 +1505,7 @@ def run_unified_reactor_loop_shared[
         handler,
         stopping,
         stats_addr,
-        None,
+        ws_hooks,
         tls_ctx_addr,
         extra_fds,
     )
