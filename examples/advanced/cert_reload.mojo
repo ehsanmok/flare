@@ -39,7 +39,9 @@ Run:
     pixi run example-cert-reload
 """
 
-from flare.tls import TlsAcceptor, TlsServerConfig
+from flare.http import HttpServer
+from flare.net import SocketAddr
+from flare.tls import TlsAcceptor, TlsServerConfig, TlsSniCert
 
 
 def main() raises:
@@ -85,6 +87,18 @@ def main() raises:
     )
     print(" diagnostic, the same gap that blocks the SIGTERM drain helper from")
     print(" Step 1. Both lift together once Mojo unblocks globals.")
+    print()
+
+    # 4. The same on an HTTPS server, with a certificate per SNI name.
+    # reload_tls() re-reads every pair; safe while serve() runs.
+    var sni = List[TlsSniCert]()
+    sni.append(TlsSniCert("api.localhost", cert_path, key_path))
+    var srv = HttpServer.bind_tls(
+        SocketAddr.localhost(0),
+        TlsServerConfig(cert_file=cert_path, key_file=key_path, sni_certs=sni^),
+    )
+    srv.reload_tls()
+    print("[4] HttpServer.reload_tls() reloaded the default and SNI certs")
     print()
 
     print("=== Example 25 complete ===")

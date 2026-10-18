@@ -833,6 +833,7 @@ examples = { depends-on = [
     "example-work-stealing",
     "example-ws",
     "example-ws-over-h2",
+    "example-ws-over-h3",
     "example-ws-permessage-deflate",
     "example-ws-server",
 ] }
@@ -845,6 +846,7 @@ example-multi-listener = "mojo -I . examples/intermediate/multi_listener.mojo" #
 example-h2c-client   = "mojo -I . examples/advanced/h2c_client.mojo"         # v0.7 — HTTP/2 cleartext via Upgrade (RFC 7540 §3.2) client
 example-client-pool  = "mojo -I . examples/advanced/client_pool.mojo"        # v0.7 — HttpClient.with_pool() keep-alive idle-reuse demo
 example-ws-over-h2   = "mojo -I . examples/advanced/ws_over_h2.mojo"         # v0.7 — RFC 8441 Extended CONNECT + WS-over-HTTP/2 stream <-> frame adapter
+example-ws-over-h3   = "mojo -I . examples/advanced/ws_over_h3.mojo"         # RFC 9220 WebSocket over HTTP/3, live server + client
 example-ws-permessage-deflate = "mojo -I . examples/advanced/ws_permessage_deflate.mojo"  # v0.7 — RFC 7692 permessage-deflate codec + offer/negotiate demo
 example-production-setup = "mojo -I . examples/advanced/production_setup.mojo"          # production-shaped server: RequestId + StructuredLogger + CatchPanic + /healthz
 example-template-inheritance = "mojo -I . examples/intermediate/template_inheritance.mojo"  # v0.8 Track J — {% block %} / {% extends %} demo

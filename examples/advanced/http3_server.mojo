@@ -71,6 +71,12 @@ struct SharedHandler(Copyable, Handler):
     def serve(self, req: Request) raises -> Response:
         if req.url == "/hello":
             return ok("Hello from flare across every wire!")
+        if req.url == "/upload":
+            # On h3 with ``stream_request_bodies`` the body arrives after
+            # the handler runs; echo it back as it comes in.
+            var r = ok("")
+            r.body_stream = req.body_stream()
+            return r^
         var body = String("you reached ") + req.method + String(" ") + req.url
         return ok(body^)
 
@@ -90,6 +96,7 @@ def main() raises:
     var udp_cfg = QuicServerConfig()
     udp_cfg.host = String("127.0.0.1")
     udp_cfg.port = UInt16(0)
+    udp_cfg.http3.stream_request_bodies = True
     var srv = HttpServer.bind_with_http3(tcp_addr, udp_cfg^)
 
     print("[bind] TCP listener:", String(srv.local_addrs()[0]))
