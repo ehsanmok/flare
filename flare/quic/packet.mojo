@@ -264,6 +264,21 @@ def parse_short_header(
     )
 
 
+def packet_number_length(
+    pn: UInt64, largest_acked: UInt64, any_acked: Bool
+) -> Int:
+    """Bytes needed to encode ``pn`` so the peer can recover it (RFC 9000
+    sec 17.1, appendix A.2): enough bits for twice the distance from the
+    largest acknowledged packet, at least 2 bytes, at most 4."""
+    var unacked = pn - largest_acked if any_acked and pn > largest_acked else (
+        pn + 1
+    )
+    var n = 2
+    while n < 4 and (unacked << 1) >= (UInt64(1) << UInt64(8 * n)):
+        n += 1
+    return n
+
+
 def encode_long_header(
     packet_type: Int,
     version: UInt32,

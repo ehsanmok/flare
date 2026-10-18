@@ -162,7 +162,7 @@ from ..tls._rustls_quic_ffi import (
     _do_session_free,
     _do_take_crypto,
 )
-from .packet import encode_short_header
+from .packet import encode_short_header, packet_number_length
 from .retry import (
     encode_retry_packet,
     encode_version_negotiation,
@@ -3418,7 +3418,7 @@ struct QuicListener(Movable):
         mut self,
         slot: Int,
         var plaintext: List[UInt8],
-        pn_length: Int = 2,
+        var pn_length: Int = 2,
         ack_eliciting: Bool = False,
     ) raises -> List[UInt8]:
         """Wrap an arbitrary 1-RTT plaintext payload (CRYPTO
@@ -3471,6 +3471,15 @@ struct QuicListener(Movable):
                 + String(pn_length)
             )
         var pn = self.connections[slot].tx_1rtt_pn
+        if slot < len(self.loss):
+            pn_length = max(
+                pn_length,
+                packet_number_length(
+                    pn,
+                    self.loss[slot].largest_acked,
+                    self.loss[slot].has_largest_acked,
+                ),
+            )
         # Start a key update once the current key has protected
         # ``key_update_interval`` packets and one of them was acked
         # (RFC 9001 sec 6.1, 6.6).

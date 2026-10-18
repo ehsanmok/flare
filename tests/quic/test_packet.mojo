@@ -236,6 +236,19 @@ def test_encoder_rejects_oversized_cid() raises:
     assert_true(raised)
 
 
+def test_packet_number_length_covers_twice_the_unacked_range() raises:
+    """RFC 9000 appendix A.2: 2 bytes up to 2^15 unacked, then 3, then
+    4; nothing acked counts from 0."""
+    from flare.quic.packet import packet_number_length
+
+    assert_equal(packet_number_length(UInt64(10), UInt64(5), True), 2)
+    assert_equal(packet_number_length(UInt64(40000), UInt64(0), True), 3)
+    assert_equal(packet_number_length(UInt64(1 << 23), UInt64(0), True), 4)
+    assert_equal(packet_number_length(UInt64(40000), UInt64(39990), True), 2)
+    assert_equal(packet_number_length(UInt64(40000), UInt64(0), False), 3)
+    assert_equal(packet_number_length(UInt64(1 << 40), UInt64(0), True), 4)
+
+
 def main() raises:
     test_long_header_initial_round_trip()
     test_long_header_all_packet_types()
@@ -248,4 +261,5 @@ def main() raises:
     test_short_header_rejects_long_bit()
     test_short_header_rejects_bad_dcid_length()
     test_encoder_rejects_oversized_cid()
+    test_packet_number_length_covers_twice_the_unacked_range()
     print("test_packet: OK")

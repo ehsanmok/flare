@@ -110,6 +110,7 @@ from .packet import (
     QUIC_VERSION_1,
     encode_long_header,
     encode_short_header,
+    packet_number_length,
     parse_initial_extras,
     parse_long_header,
     parse_short_header,
@@ -1382,7 +1383,7 @@ struct QuicClientConnection(Movable):
     def _build_1rtt(
         mut self,
         var plaintext: List[UInt8],
-        pn_length: Int = 2,
+        var pn_length: Int = 2,
         ack_eliciting: Bool = False,
     ) raises -> List[UInt8]:
         """Build a protected 1-RTT short-header datagram around an
@@ -1402,6 +1403,14 @@ struct QuicClientConnection(Movable):
         if ack_eliciting:
             frames_copy = plaintext.copy()
             self._note_ack_eliciting_send()
+        pn_length = max(
+            pn_length,
+            packet_number_length(
+                self.tx_1rtt_pn,
+                self._loss.largest_acked,
+                self._loss.has_largest_acked,
+            ),
+        )
         var prefix = encode_short_header(
             self.dcid,
             spin_bit=False,
