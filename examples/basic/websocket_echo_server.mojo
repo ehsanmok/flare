@@ -36,10 +36,9 @@ from flare.net import SocketAddr
 from flare.utils import exit, fork, usleep, waitpid
 from flare.ws import (
     WsClient,
-    WsCloseCode,
     WsConnection,
     WsHandler,
-    WsOpcode,
+    WsMessage,
     WsServer,
 )
 
@@ -60,19 +59,22 @@ struct EchoHandler(Movable, WsHandler):
     def on_connection(mut self, mut conn: WsConnection) raises -> None:
         """Run one connection to completion, echoing as it goes.
 
-        `recv` answers PING itself, so only TEXT, BINARY and CLOSE
-        reach here. A fragmented message arrives reassembled, which is
-        what lets the echo be a single send.
+        `recv_message` answers PING itself and returns a fragmented
+        message reassembled, which is what lets the echo be a single
+        send. It raises once the client has closed (the CLOSE is already
+        answered) or broke the protocol (the connection is already
+        failed with the right code), and either way the loop ends.
         """
         while True:
-            var frame = conn.recv()
-            if frame.opcode == WsOpcode.CLOSE:
-                conn.close(WsCloseCode.NORMAL)
+            var msg: WsMessage
+            try:
+                msg = conn.recv_message()
+            except:
                 break
-            if frame.opcode == WsOpcode.TEXT:
-                conn.send_text(frame.text_payload())
-            elif frame.opcode == WsOpcode.BINARY:
-                conn.send_binary(frame.payload.copy())
+            if msg.is_text:
+                conn.send_text(msg.as_text())
+            else:
+                conn.send_binary(msg.as_binary())
 
         self.served += 1
         if self.budget > 0 and self.served >= self.budget:

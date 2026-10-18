@@ -2197,6 +2197,9 @@ from test_middleware import (
     test_request_id_generates_when_absent as test_middleware__test_request_id_generates_when_absent,
 )
 from test_middleware import (
+    test_alt_svc_advertises_h3_and_keeps_a_handler_value as test_middleware__test_alt_svc_advertises_h3_and_keeps_a_handler_value,
+)
+from test_middleware import (
     test_compress_small_body_passthrough as test_middleware__test_compress_small_body_passthrough,
 )
 from test_middleware import (
@@ -5698,6 +5701,9 @@ def main() raises:
     suite.test[test_middleware__test_logger_propagates_raise]()
     suite.test[test_middleware__test_request_id_echoes_inbound]()
     suite.test[test_middleware__test_request_id_generates_when_absent]()
+    suite.test[
+        test_middleware__test_alt_svc_advertises_h3_and_keeps_a_handler_value
+    ]()
     suite.test[test_middleware__test_compress_small_body_passthrough]()
     suite.test[test_middleware__test_compress_large_body_gzipped]()
     suite.test[test_middleware__test_compress_no_acceptable_encoding_skips]()

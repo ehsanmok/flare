@@ -978,10 +978,9 @@ of what you might reasonably assume from the surrounding feature.
   protocol error from a network failure.
 - `WsConnection.recv()` fails the connection with CLOSE 1007 (RFC 6455
   sec 8.1, 7.4.1) and raises `WsProtocolError` when a final TEXT frame's
-  payload is not valid UTF-8, instead of handing it to the handler. The
-  check is per frame: a fragment of a longer message is not validated,
-  because the server has no reassembly and a fragment may end inside a
-  multi-byte sequence. The 1009 close for an oversized frame now also
+  payload is not valid UTF-8, instead of handing it to the handler. A
+  fragment is not checked by `recv()`, since it may end inside a
+  multi-byte sequence; `recv_message()` checks the reassembled message. The 1009 close for an oversized frame now also
   counts as the connection's CLOSE, so later `send_*` calls raise.
 - `WsFrame.decode_one` now raises `WsProtocolError` for a reserved opcode
   (0x3-0x7, 0xB-0xF), as RFC 6455 sec 5.2 requires of a receiver. It used
@@ -1005,20 +1004,19 @@ of what you might reasonably assume from the surrounding feature.
   when only the version is wrong, 400 otherwise. All of these used to be
   upgraded. The shared-listener upgrade (`ServerConfig.ws`) applies the
   same rule.
-- **The server side of WebSocket is not fully RFC 6455 conformant.**
-  The Autobahn suite first ran against flare in v0.11 and 63 of roughly
-  450 cases failed. In v0.12, 42 do, and all of them come from one gap:
-  `WsConnection` has no fragment reassembly and no `recv_message`, which
-  the client side does have, so a CONTINUATION sequence reaches the
-  handler as separate frames and a fragmented TEXT message is not
-  checked for UTF-8. Reserved opcodes and reserved bits fail the
-  connection with 1002, reserved close codes are rejected, and a final
-  unfragmented TEXT frame that is not valid UTF-8 is refused with 1007.
-  The remaining cases are recorded one by one in
-  [`tests/tools/conformance/autobahn-known-fail.txt`](../tests/tools/conformance/autobahn-known-fail.txt),
-  so CI catches a regression against them. Sections 12 and 13 are
-  excluded rather than failing: the standalone handshake does not
-  negotiate permessage-deflate, so they would measure the test fixture.
+- `WsConnection.recv_message()` reassembles a fragmented message on the
+  server side (RFC 6455 sec 5.4), as `WsClient.recv_message()` does on
+  the client: PING is answered between fragments, a text message is
+  checked for UTF-8 as a whole, a stray CONTINUATION or a new data frame
+  inside a fragmented message fails the connection with 1002, invalid
+  UTF-8 with 1007, and a message over `max_frame_size` with 1009. With
+  the echo server built on it, the Autobahn suite passes every case it
+  runs (301: 294 OK, 4 NON-STRICT, 3 INFORMATIONAL); the 42 failures
+  v0.12 recorded in
+  [`tests/tools/conformance/autobahn-known-fail.txt`](../tests/tools/conformance/autobahn-known-fail.txt)
+  are gone. Sections 12 and 13 are excluded rather than failing: the
+  standalone handshake does not negotiate permessage-deflate, so they
+  would measure the test fixture.
 - Batch UDP is Linux-only, and the `sendmmsg` / GSO egress path is
   built and measured but not wired into QUIC.
 - `is_private()` does not recognise IPv6 unique local addresses.

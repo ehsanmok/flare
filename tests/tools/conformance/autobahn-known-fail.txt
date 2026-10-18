@@ -12,90 +12,12 @@
 # is an ordinary use of the public API, so none of these are the
 # fixture's fault.
 #
-# Every entry left has one cause: the server side has no fragment
-# reassembly. Closing it means giving WsConnection a recv_message like
-# the client's, and each block below should be deleted when it does.
+# Emptied for v0.13: every entry had one cause, the missing server-side
+# fragment reassembly, and WsConnection.recv_message closed it. The echo
+# server uses it; the suite then passed all 301 cases it runs (294 OK, 4
+# NON-STRICT, 3 INFORMATIONAL) on 2026-10-18.
 #
 # Sections 12 and 13, permessage-deflate, are excluded in
 # autobahn.json rather than listed here -- the standalone WsServer
 # handshake does not negotiate the extension, so those cases would be
 # measuring the fixture. See autobahn-README.md.
-
-# Section 5 -- fragmentation.
-#
-# WsConnection.recv returns one frame at a time and there is no
-# recv_message, which the client side does have (flare/ws/client.mojo).
-# A CONTINUATION sequence therefore reaches the handler as separate
-# frames, and an unexpected CONTINUATION is not rejected as a protocol
-# error.
-#
-5.3
-5.4
-5.5
-5.6
-5.7
-5.8
-5.9
-5.10
-5.11
-5.12
-5.13
-5.14
-5.15
-5.16
-5.17
-5.18
-5.19
-5.20
-
-# Section 6 -- UTF-8 handling across fragments.
-#
-# A final, unfragmented TEXT frame that is not valid UTF-8 is closed
-# with 1007 already. A fragmented message would have to be validated
-# after reassembly, and the echo server hands the pieces back one by
-# one, so these wait on section 5.
-#
-6.1.3
-6.2.2
-6.2.3
-6.2.4
-6.4.1
-6.4.2
-
-# Section 7 -- close handling.
-#
-# 7.1.5 sends a message fragment, then a close frame, then another
-# fragment. It depends on reassembly for the same reason as section 5.
-#
-7.1.5
-
-# Section 9 -- large and fragmented payloads.
-#
-# 9.1 and 9.2 pass, which is the unfragmented half. 9.3 and 9.4 are
-# the same messages delivered fragmented, so they fail for the
-# section 5 reason and will pass with it.
-#
-9.3.1
-9.3.2
-9.3.3
-9.3.4
-9.3.5
-9.3.6
-9.3.7
-9.3.8
-9.4.1
-9.4.2
-9.4.3
-9.4.4
-9.4.5
-9.4.6
-9.4.7
-9.4.8
-
-# Section 10 -- auto-fragmentation.
-#
-# The server never fragments what it sends, so the peer's
-# auto-fragmentation expectation is not met. Same dependency as
-# section 5.
-#
-10.1.1

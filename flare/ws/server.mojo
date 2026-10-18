@@ -25,6 +25,7 @@ from .frame import (
     WsProtocolError,
     _is_valid_utf8,
 )
+from .client import WsMessage
 from ..crypto.base64 import base64_decode as _b64_decode_srv
 from ..crypto.base64 import base64_encode as _b64_encode_srv
 from ..http.response import Status
@@ -755,6 +756,80 @@ struct WsConnection(Movable):
                     self._stream.write_all(Span[UInt8, _](wire))
                 except:
                     pass  # best-effort: the peer may be gone already
+            return frame^
+
+    def recv_message(mut self) raises -> WsMessage:
+        """Receive the next complete message, reassembled.
+
+        A fragmented message (a TEXT or BINARY frame without FIN, then
+        CONTINUATION frames up to one with FIN, RFC 6455 sec 5.4) comes
+        back whole; :meth:`recv` returns its pieces one by one. PING is
+        answered and PONG skipped, between fragments too. A text message
+        is checked for UTF-8 as a whole, so a code point may be split
+        across fragments. The reassembled payload is bounded by
+        ``max_frame_size``.
+
+        Raises:
+            NetworkError: If the client sent CLOSE (already answered by
+                :meth:`recv`), or on I/O failure.
+            WsProtocolError: After failing the connection with 1002 for a
+                CONTINUATION with no message to continue or a new data
+                frame inside a fragmented one, 1007 for a text message
+                that is not UTF-8, 1009 for a message over
+                ``max_frame_size``.
+        """
+        var first = self._recv_data_frame()
+        if first.opcode == WsOpcode.CONTINUATION:
+            self._fail_connection(WsCloseCode.PROTOCOL_ERROR)
+            raise WsProtocolError(
+                "CONTINUATION frame with no message to continue (RFC 6455"
+                " sec 5.4)"
+            )
+        var is_text = first.opcode == WsOpcode.TEXT
+        var fin = first.fin
+        var payload = List[UInt8]()
+        swap(payload, first.payload)
+        while not fin:
+            var next = self._recv_data_frame()
+            if next.opcode != WsOpcode.CONTINUATION:
+                self._fail_connection(WsCloseCode.PROTOCOL_ERROR)
+                raise WsProtocolError(
+                    "new data frame inside a fragmented message (RFC 6455"
+                    " sec 5.4)"
+                )
+            if len(payload) + len(next.payload) > self.max_frame_size:
+                self._fail_connection(WsCloseCode.MESSAGE_TOO_BIG)
+                raise WsProtocolError(
+                    WS_TOO_BIG_MARKER
+                    + ": reassembled message exceeds "
+                    + String(self.max_frame_size)
+                    + " bytes"
+                )
+            payload.extend(Span[UInt8, _](next.payload))
+            fin = next.fin
+        if not is_text:
+            return WsMessage(payload^)
+        if not _is_valid_utf8(payload):
+            self._fail_connection(WsCloseCode.INVALID_PAYLOAD)
+            raise WsProtocolError(
+                "TEXT message is not valid UTF-8 (RFC 6455 sec 8.1); closed"
+                " with 1007"
+            )
+        return WsMessage(
+            WsFrame(opcode=WsOpcode.TEXT, payload=payload^).text_payload()
+        )
+
+    def _recv_data_frame(mut self) raises -> WsFrame:
+        """The next TEXT, BINARY or CONTINUATION frame; PONG is skipped
+        and a CLOSE raises (``recv`` has answered it)."""
+        while True:
+            var frame = self.recv()
+            if frame.opcode == WsOpcode.PONG:
+                continue
+            if frame.opcode == WsOpcode.CLOSE:
+                raise NetworkError(
+                    "WebSocket: the client closed the connection"
+                )
             return frame^
 
     def _fail_connection(mut self, code: UInt16):
