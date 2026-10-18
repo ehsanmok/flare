@@ -17,7 +17,9 @@ the `TcpListener` and hands the bare fd number to every worker. Each worker
 
 So a worker touches the number at registration and at every listener event
 of a batch it polled before observing the stop flag; a slow handler earlier
-in the same batch delays that accept arbitrarily.
+in the same batch delays that accept arbitrarily. The `ListenerGate` pause
+and resume at the connection cap (`gate.sync`, a DEL / exclusive ADD at the
+end of the same iteration) are uses of the same kind, folded into `acc`.
 
 Teardown (`shutdown`, `drain`) starts with `_signal_stop`: store stop :=
 True, leaving the number open (CONC-05). `drain` detaches workers that miss
@@ -47,7 +49,7 @@ interleaving of `close`, `reuse` and `accept` is sequentially consistent.
 namespace Flare.L5.SharedListener
 
 /-- Worker program counter.
-mirrors flare/http/_server_reactor_epoll.mojo#_run_handler_loop_impl sha=1465c17e48c9 at=59bda50f -/
+mirrors flare/http/_server_reactor_epoll.mojo#_run_handler_loop_impl sha=2f9bbe6a6bd1 at=0a183352 -/
 inductive WPc where
   | reg    -- :155-156 `register_exclusive(listener_fd, ...)`
   | check  -- :163 `while not load_stop_flag(stopping_addr)`
@@ -67,7 +69,7 @@ inductive Fd where
   deriving DecidableEq, Repr
 
 /-- Teardown thread.
-mirrors flare/runtime/scheduler.mojo#Scheduler.shutdown+Scheduler.drain sha=5d2b1769fbd6 at=59bda50f -/
+mirrors flare/runtime/scheduler.mojo#Scheduler.shutdown+Scheduler.drain sha=40ca477745be at=30fc5e99 -/
 inductive MPc where
   | signal          -- `_signal_stop`
   | sweep (k : Nat) -- join worker k if it returned, else detach it (drain)
@@ -96,7 +98,7 @@ spawned, none registered yet. -/
 def init (n : Nat) : St := ⟨List.replicate n w0, false, .lis, .signal, false⟩
 
 /-- One worker step: the new worker and whether it used the fd number.
-mirrors flare/http/_server_reactor_epoll.mojo#_run_handler_loop_impl sha=1465c17e48c9 at=59bda50f -/
+mirrors flare/http/_server_reactor_epoll.mojo#_run_handler_loop_impl sha=2f9bbe6a6bd1 at=0a183352 -/
 def wStep (stop : Bool) (w : W) : Option (W × Bool) :=
   match w.pc with
   | .reg => some ({ w with pc := .check }, true)
@@ -108,14 +110,14 @@ def anyDet (s : St) : Bool := s.ws.any (·.detached)
 
 /-- Freeing the shared listener: closed once after the join, leaked when a
 worker was detached (CONC-05).
-mirrors flare/runtime/scheduler.mojo#Scheduler._free_resources+Scheduler.drain sha=2930b24e0585 at=45813d7d (fixed, CONC-05) -/
+mirrors flare/runtime/scheduler.mojo#Scheduler._free_resources+Scheduler.drain sha=1b5729f96020 at=30fc5e99 (fixed, CONC-05) -/
 def freeFd (s : St) : Fd :=
   if anyDet s then s.fd else if s.fd = .lis then .closed else s.fd
 
 /-- `hard`: `shutdown()` / `drain(timeout_ms <= 0)` (every worker joined;
 the sweep waits). Storing the stop flag leaves the shared fd open (CONC-05).
-mirrors flare/runtime/scheduler.mojo#Scheduler._signal_stop+Scheduler._join_workers sha=557690e12b80 at=45813d7d (fixed, CONC-05) and
-flare/runtime/scheduler.mojo#Scheduler._signal_stop+Scheduler.drain sha=aea259247361 at=ea1b9282 -/
+mirrors flare/runtime/scheduler.mojo#Scheduler._signal_stop+Scheduler._join_workers sha=557690e12b80 at=30fc5e99 (fixed, CONC-05) and
+flare/runtime/scheduler.mojo#Scheduler._signal_stop+Scheduler.drain sha=0d9bc4a3ee5b at=30fc5e99 -/
 def mStep (hard : Bool) (s : St) : Option St :=
   match s.m with
   | .signal => some { s with stop := true, m := .sweep 0 }
@@ -130,8 +132,8 @@ def mStep (hard : Bool) (s : St) : Option St :=
   | .free => some { s with fd := freeFd s, m := .fin }
   | .fin => none
 
-/-- mirrors flare/http/_server_reactor_epoll.mojo#_run_handler_loop_impl sha=1465c17e48c9 at=193ddcec and
-flare/runtime/scheduler.mojo#Scheduler._signal_stop+Scheduler.drain sha=aea259247361 at=ea1b9282 -/
+/-- mirrors flare/http/_server_reactor_epoll.mojo#_run_handler_loop_impl sha=2f9bbe6a6bd1 at=30fc5e99 and
+flare/runtime/scheduler.mojo#Scheduler._signal_stop+Scheduler.drain sha=0d9bc4a3ee5b at=30fc5e99 -/
 def step (hard : Bool) (s : St) : Lbl → Option St
   | .w i =>
     match s.ws[i]? with

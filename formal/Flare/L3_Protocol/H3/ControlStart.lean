@@ -26,23 +26,25 @@ namespace Flare.L3.H3.ControlStart
 open Flare.L3.H3
 
 /-- The `Http3Config` fields read by `emit_initial_settings`.
-mirrors flare/http3/server.mojo#Http3Config sha=556adbd318b0 at=ea1b9282 -/
+mirrors flare/http3/server.mojo#Http3Config sha=7ac438a60aed at=30fc5e99 -/
 structure Config where
   maxFieldSection : Nat := 65536
   qpackCap : Nat := 0
   qpackBlocked : Nat := 0
-  connect : Bool := true
+  connect : Bool := false
+  h3Datagram : Bool := false
 
 /-- Values a varint can carry. -/
 def Config.Valid (c : Config) : Prop :=
   c.maxFieldSection < 2 ^ 62 ∧ c.qpackCap < 2 ^ 62 ∧ c.qpackBlocked < 2 ^ 62
 
-/-- mirrors flare/http3/server.mojo#Http3Connection.emit_initial_settings sha=59a32f76e580 at=ea1b9282 -/
+/-- mirrors flare/http3/server.mojo#Http3Connection.emit_initial_settings sha=c08b3afc5529 at=30fc5e99 -/
 def settingsList (c : Config) : List (Nat × Nat) :=
   [(0x06, c.maxFieldSection), (0x01, c.qpackCap), (0x07, c.qpackBlocked)] ++
-    (if c.connect then [(0x08, 1)] else [])
+    (if c.connect then [(0x08, 1)] else []) ++
+    (if c.h3Datagram then [(0x33, 1)] else [])
 
-/-- mirrors flare/http3/server.mojo#Http3Connection.emit_initial_settings sha=59a32f76e580 at=ea1b9282 -/
+/-- mirrors flare/http3/server.mojo#Http3Connection.emit_initial_settings sha=c08b3afc5529 at=30fc5e99 -/
 def emitInitialSettings (enc : Nat → Bytes) (c : Config) : Bytes :=
   enc 0x00 ++ encodeFrame enc 0x04 (encodeSettings enc (settingsList c))
 
@@ -71,7 +73,7 @@ def ClientBidi (reqs : List Nat) : Prop := ∀ s ∈ reqs, s % 4 = 0
 /-- The outbound set: stream 3 with the bytes of `take_control_stream_start()`,
 appended to the first 1-RTT flight next to HANDSHAKE_DONE, then one response
 stream per request.
-mirrors flare/quic/server.mojo#QuicListener._drain_1rtt_coalesced sha=febb6014ce9a at=74fe61fd, flare/http3/server.mojo#Http3Connection.take_control_stream_start sha=309466764d0e at=74fe61fd (fixed, H3-07) -/
+mirrors flare/quic/server.mojo#QuicListener._drain_1rtt_coalesced sha=99380341168c at=0a183352, flare/http3/server.mojo#Http3Connection.take_control_stream_start sha=309466764d0e at=0a183352 (fixed, H3-07) -/
 def implOut (enc : Nat → Bytes) (c : Config) (resp : Nat → Bytes) (reqs : List Nat) : Out :=
   (3, emitInitialSettings enc c) :: reqs.map fun s => (s, resp s)
 
@@ -111,17 +113,18 @@ theorem settingsList_valid (c : Config) (hc : c.Valid) :
   have h62 : (8 : Nat) < 2 ^ 62 := by decide
   intro p hp
   simp only [settingsList, List.mem_append, List.mem_cons, List.mem_nil_iff, or_false] at hp
-  rcases hp with (rfl | rfl | rfl) | hp
+  rcases hp with ((rfl | rfl | rfl) | hp) | hp
   · exact ⟨by omega, h1⟩
   · exact ⟨by omega, h2⟩
   · exact ⟨by omega, h3⟩
-  · split at hp
+  all_goals
+    split at hp
     · simp only [List.mem_cons, List.mem_nil_iff, or_false] at hp
-      subst hp; exact ⟨by omega, by omega⟩
+      subst hp; exact ⟨by decide, by omega⟩
     · simp at hp
 
-theorem settingsList_len (c : Config) : (settingsList c).length ≤ 4 := by
-  unfold settingsList; split <;> simp
+theorem settingsList_len (c : Config) : (settingsList c).length ≤ 5 := by
+  unfold settingsList; split <;> split <;> simp
 
 /-- The control stream opens with 0x00 and a SETTINGS frame that decodes back to
 exactly the configured settings. -/
@@ -135,7 +138,7 @@ theorem emit_control_start (enc : Nat → Bytes) (henc : VarintCodec enc)
   have hlen : (encodeSettings enc (settingsList c)).length < 2 ^ 62 := by
     have := encodeSettings_len enc henc _ hv
     have := settingsList_len c
-    have h62 : (64 : Nat) < 2 ^ 62 := by decide
+    have h62 : (80 : Nat) < 2 ^ 62 := by decide
     omega
   refine ⟨henc 0 _ (by decide), ?_, decodeSettings_encode enc henc hpos _ hv⟩
   unfold emitInitialSettings

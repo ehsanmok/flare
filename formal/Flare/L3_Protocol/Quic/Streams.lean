@@ -18,9 +18,9 @@ only a send part at its initiator and only a receive part at the other end.
 * §19.10: MAX_STREAM_DATA, the same two cases, STREAM_STATE_ERROR;
 * §19.13: STREAM_DATA_BLOCKED on a send-only stream, STREAM_STATE_ERROR.
 
-`server` is the server's check (STREAM in `_route_http3_stream_chunks`, with the
-unidirectional limit of QUIC-16; the other four frames in `check_stream_frame_id`,
-state.mojo, QUIC-15); `client` is the client's (QUIC-17). `checked` is the
+`server` is the server's check (`check_stream_frame_id`, state.mojo, QUIC-15,
+in every frame handler, then for STREAM the checks in
+`_route_http3_stream_chunks`, with the unidirectional limit of QUIC-16); `client` is the client's (QUIC-17). `checked` is the
 bit-level check; `checked_eq_spec` proves it is the spec, and
 `serverFixed_eq_spec` / `clientFixed_eq_spec` instantiate it.
 
@@ -105,49 +105,62 @@ theorem checked_eq_spec (r : Role) (c : Ctx) (k : Kind) (sid : Nat) :
 
 /-! ## The server -/
 
-/-- STREAM: mirrors flare/quic/server.mojo#QuicListener._route_http3_stream_chunks sha=efd4a176d4c2 at=59bda50f; the other
-four frames: mirrors flare/quic/state.mojo#apply_max_stream_data+apply_reset_stream+apply_stop_sending+_ConnFrameHandler.on_max_streams+_ConnFrameHandler.on_data_blocked+_ConnFrameHandler.on_stream_data_blocked+_ConnFrameHandler.on_streams_blocked sha=3afbe9a553df at=59bda50f (no
-check; RESET_STREAM / STOP_SENDING / MAX_STREAM_DATA touch a known stream,
-STREAM_DATA_BLOCKED is ignored). -/
+/-- The route checks of `_route_http3_stream_chunks` on a STREAM frame.
+mirrors flare/quic/server.mojo#QuicListener._route_http3_stream_chunks sha=dd96844227f2 at=0a183352 -/
+def route (c : Ctx) (sid : Nat) : Option Err :=
+  if sid % 2 = 1 then some .state
+  else if sid % 4 = 0 ∧ c.maxBidi < sid / 4 + 1 then some .limit
+  else if sid % 4 = 2 ∧ c.maxUni < sid / 4 + 1 then some .limit
+  else none
+
+/-- Every frame first meets `check_stream_frame_id` in its handler (the
+server's connection has `check_stream_ids`); a STREAM frame that passes
+then meets `route`. MAX_STREAMS, DATA_BLOCKED and STREAMS_BLOCKED name no
+stream.
+mirrors flare/quic/state.mojo#check_stream_frame_id+_ConnFrameHandler.on_stream+_ConnFrameHandler.on_reset_stream+_ConnFrameHandler.on_stop_sending+_ConnFrameHandler.on_max_stream_data+_ConnFrameHandler.on_stream_data_blocked+_ConnFrameHandler.on_max_streams+_ConnFrameHandler.on_data_blocked+_ConnFrameHandler.on_streams_blocked sha=b0951d91e9b9 at=0a183352 -/
 def server (c : Ctx) (k : Kind) (sid : Nat) : Option Err :=
-  match k with
-  | .stream =>
-    if sid % 2 = 1 then some .state
-    else if sid % 4 = 0 ∧ c.maxBidi < sid / 4 + 1 then some .limit
-    else if sid % 4 = 2 ∧ c.maxUni < sid / 4 + 1 then some .limit
-    else none
-  | _ => checked .server c k sid
+  match checked .server c k sid with
+  | some e => some e
+  | none => if k = .stream then route c sid else none
 
 /-- The streams flare's server has opened: none until its first 1-RTT
 flight, then exactly its HTTP/3 control stream 3 (RFC 9114 §6.2.1), which
 `_drain_1rtt_coalesced` sends and records with `mark_local_stream_opened`.
 It answers requests on the client's bidirectional streams.
-mirrors flare/quic/state.mojo#mark_local_stream_opened sha=5c6368f1a77a at=74fe61fd and
-flare/quic/server.mojo#QuicListener._drain_1rtt_coalesced sha=febb6014ce9a at=74fe61fd -/
+mirrors flare/quic/state.mojo#mark_local_stream_opened sha=5c6368f1a77a at=0a183352 and
+flare/quic/server.mojo#QuicListener._drain_1rtt_coalesced sha=99380341168c at=0a183352 -/
 def ServerOpened (sent : Bool) (c : Ctx) : Prop := ∀ sid, c.opened sid = (sent && sid == 3)
+
+theorem route_eq_checked (sent : Bool) (c : Ctx) (hc : ServerOpened sent c) (sid : Nat) :
+    route c sid = checked .server c .stream sid := by
+  unfold route checked
+  by_cases h1 : sid % 2 = 1
+  · by_cases hu : sid % 4 = 3
+    · simp [h1, hu]
+    · have h3 : sid ≠ 3 := by omega
+      have ho : c.opened sid = false := by rw [hc sid]; simp [h3]
+      have hu' : ¬ 2 ≤ sid % 4 := by omega
+      simp [h1, hu', ho]
+  · by_cases h2 : sid % 4 = 0
+    · by_cases h3 : c.maxBidi < sid / 4 + 1 <;> simp [h1, h2, h3]
+    · have h4 : sid % 4 = 2 := by omega
+      by_cases h3 : c.maxUni < sid / 4 + 1 <;> simp [h1, h4, h3]
 
 theorem serverFixed_eq_spec (sent : Bool) (c : Ctx) (hc : ServerOpened sent c) (k : Kind) (sid : Nat) :
     server c k sid = spec .server c k sid := by
   rw [← checked_eq_spec]
-  cases k with
-  | stream =>
-    unfold server checked
-    by_cases h1 : sid % 2 = 1
-    · by_cases hu : sid % 4 = 3
-      · simp [h1, hu]
-      · have h3 : sid ≠ 3 := by omega
-        have ho : c.opened sid = false := by rw [hc sid]; simp [h3]
-        have hu' : ¬ 2 ≤ sid % 4 := by omega
-        simp [h1, hu', ho]
-    · by_cases h2 : sid % 4 = 0
-      · by_cases h3 : c.maxBidi < sid / 4 + 1 <;> simp [h1, h2, h3]
-      · have h4 : sid % 4 = 2 := by omega
-        by_cases h3 : c.maxUni < sid / 4 + 1 <;> simp [h1, h4, h3]
-  | _ => rfl
+  unfold server
+  cases h : checked .server c k sid with
+  | some e => rfl
+  | none =>
+    simp only
+    split
+    · rename_i hk; subst hk; rw [route_eq_checked sent c hc sid, h]
+    · rfl
 
 /-! ## The client -/
 
-/-- mirrors flare/quic/client.mojo#QuicClientConnection._dispatch_frames sha=1dabb9c8280e at=59bda50f (`_dispatch_frames`
+/-- mirrors flare/quic/client.mojo#QuicClientConnection._dispatch_frames sha=96f9aaa8a2be at=0a183352 (`_dispatch_frames`
 hands every frame to the shared state machine, whose frame handlers run
 `check_stream_frame_id`, QUIC-17) -/
 def client (c : Ctx) (k : Kind) (sid : Nat) : Option Err :=
@@ -190,7 +203,7 @@ def runHalves (evs : List Ev) : Halves := evs.foldl stepHalves {}
 /-- mirrors flare/quic/client.mojo#QuicClientConnection.stream_reset sha=f0dc7dbddb34 at=cc5a947e (fixed, QUIC-18) -/
 def resetSeenH (h : Halves) : Bool := h.recvReset
 
-/-- mirrors flare/quic/client.mojo#QuicClientConnection.send_stream sha=0131f865bdae at=cc5a947e's reset check (fixed, QUIC-18) -/
+/-- mirrors flare/quic/client.mojo#QuicClientConnection.send_stream sha=40d19bc6fc6a at=0a183352's reset check (fixed, QUIC-18) -/
 def sendRefusedH (h : Halves) : Bool := h.sendReset
 
 theorem runHalves_go (evs : List Ev) : ∀ h : Halves,

@@ -12,6 +12,8 @@ Model of flare/quic/transport_params.mojo @59bda50:
 
 The varint codec is `Flare.L3.H3.decVarint` (= flare/quic/varint.mojo).
 CIDs and the reset token are `Bytes`, empty meaning absent, as in flare.
+min_ack_delay (draft-ietf-quic-ack-frequency) is a varint parameter with
+no range rule.
 
 Spec (`specDecode`): the buffer is a sequence of TLVs (`tlvs`); the ids are
 pairwise distinct (§18: duplicates are TRANSPORT_PARAMETER_ERROR); every
@@ -45,19 +47,20 @@ open Flare Flare.L3.H3
 inductive TPErr | truncated | trailing | duplicate | invalid
   deriving DecidableEq, Repr
 
-/-- mirrors flare/quic/transport_params.mojo#TP_ID_ORIGINAL_DCID+TP_ID_MAX_IDLE_TIMEOUT+TP_ID_STATELESS_RESET_TOKEN+TP_ID_MAX_UDP_PAYLOAD_SIZE+TP_ID_INITIAL_MAX_DATA+TP_ID_INITIAL_MAX_STREAM_DATA_BIDI_LOCAL+TP_ID_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE+TP_ID_INITIAL_MAX_STREAM_DATA_UNI+TP_ID_INITIAL_MAX_STREAMS_BIDI+TP_ID_INITIAL_MAX_STREAMS_UNI+TP_ID_ACK_DELAY_EXPONENT+TP_ID_MAX_ACK_DELAY+TP_ID_DISABLE_ACTIVE_MIGRATION+TP_ID_PREFERRED_ADDRESS+TP_ID_ACTIVE_CONNECTION_ID_LIMIT+TP_ID_INITIAL_SCID+TP_ID_RETRY_SCID+TP_ID_MAX_DATAGRAM_FRAME_SIZE sha=2b833fbaf157 at=59bda50f -/
+/-- mirrors flare/quic/transport_params.mojo#TP_ID_ORIGINAL_DCID+TP_ID_MAX_IDLE_TIMEOUT+TP_ID_STATELESS_RESET_TOKEN+TP_ID_MAX_UDP_PAYLOAD_SIZE+TP_ID_INITIAL_MAX_DATA+TP_ID_INITIAL_MAX_STREAM_DATA_BIDI_LOCAL+TP_ID_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE+TP_ID_INITIAL_MAX_STREAM_DATA_UNI+TP_ID_INITIAL_MAX_STREAMS_BIDI+TP_ID_INITIAL_MAX_STREAMS_UNI+TP_ID_ACK_DELAY_EXPONENT+TP_ID_MAX_ACK_DELAY+TP_ID_DISABLE_ACTIVE_MIGRATION+TP_ID_PREFERRED_ADDRESS+TP_ID_ACTIVE_CONNECTION_ID_LIMIT+TP_ID_INITIAL_SCID+TP_ID_RETRY_SCID+TP_ID_MAX_DATAGRAM_FRAME_SIZE+TP_ID_MIN_ACK_DELAY sha=da284e7a6065 at=da6fb43a -/
 inductive PK
   | odcid | idle | token | maxUdp | maxData | sdBidiLocal | sdBidiRemote | sdUni
   | streamsBidi | streamsUni | ackExp | maxAckDelay | disableMig | prefAddr | cidLimit
-  | iscid | rscid | datagram | unknown
+  | iscid | rscid | datagram | minAckDelay | unknown
   deriving DecidableEq, Repr
 
-/-- mirrors flare/quic/transport_params.mojo#TP_ID_ORIGINAL_DCID+TP_ID_MAX_IDLE_TIMEOUT+TP_ID_STATELESS_RESET_TOKEN+TP_ID_MAX_UDP_PAYLOAD_SIZE+TP_ID_INITIAL_MAX_DATA+TP_ID_INITIAL_MAX_STREAM_DATA_BIDI_LOCAL+TP_ID_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE+TP_ID_INITIAL_MAX_STREAM_DATA_UNI+TP_ID_INITIAL_MAX_STREAMS_BIDI+TP_ID_INITIAL_MAX_STREAMS_UNI+TP_ID_ACK_DELAY_EXPONENT+TP_ID_MAX_ACK_DELAY+TP_ID_DISABLE_ACTIVE_MIGRATION+TP_ID_PREFERRED_ADDRESS+TP_ID_ACTIVE_CONNECTION_ID_LIMIT+TP_ID_INITIAL_SCID+TP_ID_RETRY_SCID+TP_ID_MAX_DATAGRAM_FRAME_SIZE sha=2b833fbaf157 at=59bda50f -/
+/-- mirrors flare/quic/transport_params.mojo#TP_ID_ORIGINAL_DCID+TP_ID_MAX_IDLE_TIMEOUT+TP_ID_STATELESS_RESET_TOKEN+TP_ID_MAX_UDP_PAYLOAD_SIZE+TP_ID_INITIAL_MAX_DATA+TP_ID_INITIAL_MAX_STREAM_DATA_BIDI_LOCAL+TP_ID_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE+TP_ID_INITIAL_MAX_STREAM_DATA_UNI+TP_ID_INITIAL_MAX_STREAMS_BIDI+TP_ID_INITIAL_MAX_STREAMS_UNI+TP_ID_ACK_DELAY_EXPONENT+TP_ID_MAX_ACK_DELAY+TP_ID_DISABLE_ACTIVE_MIGRATION+TP_ID_PREFERRED_ADDRESS+TP_ID_ACTIVE_CONNECTION_ID_LIMIT+TP_ID_INITIAL_SCID+TP_ID_RETRY_SCID+TP_ID_MAX_DATAGRAM_FRAME_SIZE+TP_ID_MIN_ACK_DELAY sha=da284e7a6065 at=da6fb43a -/
 def kindTable : List (Nat × PK) :=
   [(0x00, .odcid), (0x01, .idle), (0x02, .token), (0x03, .maxUdp), (0x04, .maxData),
    (0x05, .sdBidiLocal), (0x06, .sdBidiRemote), (0x07, .sdUni), (0x08, .streamsBidi),
    (0x09, .streamsUni), (0x0a, .ackExp), (0x0b, .maxAckDelay), (0x0c, .disableMig),
-   (0x0d, .prefAddr), (0x0e, .cidLimit), (0x0f, .iscid), (0x10, .rscid), (0x20, .datagram)]
+   (0x0d, .prefAddr), (0x0e, .cidLimit), (0x0f, .iscid), (0x10, .rscid), (0x20, .datagram),
+   (0xFF04DE1B, .minAckDelay)]
 
 def kind (id : Nat) : PK := ((kindTable.find? (·.1 = id)).map (·.2)).getD .unknown
 
@@ -76,7 +79,7 @@ theorem kind_mem {id : Nat} {k : PK} (h : kind id = k) (hk : k ≠ .unknown) : (
     subst h1 h
     exact h2
 
-/-- mirrors flare/quic/transport_params.mojo#TransportParameters sha=b93229840322 at=59bda50f -/
+/-- mirrors flare/quic/transport_params.mojo#TransportParameters sha=511c286cee0d at=30fc5e99 -/
 structure TP where
   odcid : Bytes := []
   idle : Option Nat := none
@@ -95,6 +98,7 @@ structure TP where
   iscid : Bytes := []
   rscid : Bytes := []
   datagram : Option Nat := none
+  minAckDelay : Option Nat := none
   deriving DecidableEq, Repr
 
 /-- mirrors flare/quic/transport_params.mojo#_read_param_varint sha=8a186a3b1ca1 at=59bda50f -/
@@ -127,6 +131,7 @@ def setVar (k : PK) (x : Nat) (tp : TP) : TP :=
   | .maxAckDelay => { tp with maxAckDelay := some x }
   | .cidLimit => { tp with cidLimit := some x }
   | .datagram => { tp with datagram := some x }
+  | .minAckDelay => { tp with minAckDelay := some x }
   | _ => tp
 
 /-- RFC 9000 §18.2 preferred_address layout: 4 + 2 + 16 + 2 bytes of
@@ -136,13 +141,13 @@ def paValid (v : Bytes) : Bool :=
     decide ((Bytes.getD v 24).toNat ≤ 20) && decide (v.length = 41 + (Bytes.getD v 24).toNat)
 
 /-- A varint parameter, checked with `varOk` (the stream limits since QUIC-10).
-mirrors flare/quic/transport_params.mojo#decode_transport_parameters sha=70494f455a29 at=59bda50f -/
+mirrors flare/quic/transport_params.mojo#decode_transport_parameters sha=378c626d35a4 at=da6fb43a -/
 def applyVar (k : PK) (v : Bytes) (tp : TP) : Except TPErr TP :=
   match readVar v with
   | .error e => .error e
   | .ok x => if varOk k x then .ok (setVar k x tp) else .error .invalid
 
-/-- One parameter. mirrors flare/quic/transport_params.mojo#decode_transport_parameters sha=70494f455a29 at=59bda50f
+/-- One parameter. mirrors flare/quic/transport_params.mojo#decode_transport_parameters sha=378c626d35a4 at=da6fb43a
 (0x0d gets the QUIC-13 layout check). -/
 def apply (id : Nat) (v : Bytes) (tp : TP) : Except TPErr TP :=
   match kind id with
@@ -155,7 +160,7 @@ def apply (id : Nat) (v : Bytes) (tp : TP) : Except TPErr TP :=
   | .unknown => .ok tp
   | k => applyVar k v tp
 
-/-- mirrors flare/quic/transport_params.mojo#decode_transport_parameters sha=70494f455a29 at=59bda50f (`b` is
+/-- mirrors flare/quic/transport_params.mojo#decode_transport_parameters sha=378c626d35a4 at=da6fb43a (`b` is
 `buf[pos:]`; `seen` is the duplicate list, newest first) -/
 def decodeLoop (seen : List Nat) (tp : TP) (b : Bytes) : Except TPErr TP :=
   if b.length = 0 then .ok tp else
@@ -407,13 +412,14 @@ def bytP (id : Nat) (b : Bytes) : List (Nat × Bytes) := if b = [] then [] else 
 def flagP (id : Nat) (f : Bool) : List (Nat × Bytes) := if f then [(id, [])] else []
 
 /-- The parameters emitted, in order.
-mirrors flare/quic/transport_params.mojo#encode_transport_parameters sha=c1b27a6d5f20 at=59bda50f -/
+mirrors flare/quic/transport_params.mojo#encode_transport_parameters sha=bd16d1e078bc at=30fc5e99 -/
 def params (enc : Nat → Bytes) (tp : TP) : List (Nat × Bytes) :=
   bytP 0x00 tp.odcid ++ optP enc 0x01 tp.idle ++ bytP 0x02 tp.token ++ optP enc 0x03 tp.maxUdp ++
   optP enc 0x04 tp.maxData ++ optP enc 0x05 tp.sdBidiLocal ++ optP enc 0x06 tp.sdBidiRemote ++
   optP enc 0x07 tp.sdUni ++ optP enc 0x08 tp.streamsBidi ++ optP enc 0x09 tp.streamsUni ++
   optP enc 0x0a tp.ackExp ++ optP enc 0x0b tp.maxAckDelay ++ flagP 0x0c tp.disableMig ++
-  optP enc 0x0e tp.cidLimit ++ bytP 0x0f tp.iscid ++ bytP 0x10 tp.rscid ++ optP enc 0x20 tp.datagram
+  optP enc 0x0e tp.cidLimit ++ bytP 0x0f tp.iscid ++ bytP 0x10 tp.rscid ++ optP enc 0x20 tp.datagram ++
+  optP enc 0xFF04DE1B tp.minAckDelay
 
 /-- The length field: `encode_varint(len)`, a literal `00` for the flag.
 mirrors flare/quic/transport_params.mojo#_emit_varint_param+_emit_bytes_param+_emit_flag_param sha=5f4aaa8c473b at=59bda50f -/
@@ -425,16 +431,16 @@ def wire (enc : Nat → Bytes) : List (Nat × Bytes) → Bytes
 
 def varFields (tp : TP) : List (Option Nat) :=
   [tp.idle, tp.maxUdp, tp.maxData, tp.sdBidiLocal, tp.sdBidiRemote, tp.sdUni, tp.streamsBidi,
-   tp.streamsUni, tp.ackExp, tp.maxAckDelay, tp.cidLimit, tp.datagram]
+   tp.streamsUni, tp.ackExp, tp.maxAckDelay, tp.cidLimit, tp.datagram, tp.minAckDelay]
 
-/-- The encoder's raises. mirrors flare/quic/transport_params.mojo#encode_transport_parameters sha=c1b27a6d5f20 at=59bda50f and flare/quic/varint.mojo (values ≥ 2^62) -/
+/-- The encoder's raises. mirrors flare/quic/transport_params.mojo#encode_transport_parameters sha=bd16d1e078bc at=30fc5e99 and flare/quic/varint.mojo (values ≥ 2^62) -/
 def encodeOk (tp : TP) : Bool :=
   (tp.token = [] || tp.token.length = 16) && tp.ackExp.all (· ≤ 20) &&
     tp.maxAckDelay.all (· < 2 ^ 14) && tp.cidLimit.all (2 ≤ ·) &&
     (varFields tp).all (fun o => o.all (· < 2 ^ 62)) &&
     [tp.odcid, tp.token, tp.iscid, tp.rscid].all (fun b => decide (b.length < 2 ^ 62))
 
-/-- mirrors flare/quic/transport_params.mojo#encode_transport_parameters sha=c1b27a6d5f20 at=59bda50f -/
+/-- mirrors flare/quic/transport_params.mojo#encode_transport_parameters sha=bd16d1e078bc at=30fc5e99 -/
 def encode (enc : Nat → Bytes) (tp : TP) : Except TPErr Bytes :=
   if encodeOk tp then .ok (wire enc (params enc tp)) else .error .invalid
 
@@ -514,7 +520,7 @@ theorem validVar_enc (enc : Nat → Bytes) (henc : VarintCodec enc) (k : PK) (x 
 /-- Every parameter the encoder emits names a distinct id. -/
 theorem ids_params_sublist (enc : Nat → Bytes) (tp : TP) :
     (ids (params enc tp)).Sublist [0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09,
-      0x0a, 0x0b, 0x0c, 0x0e, 0x0f, 0x10, 0x20] := by
+      0x0a, 0x0b, 0x0c, 0x0e, 0x0f, 0x10, 0x20, 0xFF04DE1B] := by
   have ho : ∀ id o, (ids (optP enc id o)).Sublist [id] := by
     intro id o; cases o <;> simp [optP, ids]
   have hb : ∀ id (b : Bytes), (ids (bytP id b)).Sublist [id] := by
@@ -525,11 +531,11 @@ theorem ids_params_sublist (enc : Nat → Bytes) (tp : TP) :
   unfold params
   simp only [hm]
   refine List.Sublist.append (List.Sublist.append (List.Sublist.append (List.Sublist.append
-    (List.Sublist.append (List.Sublist.append (List.Sublist.append (List.Sublist.append
+    (List.Sublist.append (List.Sublist.append (List.Sublist.append (List.Sublist.append (List.Sublist.append
     (List.Sublist.append (List.Sublist.append (List.Sublist.append (List.Sublist.append
     (List.Sublist.append (List.Sublist.append (List.Sublist.append (List.Sublist.append
     (hb _ _) (ho _ _)) (hb _ _)) (ho _ _)) (ho _ _)) (ho _ _)) (ho _ _)) (ho _ _)) (ho _ _))
-    (ho _ _)) (ho _ _)) (ho _ _)) (hf _ _)) (ho _ _)) (hb _ _)) (hb _ _)) (ho _ _)
+    (ho _ _)) (ho _ _)) (ho _ _)) (hf _ _)) (ho _ _)) (hb _ _)) (hb _ _)) (ho _ _)) (ho _ _)
 
 /-- What the RFC lets an endpoint send: each varint value inside its
 §18.2 range, and a 16-byte reset token if any. `encode` does not check
@@ -608,7 +614,7 @@ theorem mem_wire_bounds (enc : Nat → Bytes) (henc : VarintCodec enc) (tp : TP)
     fun b hm => of_decide_eq_true (hbytes b hm)
   unfold params
   simp only [List.forall_mem_append]
-  refine ⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨?_, ?_⟩, ?_⟩, ?_⟩, ?_⟩, ?_⟩, ?_⟩, ?_⟩, ?_⟩, ?_⟩, ?_⟩, ?_⟩, ?_⟩, ?_⟩, ?_⟩, ?_⟩, ?_⟩
+  refine ⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨?_, ?_⟩, ?_⟩, ?_⟩, ?_⟩, ?_⟩, ?_⟩, ?_⟩, ?_⟩, ?_⟩, ?_⟩, ?_⟩, ?_⟩, ?_⟩, ?_⟩, ?_⟩, ?_⟩, ?_⟩
   · exact hB _ _ (by decide) (hb _ (by simp))
   · exact hO _ _ (by decide) (hv _ (by simp [varFields]))
   · exact hB _ _ (by decide) (hb _ (by simp))
@@ -625,6 +631,7 @@ theorem mem_wire_bounds (enc : Nat → Bytes) (henc : VarintCodec enc) (tp : TP)
   · exact hO _ _ (by decide) (hv _ (by simp [varFields]))
   · exact hB _ _ (by decide) (hb _ (by simp))
   · exact hB _ _ (by decide) (hb _ (by simp))
+  · exact hO _ _ (by decide) (hv _ (by simp [varFields]))
   · exact hO _ _ (by decide) (hv _ (by simp [varFields]))
 
 theorem encFacts (tp : TP) (hok : encodeOk tp = true) :
@@ -645,7 +652,7 @@ theorem valid_params (enc : Nat → Bytes) (henc : VarintCodec enc) (tp : TP) (h
   obtain ⟨hok, hmu, hsb, hsu⟩ := hs
   obtain ⟨htok, hae, hmad, hcid, hv⟩ := encFacts tp hok
   simp only [params, List.all_append, Bool.and_eq_true]
-  refine ⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨?_, ?_⟩, ?_⟩, ?_⟩, ?_⟩, ?_⟩, ?_⟩, ?_⟩, ?_⟩, ?_⟩, ?_⟩, ?_⟩, ?_⟩, ?_⟩, ?_⟩, ?_⟩, ?_⟩
+  refine ⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨⟨?_, ?_⟩, ?_⟩, ?_⟩, ?_⟩, ?_⟩, ?_⟩, ?_⟩, ?_⟩, ?_⟩, ?_⟩, ?_⟩, ?_⟩, ?_⟩, ?_⟩, ?_⟩, ?_⟩, ?_⟩
   · exact valid_bytes _ _ (fun _ => rfl)
   · exact valid_var enc henc 0x01 .idle (fun _ => rfl) _ (hv _ (by simp [varFields])) (varOk_true _ _ (fun _ => rfl))
   · refine valid_bytes _ _ (fun hne => ?_)
@@ -666,6 +673,7 @@ theorem valid_params (enc : Nat → Bytes) (henc : VarintCodec enc) (tp : TP) (h
   · exact valid_bytes _ _ (fun _ => rfl)
   · exact valid_bytes _ _ (fun _ => rfl)
   · exact valid_var enc henc 0x20 .datagram (fun _ => rfl) _ (hv _ (by simp [varFields])) (varOk_true _ _ (fun _ => rfl))
+  · exact valid_var enc henc 0xFF04DE1B .minAckDelay (fun _ => rfl) _ (hv _ (by simp [varFields])) (varOk_true _ _ (fun _ => rfl))
 
 theorem seg_idle (enc : Nat → Bytes) (henc : VarintCodec enc) (o : Option Nat)
     (ho : o.all (· < 2 ^ 62) = true) (t : TP) :
@@ -739,6 +747,12 @@ theorem seg_datagram (enc : Nat → Bytes) (henc : VarintCodec enc) (o : Option 
   rw [seg_var enc henc 0x20 .datagram (fun _ _ => rfl) o ho]
   cases o <;> rfl
 
+theorem seg_minAckDelay (enc : Nat → Bytes) (henc : VarintCodec enc) (o : Option Nat)
+    (ho : o.all (· < 2 ^ 62) = true) (t : TP) :
+    (optP enc 0xFF04DE1B o).foldl step t = { t with minAckDelay := o.or t.minAckDelay } := by
+  rw [seg_var enc henc 0xFF04DE1B .minAckDelay (fun _ _ => rfl) o ho]
+  cases o <;> rfl
+
 theorem seg_odcid (b : Bytes) (t : TP) :
     (bytP 0x00 b).foldl step t = { t with odcid := if b = [] then t.odcid else b } := by
   unfold bytP; split <;> rfl
@@ -763,9 +777,9 @@ theorem fold_params (enc : Nat → Bytes) (henc : VarintCodec enc) (tp : TP) (ho
     (params enc tp).foldl step {} = tp := by
   obtain ⟨_, _, _, _, hv⟩ := encFacts tp hok
   simp only [params, List.foldl_append, seg_odcid, seg_token, seg_iscid, seg_rscid, seg_disableMig,
-    seg_idle enc henc tp.idle (hv _ (by simp [varFields])), seg_maxUdp enc henc tp.maxUdp (hv _ (by simp [varFields])), seg_maxData enc henc tp.maxData (hv _ (by simp [varFields])), seg_sdBidiLocal enc henc tp.sdBidiLocal (hv _ (by simp [varFields])), seg_sdBidiRemote enc henc tp.sdBidiRemote (hv _ (by simp [varFields])), seg_sdUni enc henc tp.sdUni (hv _ (by simp [varFields])), seg_streamsBidi enc henc tp.streamsBidi (hv _ (by simp [varFields])), seg_streamsUni enc henc tp.streamsUni (hv _ (by simp [varFields])), seg_ackExp enc henc tp.ackExp (hv _ (by simp [varFields])), seg_maxAckDelay enc henc tp.maxAckDelay (hv _ (by simp [varFields])), seg_cidLimit enc henc tp.cidLimit (hv _ (by simp [varFields])), seg_datagram enc henc tp.datagram (hv _ (by simp [varFields]))]
+    seg_idle enc henc tp.idle (hv _ (by simp [varFields])), seg_maxUdp enc henc tp.maxUdp (hv _ (by simp [varFields])), seg_maxData enc henc tp.maxData (hv _ (by simp [varFields])), seg_sdBidiLocal enc henc tp.sdBidiLocal (hv _ (by simp [varFields])), seg_sdBidiRemote enc henc tp.sdBidiRemote (hv _ (by simp [varFields])), seg_sdUni enc henc tp.sdUni (hv _ (by simp [varFields])), seg_streamsBidi enc henc tp.streamsBidi (hv _ (by simp [varFields])), seg_streamsUni enc henc tp.streamsUni (hv _ (by simp [varFields])), seg_ackExp enc henc tp.ackExp (hv _ (by simp [varFields])), seg_maxAckDelay enc henc tp.maxAckDelay (hv _ (by simp [varFields])), seg_cidLimit enc henc tp.cidLimit (hv _ (by simp [varFields])), seg_datagram enc henc tp.datagram (hv _ (by simp [varFields])), seg_minAckDelay enc henc tp.minAckDelay (hv _ (by simp [varFields]))]
   obtain ⟨odcid, idle, token, maxUdp, maxData, sdBidiLocal, sdBidiRemote, sdUni, streamsBidi,
-    streamsUni, ackExp, maxAckDelay, disableMig, cidLimit, iscid, rscid, datagram⟩ := tp
+    streamsUni, ackExp, maxAckDelay, disableMig, cidLimit, iscid, rscid, datagram, minAckDelay⟩ := tp
   simp [ite_nil_self]
 
 /-- **Encoder round trip**: every parameter set the RFC lets flare send is

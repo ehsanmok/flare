@@ -66,7 +66,7 @@ theorem decodeKnown_encode (allowRsv1 : Bool) (maxP : Nat) (f : Frame) (mask : B
 /-! ## Mask direction -/
 
 /-- `WsConnection._recv_one`: decode, then refuse an unmasked frame.
-mirrors flare/ws/server.mojo#WsConnection._recv_one sha=9c464aa111c4 at=59bda50f -/
+mirrors flare/ws/server.mojo#WsConnection._recv_one sha=fa9b76f7913d at=0a183352 -/
 def serverAccept (maxP : Nat) (d : Bytes) : DRes :=
   match decodeKnown false maxP d with
   | .ok f n => if f.masked then .ok f n else .error

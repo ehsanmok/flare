@@ -212,14 +212,14 @@ structure CCfg where
   encode : Enc → List UInt8 → List UInt8
   minSize : Nat
 
-/-- The encoding branch: replace the body, set Content-Encoding and
-Content-Length, append `Vary: Accept-Encoding`.
-mirrors flare/http/middleware.mojo#Compress.serve sha=23cf21612267 at=59bda50f -/
+/-- The encoding branch: append `Vary: Accept-Encoding`, replace the body,
+set Content-Encoding and Content-Length.
+mirrors flare/http/middleware.mojo#Compress.serve sha=d4b25a2e284c at=0a183352 -/
 def encodeAs (c : CCfg) (e : Enc) (x : Resp) : Resp :=
   let b := c.encode e x.body
   { x with body := b,
-           hdrs := appendH (setH (setH x.hdrs "Content-Encoding" e.name) "Content-Length"
-                     (toString b.length)) "Vary" "Accept-Encoding" }
+           hdrs := setH (setH (appendH x.hdrs "Vary" "Accept-Encoding") "Content-Encoding" e.name)
+                     "Content-Length" (toString b.length) }
 
 /-- A 206 (or a response with Content-Range) has its byte offsets fixed
 relative to the identity bytes. -/
@@ -286,11 +286,24 @@ theorem compress_cases (c : CCfg) (x : Resp) :
 theorem encodeAs_content_length (c : CCfg) (e : Enc) (x : Resp) :
     getH (encodeAs c e x).hdrs "Content-Length" = toString (encodeAs c e x).body.length := by
   simp only [encodeAs]
-  rw [getH_append_of_has _ _ _ _ (hasH_setH_self _ _ _), getH_setH_self]
+  rw [getH_setH_self]
+
+theorem mem_setH (h : Hdrs) (p : String × String) (k v : String) (hp : p ∈ h) (hk : ieq p.1 k = false) :
+    p ∈ setH h k v := by
+  induction h with
+  | nil => cases hp
+  | cons q t ih =>
+    obtain ⟨k', v'⟩ := q
+    simp only [setH]
+    rcases List.mem_cons.1 hp with rfl | hp
+    · simp [hk]
+    · split <;> simp [hp, ih hp]
 
 theorem encodeAs_vary (c : CCfg) (e : Enc) (x : Resp) :
     ("Vary", "Accept-Encoding") ∈ (encodeAs c e x).hdrs := by
-  simp [encodeAs, appendH]
+  simp only [encodeAs]
+  refine mem_setH _ _ _ _ (mem_setH _ _ _ _ (by simp [appendH]) ?_) ?_ <;>
+    · unfold ieq; decide +kernel
 
 theorem vary_mem (x : Resp) : ("Vary", "Accept-Encoding") ∈ (vary x).hdrs := by
   simp [vary, appendH]

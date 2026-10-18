@@ -34,7 +34,9 @@ Spec (RFC 9114 §6.2, §7.2, §11.2; RFC 9204 §4.2), server receiving:
   error (§5.2); a GOAWAY payload that is not exactly one varint is
   H3_FRAME_ERROR (`specGoaway`, §7.1, §7.2.6); CANCEL_PUSH, MAX_PUSH_ID and unknown types are accepted.
 * `specApplySettings`: identifiers 0x02-0x05 are H3_SETTINGS_ERROR
-  (§7.2.4.1, §11.2.2); others update the peer view or are ignored.
+  (§7.2.4.1, §11.2.2), and so is SETTINGS_H3_DATAGRAM above 1, or 1 when
+  the peer did not negotiate QUIC datagrams (RFC 9297 §2.1.1); others
+  update the peer view or are ignored.
 
 Results: `dispatchControlFixed_eq_spec`, `goawayFixed_eq_spec`, `applySettingsFixed_eq_spec`,
 `classifyFixed_eq_spec` (the model equals the spec on every input),
@@ -52,65 +54,90 @@ inductive H3Err
 
 /-! ## SETTINGS -/
 
-/-- mirrors flare/http3/server.mojo#Http3Connection._apply_peer_settings+Http3Connection sha=0328217723d2 at=59bda50f (the fields of
+/-- mirrors flare/http3/server.mojo#Http3Connection._apply_peer_settings+Http3Connection sha=7a7c94d4e85b at=0a183352 (the fields of
 `Http3Connection` it writes) -/
 structure PeerSettings where
   maxFieldSection : Option Nat := none
   qpackCap : Option Nat := none
   qpackBlocked : Option Nat := none
   connect : Option Bool := none
+  h3Datagram : Option Bool := none
   deriving DecidableEq, Repr
 
-/-- mirrors flare/http3/server.mojo#Http3Connection._apply_peer_settings sha=c6b676a3412f at=59bda50f -/
+/-- mirrors flare/http3/server.mojo#Http3Connection._apply_peer_settings sha=aa13c1763f9b at=30fc5e99 -/
 def applySetting (ps : PeerSettings) (p : Nat × Nat) : PeerSettings :=
   if p.1 = 0x06 then { ps with maxFieldSection := some p.2 }
   else if p.1 = 0x01 then { ps with qpackCap := some p.2 }
   else if p.1 = 0x07 then { ps with qpackBlocked := some p.2 }
   else if p.1 = 0x08 then { ps with connect := some (p.2 ≠ 0) }
+  else if p.1 = 0x33 then { ps with h3Datagram := some (p.2 = 1) }
   else ps
 
 /-- HTTP/2 setting identifiers reserved by RFC 9114 §7.2.4.1 / §11.2.2. -/
 def isH2Setting (id : Nat) : Bool := 2 ≤ id && id ≤ 5
 
-/-- mirrors flare/http3/server.mojo#Http3Connection._apply_peer_settings sha=f5cf4d5f729f at=4ec4b5c2 (fixed, H3-04): reserved
-identifiers raise. -/
-def applySettings (ps : PeerSettings) (ss : List (Nat × Nat)) :
+/-- SETTINGS_H3_DATAGRAM other than 0 or 1, or 1 without QUIC datagrams
+(`qd`, `peer_quic_datagram`). -/
+def datagramBad (qd : Bool) (p : Nat × Nat) : Bool :=
+  p.1 = 0x33 && (decide (p.2 > 1) || (p.2 = 1 && !qd))
+
+/-- mirrors flare/http3/server.mojo#Http3Connection._apply_peer_settings sha=aa13c1763f9b at=30fc5e99 (fixed, H3-04): reserved
+identifiers raise before any value is applied; a bad H3_DATAGRAM raises
+while applying, so the connection errors either way. -/
+def applySettings (qd : Bool) (ps : PeerSettings) (ss : List (Nat × Nat)) :
     Except H3Err PeerSettings :=
   if ss.any (fun p => isH2Setting p.1) then .error .settingsError
+  else if ss.any (datagramBad qd) then .error .settingsError
   else .ok (ss.foldl applySetting ps)
 
-/-- RFC 9114 §7.2.4.1: reserved identifiers are an error, every other
-identifier is applied (known) or ignored (unknown). -/
-def specApplySettings (ps : PeerSettings) : List (Nat × Nat) → Except H3Err PeerSettings
+/-- RFC 9114 §7.2.4.1 and RFC 9297 §2.1.1: reserved identifiers and a bad
+SETTINGS_H3_DATAGRAM are an error, every other identifier is applied
+(known) or ignored (unknown). `qd`: the peer negotiated QUIC datagrams. -/
+def specApplySettings (qd : Bool) (ps : PeerSettings) :
+    List (Nat × Nat) → Except H3Err PeerSettings
   | [] => .ok ps
   | (id, v) :: ss =>
     if 2 ≤ id ∧ id ≤ 5 then .error .settingsError
-    else specApplySettings (applySetting ps (id, v)) ss
+    else if id = 0x33 ∧ (v > 1 ∨ (v = 1 ∧ qd = false)) then .error .settingsError
+    else specApplySettings qd (applySetting ps (id, v)) ss
 
-theorem applySettingsFixed_eq_spec (ps : PeerSettings) (ss : List (Nat × Nat)) :
-    applySettings ps ss = specApplySettings ps ss := by
+theorem applySettingsFixed_eq_spec (qd : Bool) (ps : PeerSettings) (ss : List (Nat × Nat)) :
+    applySettings qd ps ss = specApplySettings qd ps ss := by
   induction ss generalizing ps with
   | nil => rfl
   | cons p ss ih =>
     obtain ⟨id, v⟩ := p
     have e := ih (applySetting ps (id, v))
-    simp only [applySettings, List.any_cons, Bool.or_eq_true,
-      List.foldl_cons, specApplySettings] at e ⊢
     by_cases h : 2 ≤ id ∧ id ≤ 5
     · have : isH2Setting id = true := by simp [isH2Setting]; omega
-      simp [this, h]
-    · have : isH2Setting id = false := by simp [isH2Setting]; omega
-      simp only [this, Bool.false_eq_true, false_or, h, ↓reduceIte] at e ⊢
-      exact e
+      simp [applySettings, specApplySettings, this, h]
+    · have h2 : isH2Setting id = false := by simp [isH2Setting]; omega
+      by_cases hd : id = 0x33 ∧ (v > 1 ∨ (v = 1 ∧ qd = false))
+      · have : datagramBad qd (id, v) = true := by
+          rcases hd with ⟨rfl, hv | ⟨rfl, rfl⟩⟩
+          · simp [datagramBad, hv]
+          · rfl
+        simp only [applySettings, specApplySettings, List.any_cons, hd]
+        split <;> simp_all
+      · have : datagramBad qd (id, v) = false := by
+          simp only [datagramBad]
+          by_cases hi : id = 0x33
+          · subst hi; cases qd <;> simp_all <;> omega
+          · simp [hi]
+        simp only [applySettings, List.any_cons, h2, this, Bool.false_or,
+          List.foldl_cons] at e ⊢
+        simp only [specApplySettings, h, hd, ↓reduceIte]
+        exact e
 
 /-! ## Control-stream frames -/
 
-/-- mirrors flare/http3/server.mojo#Http3Connection.__init__ sha=b6dddccf88c5 at=59bda50f (initial values),
+/-- mirrors flare/http3/server.mojo#Http3Connection.__init__ sha=54a3b07d96c3 at=0a183352 (initial values),
 1170-1211 (fields read and written) -/
 structure CtlState where
   settingsReceived : Bool := false
   goawayMax : Option Nat := none
   peer : PeerSettings := {}
+  quicDatagram : Bool := false
   deriving DecidableEq, Repr
 
 /-- Types RFC 9114 forbids on a control stream: DATA, HEADERS, PUSH_PROMISE
@@ -153,14 +180,14 @@ theorem goawayFixed_eq_spec (s : CtlState) (p : Bytes) :
       simp only
       by_cases hk : k = tl.length + 1 <;> simp [hk]
 
-/-- mirrors flare/http3/server.mojo#Http3Connection._dispatch_control_frame sha=9b3d3ec5bd47 at=6254ba56 (fixed, H3-03): the forbidden-type
+/-- mirrors flare/http3/server.mojo#Http3Connection._dispatch_control_frame sha=ee593a4f5552 at=0a183352 (fixed, H3-03): the forbidden-type
 check comes after the SETTINGS-first check. -/
 def dispatchControl (s : CtlState) (t : Nat) (p : Bytes) : Except H3Err CtlState :=
   if t = 0x04 then
     if s.settingsReceived then .error .frameUnexpected
     else match decodeSettings p with
       | none => .error .frameError
-      | some ss => match applySettings s.peer ss with
+      | some ss => match applySettings s.quicDatagram s.peer ss with
         | .error e => .error e
         | .ok ps => .ok { s with peer := ps, settingsReceived := true }
   else if s.settingsReceived = false then .error .missingSettings
@@ -184,7 +211,7 @@ def specControl (s : CtlState) (t : Nat) (p : Bytes) : Except H3Err CtlState :=
     if s.settingsReceived then .error .frameUnexpected
     else match decodeSettings p with
       | none => .error .frameError
-      | some ss => match specApplySettings s.peer ss with
+      | some ss => match specApplySettings s.quicDatagram s.peer ss with
         | .error e => .error e
         | .ok ps => .ok { s with peer := ps, settingsReceived := true }
   | k =>
@@ -268,7 +295,7 @@ theorem feedControl_le (s : CtlState) (b : Bytes) (s' : CtlState) (c : Bytes)
 inductive UKind | control | push | qpackEnc | qpackDec | unknown
   deriving DecidableEq, Repr
 
-/-- mirrors flare/http3/server.mojo#Http3Connection.__init__ sha=b6dddccf88c5 at=59bda50f -/
+/-- mirrors flare/http3/server.mojo#Http3Connection.__init__ sha=54a3b07d96c3 at=0a183352 -/
 structure UniState where
   ctrl : Option Nat := none
   enc : Option Nat := none

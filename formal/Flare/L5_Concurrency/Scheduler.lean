@@ -16,7 +16,9 @@ detaches the rest, reads the stats cells and frees the resources.
 ## Semantics
 
 Interleaving small-step semantics over a shared heap. The heap is the stop
-flag (value `stop`, freed bit `stopF`) and, per worker, freed bits for the
+flag (value `stop`) and the accept-balancing group, sharing the freed bit
+`stopF` (`_free_resources` frees both and the stuck branch of `drain` leaks
+both, under the same condition), and, per worker, freed bits for the
 context, the stats cell and the listener. Each worker is a program counter
 (`WPc`); the drain thread is `MPc`. Every step that dereferences a heap
 cell ORs that cell's freed bit into the ghost flag `uaf`. The scheduler of
@@ -55,8 +57,10 @@ self-join (`live_handle_calls`), which no in-repo caller performs
 
 * The frontend's serve loop is abstracted to: load the stop flag, exit if
   set, otherwise one `serve` iteration touching the context (the frontend
-  lives in it), the listener and the stats cell. Any handler runs inside
-  `serve`.
+  lives in it), the listener, the stats cell and the balancing group
+  (`Balancer.publish` / `pending` / hand-offs). Any handler runs inside
+  `serve`. The post-loop `bal.close()` / `pop()` touch the group before
+  `WORKER_STAT_DONE` is stored.
 * Freeing is one step (`free`); the frees are monotone and nothing reads in
   between, so splitting it would only add interleavings with the same
   outcome for `uaf`.
@@ -76,15 +80,16 @@ inductive WPc where
   | start   -- :110-136 read the context (stop address, pinning)
   | loop    -- frontend serve loop: `load_stop_flag(stopping)`
   | serve   -- one reactor iteration / handler: context, listener, stats
-  | doneSt  -- :156 `store_worker_stat(ctx.stats_addr, WORKER_STAT_DONE, 1)`
+  | doneSt  -- loop teardown (`bal.close()`) and `store_worker_stat(ctx.stats_addr, WORKER_STAT_DONE, 1)`
   | ret     -- :161-162 return from the pthread start routine
   | term    -- thread terminated
   deriving DecidableEq, Repr
 
 /-- Per-worker state: the program counter, the shared `WORKER_STAT_DONE`
 slot, the drain thread's snapshot `done[i]`, what the drain did to the
-handle, and the freed bits of this worker's heap cells.
-mirrors flare/runtime/scheduler.mojo#Scheduler sha=cd290d220f65 at=59bda50f -/
+handle, and the freed bits of this worker's heap cells (`_balance_addr`
+is shared, with `St.stopF`).
+mirrors flare/runtime/scheduler.mojo#Scheduler sha=ea1cf1af69c8 at=30fc5e99 -/
 structure WS where
   pc : WPc
   done : Bool
@@ -97,7 +102,7 @@ structure WS where
   deriving DecidableEq, Repr
 
 /-- Drain thread program counter.
-mirrors flare/runtime/scheduler.mojo#Scheduler.drain sha=df979eac331a at=59bda50f -/
+mirrors flare/runtime/scheduler.mojo#Scheduler.drain sha=25089b531e7a at=30fc5e99 -/
 inductive MPc where
   | signal          -- `_signal_stop` (store stop := True)
   | wait            -- :831-844 sample `WORKER_STAT_DONE` until all done or deadline
@@ -129,27 +134,28 @@ inductive Lbl where
 def w0 : WS := ⟨.start, false, false, false, false, false, false, false⟩
 
 /-- State right after `Scheduler.start` returned with `n` workers.
-mirrors flare/runtime/scheduler.mojo#Scheduler.start sha=1ab2edc505a7 at=59bda50f -/
+mirrors flare/runtime/scheduler.mojo#Scheduler.start sha=a1f17c56964f at=30fc5e99 -/
 def init (n : Nat) : St := ⟨List.replicate n w0, false, false, .signal, false⟩
 
 def Freed (w : WS) : Bool := w.ctxF || w.statsF || w.lisF
 
 /-- One worker step: the new worker state and whether it dereferenced a
-freed cell. mirrors flare/runtime/_worker.mojo#_worker_entry sha=0c7cab63ae89 at=a7838f62 -/
+freed cell; `stopF` is the freed bit of the stop flag and the group. mirrors flare/runtime/_worker.mojo#_worker_entry sha=0c7cab63ae89 at=a7838f62 -/
 def wStep (stop stopF : Bool) (w : WS) : Option (WS × Bool) :=
   match w.pc with
   | .start => some ({ w with pc := .loop }, w.ctxF)
   | .loop => some ({ w with pc := if stop then .doneSt else .serve }, stopF)
-  | .serve => some ({ w with pc := .loop }, w.ctxF || w.lisF || w.statsF)
-  | .doneSt => some ({ w with pc := .ret, done := true }, w.ctxF || w.statsF)
+  | .serve => some ({ w with pc := .loop }, w.ctxF || w.lisF || w.statsF || stopF)
+  | .doneSt => some ({ w with pc := .ret, done := true }, w.ctxF || w.statsF || stopF)
   | .ret => some ({ w with pc := .term }, false)
   | .term => none
 
 /-- The free policy after the sweep: the stuck workers' ctx, stats and
 listener entries are dropped from what gets freed (CONC-04), the stop flag
-is leaked (`self._stopping_addr = 0`) when a worker was detached (CONC-03),
-and `_free_resources` frees the rest.
-mirrors flare/runtime/scheduler.mojo#Scheduler.drain+default_worker_count+Scheduler._free_resources sha=0489f4553029 at=bdc6e488 (fixed, CONC-03, CONC-04) -/
+and the balancing group are leaked (`self._stopping_addr = 0`,
+`self._balance_addr = 0`) when a worker was detached (CONC-03), and
+`_free_resources` frees the rest.
+mirrors flare/runtime/scheduler.mojo#Scheduler.drain+default_worker_count+Scheduler._free_resources sha=a150f98fac4c at=30fc5e99 (fixed, CONC-03, CONC-04) -/
 def freeAll (s : St) : St :=
   let anyDet := s.ws.any (·.detached)
   { s with
@@ -159,7 +165,7 @@ def freeAll (s : St) : St :=
     stopF := !anyDet,
     m := .fin }
 
-/-- One drain-thread step. mirrors flare/runtime/scheduler.mojo#Scheduler.drain sha=df979eac331a at=59bda50f -/
+/-- One drain-thread step. mirrors flare/runtime/scheduler.mojo#Scheduler.drain sha=25089b531e7a at=30fc5e99 -/
 def mStep (c : Cfg) (s : St) : Option St :=
   match s.m with
   | .signal => some { s with stop := true, m := .wait, uaf := s.uaf || s.stopF }
@@ -179,7 +185,7 @@ def mStep (c : Cfg) (s : St) : Option St :=
   | .free => some (freeAll s)
   | .fin => none
 
-/-- mirrors flare/runtime/scheduler.mojo#Scheduler.drain sha=df979eac331a at=193ddcec and flare/runtime/_worker.mojo#_worker_entry sha=0c7cab63ae89 at=a7838f62 -/
+/-- mirrors flare/runtime/scheduler.mojo#Scheduler.drain sha=25089b531e7a at=30fc5e99 and flare/runtime/_worker.mojo#_worker_entry sha=0c7cab63ae89 at=30fc5e99 -/
 def step (c : Cfg) (s : St) : Lbl → Option St
   | .w i =>
     match s.ws[i]? with

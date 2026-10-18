@@ -115,7 +115,7 @@ def register (s : St) (fd : Int) (tok : UInt64) (interest : Nat) (ok : Bool) :
   else if ok then .ok { reg := upd s.reg fd (some tok), kern := upd s.kern fd (some (tok, interest)) }
   else .error .sys
 
-/-- mirrors flare/runtime/reactor.mojo#Reactor.register_exclusive sha=c0c6966234cf at=59bda50f
+/-- mirrors flare/runtime/reactor.mojo#Reactor.register_exclusive sha=3e37fe52dfaa at=0a183352
 `okExcl`: ADD with EPOLLEXCLUSIVE; `okPlain`: the fallback plain ADD. -/
 def registerExclusive (s : St) (fd : Int) (tok : UInt64) (interest : Nat)
     (okExcl okPlain : Bool) : Except Err St :=

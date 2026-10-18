@@ -39,11 +39,11 @@ open Flare.L5.SharedListener
 def requiresPerWorker (linux probe bufring : Bool) (tls : Nat) : Bool :=
   linux && probe && bufring && tls == 0
 
-/-- mirrors flare/http/frontend.mojo#HttpFrontend.run_worker sha=d92fba8e45f2 at=59bda50f -/
+/-- mirrors flare/http/frontend.mojo#HttpFrontend.run_worker sha=a464347a1707 at=0a183352 -/
 def uringDispatch (linux probe bufring : Bool) (tls extras : Nat) : Bool :=
   linux && probe && bufring && tls == 0 && extras == 0
 
-/-- mirrors flare/runtime/scheduler.mojo#Scheduler.start sha=1ab2edc505a7 at=59bda50f -/
+/-- mirrors flare/runtime/scheduler.mojo#Scheduler.start sha=a1f17c56964f at=0a183352 -/
 def prebind (demands reuseport : Bool) (extras : Nat) : Bool :=
   demands || reuseport || decide (0 < extras)
 
@@ -64,7 +64,7 @@ theorem probe_skew_shared :
 
 /-- The io_uring worker on the shared-listener state: the number is used by
 the arm only.
-mirrors flare/http/_server_reactor_uring.mojo#run_uring_bufring_reactor_loop_shared sha=eec8fc1931de at=59bda50f -/
+mirrors flare/http/_server_reactor_uring.mojo#run_uring_bufring_reactor_loop_shared sha=3b4da4a6d678 at=0a183352 -/
 def uwStep (stop : Bool) (w : W) : Option (W × Bool) :=
   match w.pc with
   | .reg => some ({ w with pc := .check }, true)
@@ -72,8 +72,8 @@ def uwStep (stop : Bool) (w : W) : Option (W × Bool) :=
   | .acc => some ({ w with pc := .check }, false)
   | .done => none
 
-/-- mirrors flare/http/_server_reactor_uring.mojo#run_uring_bufring_reactor_loop_shared sha=eec8fc1931de at=193ddcec and
-flare/runtime/scheduler.mojo#Scheduler._signal_stop+Scheduler.drain sha=aea259247361 at=ea1b9282 -/
+/-- mirrors flare/http/_server_reactor_uring.mojo#run_uring_bufring_reactor_loop_shared sha=3b4da4a6d678 at=30fc5e99 and
+flare/runtime/scheduler.mojo#Scheduler._signal_stop+Scheduler.drain sha=0d9bc4a3ee5b at=30fc5e99 -/
 def ustep (hard : Bool) (s : St) : Lbl → Option St
   | .w i =>
     match s.ws[i]? with

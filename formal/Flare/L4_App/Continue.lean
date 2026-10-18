@@ -53,7 +53,7 @@ def flush (s : St) : St :=
 
 /-- Keep the tail the kernel did not take (only after a short
 send; EAGAIN leaves the client's own fallback in charge).
-mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._maybe_send_continue+ConnHandle._keep_unsent_interim+ConnHandle._check_request_complete sha=9d1bf7e21ed4 at=405105c0 (fixed, APP-49) -/
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._maybe_send_continue+ConnHandle._keep_unsent_interim+ConnHandle._check_request_complete sha=58c0298dfb61 at=0a183352 (fixed, APP-49) -/
 def sendContinue (I : Bytes) (k : Nat) (s : St) : St :=
   { s with wire := s.wire ++ I.take k,
            rest := if 0 < k ∧ k < I.length then I.drop k else [] }
@@ -112,7 +112,7 @@ def sendContinue (I : Bytes) (ok : Bool) (s : St) : St :=
   sslWrite .own I ok s
 
 /-- Retry the kept interim from the same buffer before the response.
-mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle.on_readable_static+ConnHandle._flush_write_buf_tls sha=e3dacdd25bb9 at=405105c0 (fixed, APP-49) -/
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle.on_readable_static+ConnHandle._flush_write_buf_tls sha=ac0e210f74bc at=0a183352 (fixed, APP-49) -/
 def flush (I R : Bytes) (s : St) : St :=
   let s' := if s.pending = some .own then sslWrite .own I true s else s
   if s'.closed then s' else sslWrite .wbuf R true s'

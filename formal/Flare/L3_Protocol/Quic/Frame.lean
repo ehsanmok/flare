@@ -48,6 +48,8 @@ inductive Frame where
   | connectionClose (app : Bool) (ec ft : UInt64) (reason : Bytes)
   | handshakeDone
   | datagram (data : Bytes) (hasLen : Bool)
+  | ackFrequency (seq threshold delay reorder : UInt64)
+  | immediateAck
   | unknown (t : UInt64)
   deriving DecidableEq, Repr, Inhabited
 
@@ -56,7 +58,7 @@ inductive Kind where
   | padding | ping | ack | resetStream | stopSending | crypto | newToken | stream
   | maxData | maxStreamData | maxStreams | dataBlocked | streamDataBlocked | streamsBlocked
   | newConnectionId | retireConnectionId | pathChallenge | pathResponse | connectionClose
-  | handshakeDone | datagram | unknown
+  | handshakeDone | datagram | ackFrequency | immediateAck | unknown
   deriving DecidableEq, Repr
 
 def Frame.kind : Frame → Kind
@@ -81,10 +83,12 @@ def Frame.kind : Frame → Kind
   | .connectionClose .. => .connectionClose
   | .handshakeDone => .handshakeDone
   | .datagram .. => .datagram
+  | .ackFrequency .. => .ackFrequency
+  | .immediateAck => .immediateAck
   | .unknown .. => .unknown
 
 /-- The type tests of the dispatch, in source order.
-mirrors flare/quic/frame.mojo#parse_frame_into sha=915516b6d15d at=59bda50f -/
+mirrors flare/quic/frame.mojo#parse_frame_into sha=b75548102aad at=da6fb43a -/
 def kindOf (t : Nat) : Kind :=
   if t = 0x00 then .padding
   else if t = 0x01 then .ping
@@ -107,6 +111,8 @@ def kindOf (t : Nat) : Kind :=
   else if t = 0x1C ∨ t = 0x1D then .connectionClose
   else if t = 0x1E then .handshakeDone
   else if t = 0x30 ∨ t = 0x31 then .datagram
+  else if t = 0xAF then .ackFrequency
+  else if t = 0x1F then .immediateAck
   else .unknown
 
 /-- The ACK range loop (frame.mojo:773-776). -/
@@ -137,7 +143,7 @@ def remaining (b : Bytes) : Parser Nat := fun pos => .ok (b.length - pos, pos)
 /-! ## One parser per frame type -/
 
 /-- ECN counts of ACK_ECN (read; the model drops their values).
-mirrors flare/quic/frame.mojo#parse_frame_into sha=915516b6d15d at=59bda50f -/
+mirrors flare/quic/frame.mojo#parse_frame_into sha=b75548102aad at=da6fb43a -/
 def ackEcn (b : Bytes) (t : Nat) : Parser Unit :=
   if t = 0x03 then do
     let _ ← varint b
@@ -147,21 +153,21 @@ def ackEcn (b : Bytes) (t : Nat) : Parser Unit :=
   else pure ()
 
 /-- RFC 9000 §19.3.1: reject any computed packet number < 0 (QUIC-03).
-mirrors flare/quic/frame.mojo#parse_frame_into sha=915516b6d15d at=59bda50f -/
+mirrors flare/quic/frame.mojo#parse_frame_into sha=b75548102aad at=da6fb43a -/
 def ackFinish (t : Nat) (largest delay first : UInt64)
     (ranges : List (UInt64 × UInt64)) : Parser Frame :=
   if ackOk largest first ranges = false then
     fail "FRAME_ENCODING_ERROR: negative ack range"
   else pure (.ack largest delay first ranges (t = 0x03))
 
-/-- mirrors flare/quic/frame.mojo#parse_frame_into sha=915516b6d15d at=59bda50f -/
+/-- mirrors flare/quic/frame.mojo#parse_frame_into sha=b75548102aad at=da6fb43a -/
 def ackTail (b : Bytes) (t : Nat) (largest delay rc : UInt64) : Parser Frame := do
   let first ← varint b
   let ranges ← ackRanges b rc.toNat
   let _ ← ackEcn b t
   ackFinish t largest delay first ranges
 
-/-- mirrors flare/quic/frame.mojo#parse_frame_into sha=915516b6d15d at=59bda50f -/
+/-- mirrors flare/quic/frame.mojo#parse_frame_into sha=b75548102aad at=da6fb43a -/
 def ackBody (b : Bytes) (t : Nat) : Parser Frame := do
   let largest ← varint b
   let delay ← varint b
@@ -169,27 +175,27 @@ def ackBody (b : Bytes) (t : Nat) : Parser Frame := do
   if rc > 0x4000 then fail "quic ack: range count exceeds RFC 9000 §19.3 cap"
   else ackTail b t largest delay rc
 
-/-- mirrors flare/quic/frame.mojo#parse_frame_into sha=915516b6d15d at=59bda50f -/
+/-- mirrors flare/quic/frame.mojo#parse_frame_into sha=b75548102aad at=da6fb43a -/
 def resetBody (b : Bytes) : Parser Frame := do
   let sid ← varint b
   let ec ← varint b
   let fs ← varint b
   pure (.resetStream sid ec fs)
 
-/-- mirrors flare/quic/frame.mojo#parse_frame_into sha=915516b6d15d at=59bda50f -/
+/-- mirrors flare/quic/frame.mojo#parse_frame_into sha=b75548102aad at=da6fb43a -/
 def stopBody (b : Bytes) : Parser Frame := do
   let sid ← varint b
   let ec ← varint b
   pure (.stopSending sid ec)
 
-/-- mirrors flare/quic/frame.mojo#parse_frame_into sha=915516b6d15d at=59bda50f -/
+/-- mirrors flare/quic/frame.mojo#parse_frame_into sha=b75548102aad at=da6fb43a -/
 def cryptoBody (b : Bytes) : Parser Frame := do
   let off ← varint b
   let n ← varint b
   let d ← bytes b n.toNat
   pure (.crypto off d)
 
-/-- mirrors flare/quic/frame.mojo#parse_frame_into sha=915516b6d15d at=59bda50f -/
+/-- mirrors flare/quic/frame.mojo#parse_frame_into sha=b75548102aad at=da6fb43a -/
 def newTokenBody (b : Bytes) : Parser Frame := do
   let n ← varint b
   if n = 0 then fail "quic new_token: empty token"
@@ -197,11 +203,11 @@ def newTokenBody (b : Bytes) : Parser Frame := do
     let d ← bytes b n.toNat
     pure (.newToken d)
 
-/-- mirrors flare/quic/frame.mojo#parse_frame_into sha=915516b6d15d at=59bda50f -/
+/-- mirrors flare/quic/frame.mojo#parse_frame_into sha=b75548102aad at=da6fb43a -/
 def streamOff (b : Bytes) (t : Nat) : Parser UInt64 :=
   if t &&& 4 ≠ 0 then varint b else pure 0
 
-/-- mirrors flare/quic/frame.mojo#parse_frame_into sha=915516b6d15d at=59bda50f -/
+/-- mirrors flare/quic/frame.mojo#parse_frame_into sha=b75548102aad at=da6fb43a -/
 def streamData (b : Bytes) (t : Nat) : Parser Bytes :=
   if t &&& 2 ≠ 0 then do
     let n ← varint b
@@ -210,57 +216,57 @@ def streamData (b : Bytes) (t : Nat) : Parser Bytes :=
     let r ← remaining b
     bytes b r
 
-/-- mirrors flare/quic/frame.mojo#parse_frame_into sha=915516b6d15d at=59bda50f -/
+/-- mirrors flare/quic/frame.mojo#parse_frame_into sha=b75548102aad at=da6fb43a -/
 def streamBody (b : Bytes) (t : Nat) : Parser Frame := do
   let sid ← varint b
   let off ← streamOff b t
   let d ← streamData b t
   pure (.stream sid off d (t &&& 1 ≠ 0))
 
-/-- mirrors flare/quic/frame.mojo#parse_frame_into sha=915516b6d15d at=59bda50f -/
+/-- mirrors flare/quic/frame.mojo#parse_frame_into sha=b75548102aad at=da6fb43a -/
 def maxDataBody (b : Bytes) : Parser Frame := do
   let v ← varint b
   pure (.maxData v)
 
-/-- mirrors flare/quic/frame.mojo#parse_frame_into sha=915516b6d15d at=59bda50f -/
+/-- mirrors flare/quic/frame.mojo#parse_frame_into sha=b75548102aad at=da6fb43a -/
 def maxStreamDataBody (b : Bytes) : Parser Frame := do
   let sid ← varint b
   let v ← varint b
   pure (.maxStreamData sid v)
 
 /-- RFC 9000 §4.6 / §19.11: at most 2^60 (QUIC-02).
-mirrors flare/quic/frame.mojo#parse_frame_into sha=915516b6d15d at=59bda50f -/
+mirrors flare/quic/frame.mojo#parse_frame_into sha=b75548102aad at=da6fb43a -/
 def maxStreamsBody (b : Bytes) (t : Nat) : Parser Frame := do
   let v ← varint b
   if v.toNat > 2 ^ 60 then fail "FRAME_ENCODING_ERROR: MAX_STREAMS > 2^60"
   else pure (.maxStreams (t = 0x13) v)
 
-/-- mirrors flare/quic/frame.mojo#parse_frame_into sha=915516b6d15d at=59bda50f -/
+/-- mirrors flare/quic/frame.mojo#parse_frame_into sha=b75548102aad at=da6fb43a -/
 def dataBlockedBody (b : Bytes) : Parser Frame := do
   let v ← varint b
   pure (.dataBlocked v)
 
-/-- mirrors flare/quic/frame.mojo#parse_frame_into sha=915516b6d15d at=59bda50f -/
+/-- mirrors flare/quic/frame.mojo#parse_frame_into sha=b75548102aad at=da6fb43a -/
 def streamDataBlockedBody (b : Bytes) : Parser Frame := do
   let sid ← varint b
   let v ← varint b
   pure (.streamDataBlocked sid v)
 
 /-- RFC 9000 §19.14: at most 2^60 (QUIC-02).
-mirrors flare/quic/frame.mojo#parse_frame_into sha=915516b6d15d at=59bda50f -/
+mirrors flare/quic/frame.mojo#parse_frame_into sha=b75548102aad at=da6fb43a -/
 def streamsBlockedBody (b : Bytes) (t : Nat) : Parser Frame := do
   let v ← varint b
   if v.toNat > 2 ^ 60 then fail "FRAME_ENCODING_ERROR: STREAMS_BLOCKED > 2^60"
   else pure (.streamsBlocked (t = 0x17) v)
 
-/-- mirrors flare/quic/frame.mojo#parse_frame_into sha=915516b6d15d at=59bda50f -/
+/-- mirrors flare/quic/frame.mojo#parse_frame_into sha=b75548102aad at=da6fb43a -/
 def newCidTail (b : Bytes) (seq retire : UInt64) (cl : UInt8) : Parser Frame := do
   let cid ← bytes b cl.toNat
   let tok ← bytes b 16
   if retire > seq then fail "quic new_connection_id: retire_prior_to > sequence_number"
   else pure (.newConnectionId seq retire cid tok)
 
-/-- mirrors flare/quic/frame.mojo#parse_frame_into sha=915516b6d15d at=59bda50f -/
+/-- mirrors flare/quic/frame.mojo#parse_frame_into sha=b75548102aad at=da6fb43a -/
 def newCidBody (b : Bytes) : Parser Frame := do
   let seq ← varint b
   let retire ← varint b
@@ -268,26 +274,26 @@ def newCidBody (b : Bytes) : Parser Frame := do
   if cl.toNat < 1 ∨ cl.toNat > 20 then fail "quic new_connection_id: cid length out of [1, 20]"
   else newCidTail b seq retire cl
 
-/-- mirrors flare/quic/frame.mojo#parse_frame_into sha=915516b6d15d at=59bda50f -/
+/-- mirrors flare/quic/frame.mojo#parse_frame_into sha=b75548102aad at=da6fb43a -/
 def retireBody (b : Bytes) : Parser Frame := do
   let s ← varint b
   pure (.retireConnectionId s)
 
-/-- mirrors flare/quic/frame.mojo#parse_frame_into sha=915516b6d15d at=59bda50f -/
+/-- mirrors flare/quic/frame.mojo#parse_frame_into sha=b75548102aad at=da6fb43a -/
 def pathChallengeBody (b : Bytes) : Parser Frame := do
   let d ← bytes b 8
   pure (.pathChallenge d)
 
-/-- mirrors flare/quic/frame.mojo#parse_frame_into sha=915516b6d15d at=59bda50f -/
+/-- mirrors flare/quic/frame.mojo#parse_frame_into sha=b75548102aad at=da6fb43a -/
 def pathResponseBody (b : Bytes) : Parser Frame := do
   let d ← bytes b 8
   pure (.pathResponse d)
 
-/-- mirrors flare/quic/frame.mojo#parse_frame_into sha=915516b6d15d at=59bda50f -/
+/-- mirrors flare/quic/frame.mojo#parse_frame_into sha=b75548102aad at=da6fb43a -/
 def closeFt (b : Bytes) (t : Nat) : Parser UInt64 :=
   if t = 0x1C then varint b else pure 0
 
-/-- mirrors flare/quic/frame.mojo#parse_frame_into sha=915516b6d15d at=59bda50f -/
+/-- mirrors flare/quic/frame.mojo#parse_frame_into sha=b75548102aad at=da6fb43a -/
 def closeBody (b : Bytes) (t : Nat) : Parser Frame := do
   let ec ← varint b
   let ft ← closeFt b t
@@ -295,22 +301,31 @@ def closeBody (b : Bytes) (t : Nat) : Parser Frame := do
   let reason ← bytes b rn.toNat
   pure (.connectionClose (t = 0x1D) ec ft reason)
 
-/-- mirrors flare/quic/frame.mojo#parse_frame_into sha=915516b6d15d at=59bda50f -/
+/-- mirrors flare/quic/frame.mojo#parse_frame_into sha=b75548102aad at=da6fb43a -/
 def datagramLen (b : Bytes) (t : Nat) : Parser Nat :=
   if t = 0x31 then do
     let v ← varint b
     pure v.toNat
   else remaining b
 
-/-- mirrors flare/quic/frame.mojo#parse_frame_into sha=915516b6d15d at=59bda50f -/
+/-- mirrors flare/quic/frame.mojo#parse_frame_into sha=b75548102aad at=da6fb43a -/
 def datagramBody (b : Bytes) (t : Nat) : Parser Frame := do
   let n ← datagramLen b t
   let d ← bytes b n
   pure (.datagram d (t = 0x31))
 
+/-- ACK_FREQUENCY (draft-ietf-quic-ack-frequency).
+mirrors flare/quic/frame.mojo#parse_frame_into sha=b75548102aad at=da6fb43a -/
+def ackFrequencyBody (b : Bytes) : Parser Frame := do
+  let seq ← varint b
+  let threshold ← varint b
+  let delay ← varint b
+  let reorder ← varint b
+  pure (.ackFrequency seq threshold delay reorder)
+
 /-- An unknown frame type raises FRAME_ENCODING_ERROR (RFC 9000 §12.4,
 QUIC-01).
-mirrors flare/quic/frame.mojo#parse_frame_into sha=11f99f7bdbc6 at=c3f84e3b (fixed, QUIC-01) -/
+mirrors flare/quic/frame.mojo#parse_frame_into sha=b75548102aad at=da6fb43a (fixed, QUIC-01) -/
 def unknownBody (_raw : UInt64) : Parser Frame :=
   fail "FRAME_ENCODING_ERROR: unknown frame type"
 
@@ -337,14 +352,16 @@ def body (b : Bytes) (raw : UInt64) : Kind → Parser Frame
   | .connectionClose => closeBody b raw.toNat
   | .handshakeDone => pure .handshakeDone
   | .datagram => datagramBody b raw.toNat
+  | .ackFrequency => ackFrequencyBody b
+  | .immediateAck => pure .immediateAck
   | .unknown => unknownBody raw
 
-/-- mirrors flare/quic/frame.mojo#parse_frame_into sha=915516b6d15d at=59bda50f (dispatch on the decoded
+/-- mirrors flare/quic/frame.mojo#parse_frame_into sha=b75548102aad at=da6fb43a (dispatch on the decoded
 type). -/
 def frameBody (b : Bytes) (raw : UInt64) : Parser Frame :=
   body b raw (kindOf raw.toNat)
 
-/-- mirrors flare/quic/frame.mojo#parse_frame_into sha=915516b6d15d at=59bda50f -/
+/-- mirrors flare/quic/frame.mojo#parse_frame_into sha=b75548102aad at=da6fb43a -/
 def parseFrameAux (b : Bytes) : Parser Frame := do
   let raw ← varint b
   frameBody b raw
@@ -447,6 +464,9 @@ theorem good_body (raw : UInt64) : ∀ k, Good b (body b raw k)
   | .connectionClose => good_closeBody b _
   | .handshakeDone => good_pure _ _
   | .datagram => good_datagramBody b _
+  | .ackFrequency => good_v1 b _ fun _ => good_v1 b _ fun _ => good_v1 b _ fun _ =>
+      good_v1 b _ fun _ => good_pure _ _
+  | .immediateAck => good_pure _ _
   | .unknown => good_fail _ _
 
 end good
@@ -569,6 +589,9 @@ theorem body_kind (b : Bytes) (raw : UInt64) :
       sat_pure rfl
   | .handshakeDone => sat_pure rfl
   | .datagram => sat_bind fun _ => sat_bind fun _ => sat_pure rfl
+  | .ackFrequency => sat_bind fun _ => sat_bind fun _ => sat_bind fun _ => sat_bind fun _ =>
+      sat_pure rfl
+  | .immediateAck => sat_pure rfl
   | .unknown => sat_fail _
 
 /-- A property that holds for every frame of kind `k` holds for whatever the

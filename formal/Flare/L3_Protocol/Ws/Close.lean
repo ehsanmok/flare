@@ -64,12 +64,15 @@ def CloseOK {σ : Type} (step : σ → Act → σ × List Out) (init : σ) : Pro
   ∀ acts, Good false acts (outs step init acts)
 
 /-- `WsConnection`: `recv` answers a CLOSE (`closeReply`) unless one
-was sent, `close()` sends once, `send_*` and `send_frame` raise (write
-nothing) after a CLOSE.
-mirrors flare/ws/server.mojo#WsConnection.send_text+WsConnection.send_binary+WsConnection.send_frame+WsConnection._require_open+WsConnection.recv+WsConnection._recv_one+WsConnection.close+WsConnection.peer_addr sha=c13229328a2f at=152d8877 (fixed, WS-06) -/
+was sent and fails a TEXT frame that is not UTF-8 with CLOSE 1007 (sent
+once), `close()` sends once, `send_*` and `send_frame` raise (write
+nothing) after a CLOSE. A `recv` event is a final frame.
+mirrors flare/ws/server.mojo#WsConnection.send_text+WsConnection.send_binary+WsConnection.send_frame+WsConnection._require_open+WsConnection.recv+WsConnection._recv_one+WsConnection.close+WsConnection.peer_addr sha=63125833aa5d at=0a183352 (fixed, WS-06) -/
 def fixStep : Bool → Act → Bool × List Out
   | s, .recv op p =>
     if op = 9 then (s, [⟨10, p⟩])
+    else if op = 1 ∧ Flare.L1.Utf8.isValidUtf8 p = false then
+      if s then (s, []) else (true, [⟨8, be16 1007⟩])
     else if op = 8 ∧ s = false then (true, [⟨8, closeReply p⟩])
     else (s, [])
   | s, .sendText p => if s then (s, []) else (s, [⟨1, p⟩])
@@ -82,9 +85,11 @@ theorem fix_state (s : Bool) (a : Act) :
   | recv op p =>
     by_cases h9 : op = 9
     · subst h9; cases s <;> simp [fixStep, isCloseOut]
-    · by_cases h8 : op = 8
-      · subst h8; cases s <;> simp [fixStep, isCloseOut]
-      · cases s <;> simp [fixStep, h9, h8]
+    · by_cases h1 : op = 1 ∧ Flare.L1.Utf8.isValidUtf8 p = false
+      · cases s <;> simp [fixStep, h1, isCloseOut]
+      · by_cases h8 : op = 8
+        · subst h8; cases s <;> simp_all [fixStep, isCloseOut]
+        · cases s <;> simp [fixStep, h9, h1, h8]
   | sendText p => cases s <;> simp [fixStep, isCloseOut]
   | sendBinary p => cases s <;> simp [fixStep, isCloseOut]
   | close c => cases s <;> simp [fixStep, isCloseOut]
@@ -94,7 +99,9 @@ theorem fix_noData (a : Act) : ∀ f ∈ (fixStep true a).2, isDataOut f = false
   | recv op p =>
     by_cases h9 : op = 9
     · subst h9; simp [fixStep, isDataOut]
-    · simp [fixStep, h9]
+    · by_cases h1 : op = 1 ∧ Flare.L1.Utf8.isValidUtf8 p = false
+      · simp [fixStep, h1]
+      · simp [fixStep, h9, h1]
   | sendText p => simp [fixStep]
   | sendBinary p => simp [fixStep]
   | close c => simp [fixStep]

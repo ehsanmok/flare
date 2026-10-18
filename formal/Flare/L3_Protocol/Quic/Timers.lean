@@ -86,11 +86,11 @@ def ispecStep (p : IdleParams) (s : ISpec) : IEv → ISpec
 /-- The timer the server runs (fixed, QUIC-20): armed from the effective
 timeout, re-armed only by an authenticated receipt or the first ack-eliciting
 send after one, not armed when there is no effective timeout.
-mirrors flare/quic/server.mojo#QuicListener._handle_inbound+QuicListener._process_one_packet sha=49ade7efcc8a at=4b4e9f4c (only packets for which
+mirrors flare/quic/server.mojo#QuicListener._handle_inbound+QuicListener._process_one_packet sha=5dce8b038aa3 at=0a183352 (only packets for which
 `_process_one_packet` succeeded), `_build_1rtt_response` (first ack-eliciting
 send, `idle_sent_since_rx`), `schedule_idle_timeout`, `_client_params_ok` (the
-peer's value) and flare/quic/_server_support.mojo#_effective_idle_ms sha=125091334ee3 at=060bca67. The
-client runs the same timer (fixed, QUIC-21): flare/quic/client.mojo#QuicClientConnection._dispatch_frames sha=abc914dfa0bf at=060bca67 (processed packets, with the monotonic clock),
+peer's value) and flare/quic/_server_support.mojo#_effective_idle_ms sha=125091334ee3 at=0a183352. The
+client runs the same timer (fixed, QUIC-21): flare/quic/client.mojo#QuicClientConnection._dispatch_frames sha=96f9aaa8a2be at=0a183352 (processed packets, with the monotonic clock),
 `_note_ack_eliciting_send`, `_apply_peer_transport_params` (the server's value)
 and `_check_idle` (called from `poll`) -/
 structure IFix where
@@ -249,22 +249,24 @@ CONNECTION_CLOSE (`_answer_closing`; the code answers only the 1st, 2nd, 4th,
 one, which is the stronger obligation); only the closing timer, not any other
 timer of the slot, ends the phase. A dead slot that never sent a
 CONNECTION_CLOSE (no 1-RTT keys) is reclaimed by its next timer. Nothing is
-sent while draining: `_build_1rtt_response` returns no datagram and
-`_drain_and_send` returns at once when the connection state is DRAINING, so
-no ACK, response, PTO probe or delayed-ACK flush leaves the server. A peer
-CONNECTION_CLOSE that arrives while closing moves to draining, keeping the
-closing period's end (`apply_connection_close` sets DRAINING from any state);
-the slot then ends with the closing timer or the idle timer, as before.
-mirrors flare/quic/server.mojo#QuicListener._build_1rtt_response+QuicListener._drain_and_send sha=30ce4d7f42d1 at=7c972383,
-flare/quic/state.mojo#apply_connection_close sha=59dee456aa9d at=7c972383,
-flare/quic/server.mojo#QuicListener._close_for+QuicListener._enter_closing+QuicListener._answer_closing+QuicListener._handle_inbound+QuicListener.advance_timers sha=a5579bd9014f at=a8782952 -/
+sent while draining: `_build_1rtt_response`, `_build_initial_response` and
+`_build_handshake_response` return no datagram and `_drain_and_send` returns
+at once when the connection state is DRAINING, so no ACK, response, PTO probe,
+long-header retransmit or delayed-ACK flush leaves the server at any level.
+A peer CONNECTION_CLOSE enters draining from the open state
+(`apply_connection_close`); the slot then ends with its idle timer. While
+closing, `_handle_inbound` processes nothing, so the peer's CONNECTION_CLOSE
+is answered like any other packet and the closing timer ends the slot.
+mirrors flare/quic/server.mojo#QuicListener._build_1rtt_response+QuicListener._build_initial_response+QuicListener._build_handshake_response+QuicListener._drain_and_send sha=4bfd6370e5fd at=30fc5e99,
+flare/quic/state.mojo#apply_connection_close sha=59dee456aa9d at=30fc5e99,
+flare/quic/server.mojo#QuicListener._close_for+QuicListener._enter_closing+QuicListener._answer_closing+QuicListener._handle_inbound+QuicListener.advance_timers sha=be199d49b02d at=30fc5e99 -/
 def srvStepNow (pto : Nat) (s : SSt) : CEv → SSt
   | .localClose t => match s.phase with
     | .opened => ⟨.closing (t + 3 * pto), false, .cc :: s.out⟩
     | _ => s
   | .peerClose t => match s.phase with
     | .opened => ⟨.draining t, s.alive, s.out⟩
-    | .closing u => ⟨.draining u, s.alive, s.out⟩
+    | .closing u => if t < u then { s with out := .cc :: s.out } else s
     | _ => s
   | .recvPkt t => match s.phase with
     | .closing u => if t < u then { s with out := .cc :: s.out } else s
@@ -318,7 +320,7 @@ theorem srvFix_refines (pto : Nat) (s : SSt) (h : SOk s) (e : CEv)
 (and the Initial, Handshake and 0-RTT builders) return no datagram when the
 connection state is DRAINING, which covers `_drain_egress`, `_check_pto`,
 `keepalive` and `shutdown`; `send_stream` raises instead of sending.
-mirrors flare/quic/client.mojo#QuicClientConnection._build_1rtt+QuicClientConnection.send_stream sha=3e2f976beda7 at=a8e10fbd -/
+mirrors flare/quic/client.mojo#QuicClientConnection._build_1rtt+QuicClientConnection.send_stream sha=6139df454e5d at=0a183352 -/
 def cliStepNow (s : CSt) : CEv → CSt
   | .localClose _ => match s.phase with
     | .opened => ⟨.gone, .cc :: s.out⟩

@@ -69,8 +69,8 @@ theorem pollTimeout_pos (nf now cap : Nat) (h : 1 ≤ cap) : 1 ≤ pollTimeout n
   · split <;> omega
 
 /-- Worker phase.
-mirrors flare/http/_server_reactor_epoll.mojo#_run_handler_loop_impl sha=1465c17e48c9 at=193ddcec and
-flare/http/_server_reactor_uring.mojo#run_uring_bufring_reactor_loop_shared sha=eec8fc1931de at=59bda50f -/
+mirrors flare/http/_server_reactor_epoll.mojo#_run_handler_loop_impl sha=2f9bbe6a6bd1 at=0a183352 and
+flare/http/_server_reactor_uring.mojo#run_uring_bufring_reactor_loop_shared sha=3b4da4a6d678 at=0a183352 -/
 inductive TPc where
   | reg | check | poll | ready | batch | clean | done
   deriving DecidableEq, Repr
@@ -82,7 +82,7 @@ structure TW where
   deriving DecidableEq, Repr
 
 /-- Teardown thread; the argument is the time the phase was entered.
-mirrors flare/runtime/scheduler.mojo#Scheduler.shutdown+Scheduler.drain sha=5d2b1769fbd6 at=59bda50f -/
+mirrors flare/runtime/scheduler.mojo#Scheduler.shutdown+Scheduler.drain sha=40ca477745be at=30fc5e99 -/
 inductive MPc where
   | sig
   | wait (t : Nat)
@@ -128,7 +128,7 @@ def allDone (s : TS) : Bool := s.ws.all isDone
 def init (n : Nat) : TS := ⟨0, none, List.replicate n ⟨.reg, 0⟩, .sig, []⟩
 
 /-- Next phase on a worker's own step (`poll` is ended by the kernel).
-mirrors flare/http/_server_reactor_epoll.mojo#_run_handler_loop_impl sha=1465c17e48c9 at=59bda50f -/
+mirrors flare/http/_server_reactor_epoll.mojo#_run_handler_loop_impl sha=2f9bbe6a6bd1 at=0a183352 -/
 def wNext (stop : Option Nat) : TPc → Option TPc
   | .reg => some .check
   | .check => some (if stop.isSome then .clean else .poll)
@@ -138,7 +138,7 @@ def wNext (stop : Option Nat) : TPc → Option TPc
   | .clean => some .done
   | .done => none
 
-/-- mirrors flare/runtime/scheduler.mojo#Scheduler.drain sha=df979eac331a at=59bda50f -/
+/-- mirrors flare/runtime/scheduler.mojo#Scheduler.drain sha=25089b531e7a at=30fc5e99 -/
 def mStep (c : Cfg) (s : TS) : Option TS :=
   match s.m with
   | .sig => none
@@ -159,10 +159,10 @@ def mStep (c : Cfg) (s : TS) : Option TS :=
   | .free _ => some { s with m := .fin s.now }
   | .fin _ => none
 
-/-- mirrors flare/http/_server_reactor_epoll.mojo#_run_handler_loop_impl sha=1465c17e48c9 at=193ddcec,
-flare/http/_server_reactor_uring.mojo#run_uring_bufring_reactor_loop_shared sha=375dfd9f0074 at=0741fc9e (fixed, CONC-07: `poll` takes
+/-- mirrors flare/http/_server_reactor_epoll.mojo#_run_handler_loop_impl sha=2f9bbe6a6bd1 at=30fc5e99,
+flare/http/_server_reactor_uring.mojo#run_uring_bufring_reactor_loop_shared sha=3b4da4a6d678 at=30fc5e99 (fixed, CONC-07: `poll` takes
 `URING_STOP_POLL_MS`) and
-flare/runtime/scheduler.mojo#Scheduler._signal_stop+Scheduler.shutdown+Scheduler.drain sha=4687296db41d at=ea1b9282 -/
+flare/runtime/scheduler.mojo#Scheduler._signal_stop+Scheduler.shutdown+Scheduler.drain sha=fce0ba997edc at=30fc5e99 -/
 def step (c : Cfg) (s : TS) : Lbl → Option TS
   | .tick => some { s with now := s.now + 1 }
   | .w i =>

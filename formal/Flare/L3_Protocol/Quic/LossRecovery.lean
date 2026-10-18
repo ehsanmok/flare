@@ -3,14 +3,22 @@
 
 RFC 9002 defines `bytes_in_flight` as the sum of the sizes of the
 in-flight packets. flare's `LossRecovery` keeps it as a separate counter.
-`on_sent` adds to it. `on_ack`, `detect_lost` and `fire_pto` subtract as
-they remove records from `sent`.
+`on_sent` adds to it. `on_ack` / `on_ack_ranges`, `detect_lost` and
+`fire_pto` subtract as they retire records (`_retire`).
+
+flare retires a record by clearing its `live` flag and drops the dead
+prefix later (`head`, `_compact`). The model's `sent` is the live records
+of `sent[head:]` in order; tombstones and compaction do not change it.
+`sent` is in packet-number order (packet numbers grow with each
+`on_sent`), so the binary searches and early loop exits of `on_ack_ranges`
+and `detect_lost` visit exactly the records their predicates select.
 
 The model keeps only the fields that touch the counter: the packet list
 (number, send time, size) and the counter, both over `Nat`. Congestion
 control, RTT estimation and frame bytes are left out, since none of them
-feeds back into the counter. The retire predicates of `on_ack` (packet
-number listed in the ACK) and `detect_lost` (packet / time threshold)
+feeds back into the counter. The retire predicates of `on_ack_ranges`
+(packet number inside an acknowledged range) and `detect_lost` (packet /
+time threshold)
 are abstracted to an arbitrary `p : Sent → Bool`, so the results hold for
 every such predicate.
 
@@ -48,12 +56,12 @@ theorem sumSz_append (a b : List Sent) : sumSz (a ++ b) = sumSz a + sumSz b := b
 
 def Inv (r : LR) : Prop := r.inflight = sumSz r.sent
 
-/-- mirrors flare/quic/_loss_recovery.mojo#LossRecovery.__init__ sha=2083bb4147ec at=59bda50f -/
+/-- mirrors flare/quic/_loss_recovery.mojo#LossRecovery.__init__ sha=20fe0e1c8da6 at=0a183352 -/
 def init : LR := ⟨[], 0⟩
 
 theorem inv_init : Inv init := rfl
 
-/-- mirrors flare/quic/_loss_recovery.mojo#LossRecovery.on_sent sha=f4e453a858f5 at=59bda50f -/
+/-- mirrors flare/quic/_loss_recovery.mojo#LossRecovery.on_sent sha=230a0db3a85a at=0a183352 -/
 def onSent (r : LR) (pn now size frameLen : Nat) : LR :=
   let sz := if size > 0 then size else frameLen
   ⟨r.sent ++ [⟨pn, now, sz⟩], r.inflight + sz⟩
@@ -65,7 +73,7 @@ theorem inv_onSent (r : LR) (pn now size frameLen : Nat) (h : Inv r) :
 
 /-- The shared retire loop of `on_ack` and `detect_lost`: walk `sent` in
 order, subtract the size of each retired record, keep the rest.
-mirrors flare/quic/_loss_recovery.mojo#LossRecovery.on_ack+LossRecovery.detect_lost sha=06ddd040cdbc at=59bda50f -/
+mirrors flare/quic/_loss_recovery.mojo#LossRecovery.on_ack_ranges+LossRecovery.detect_lost+LossRecovery._retire sha=eb379c3f0939 at=0a183352 -/
 def retireLoop (p : Sent → Bool) : List Sent → Nat → List Sent → Nat × List Sent
   | [], inflight, keep => (inflight, keep)
   | x :: xs, inflight, keep =>
@@ -115,26 +123,55 @@ theorem retire_noUnderflow (p : Sent → Bool) (r : LR) (h : Inv r) :
     NoUnderflow p r.sent r.inflight :=
   retireLoop_noUnderflow p r.sent r.inflight [] (by simp [Inv] at h; simp [sumSz, h])
 
-/-- `on_ack`: an empty ACK or an empty `sent` list returns without change;
-otherwise retire every record whose number is listed.
-mirrors flare/quic/_loss_recovery.mojo#LossRecovery.on_ack sha=89e0b43c1a8f at=59bda50f -/
-def onAck (r : LR) (acked : List Nat) : LR :=
-  if acked.isEmpty || r.sent.isEmpty then r
-  else retire (fun s => acked.contains s.pn) r
+def inRanges : List Nat → Nat → Bool
+  | lo :: hi :: rs, pn => (lo ≤ pn && pn ≤ hi) || inRanges rs pn
+  | _, _ => false
 
-theorem inv_onAck (r : LR) (acked : List Nat) (h : Inv r) : Inv (onAck r acked) := by
-  unfold onAck; split
+/-- `on_ack_ranges`: flat `[lo, hi]` pairs, descending. No ranges or
+nothing in flight: no change. The top of the first range is clamped below
+`next_pn`; a first range wholly at or past `next_pn` ends the call. Then
+every record in `[bottom, top]` inside a range is retired.
+mirrors flare/quic/_loss_recovery.mojo#LossRecovery.on_ack_ranges sha=5fe79d3d2d73 at=0a183352 -/
+def onAckRanges (r : LR) (ranges : List Nat) (nextPn : Nat) : LR :=
+  match ranges with
+  | lo0 :: hi0 :: _ =>
+    if r.sent.isEmpty then r
+    else if hi0 ≥ nextPn ∧ nextPn = 0 then r
+    else
+      let top := if hi0 ≥ nextPn then nextPn - 1 else hi0
+      if top < lo0 then r
+      else
+        let bottom := ranges.getD (ranges.length - 2) 0
+        retire (fun s => bottom ≤ s.pn && s.pn ≤ top && inRanges ranges s.pn) r
+  | _ => r
+
+/-- `on_ack`: each acknowledged number as a one-packet range, descending.
+mirrors flare/quic/_loss_recovery.mojo#LossRecovery.on_ack sha=8e0188da00cf at=0a183352 -/
+def onAck (r : LR) (acked : List Nat) (nextPn : Nat := 2 ^ 64 - 1) : LR :=
+  onAckRanges r ((acked.mergeSort (fun a b => decide (b ≤ a))).flatMap (fun x => [x, x])) nextPn
+
+theorem inv_onAckRanges (r : LR) (ranges : List Nat) (nextPn : Nat) (h : Inv r) :
+    Inv (onAckRanges r ranges nextPn) := by
+  unfold onAckRanges
+  split
+  · repeat (first | exact h | exact inv_retire _ r h | (simp only []; split) | split)
   · exact h
-  · exact inv_retire _ r h
+
+theorem inv_onAck (r : LR) (acked : List Nat) (h : Inv r) : Inv (onAck r acked) :=
+  inv_onAckRanges r _ _ h
+
+theorem inv_onAck_next (r : LR) (acked : List Nat) (nextPn : Nat) (h : Inv r) :
+    Inv (onAck r acked nextPn) :=
+  inv_onAckRanges r _ _ h
 
 /-- `detect_lost` with its loss predicate abstracted.
-mirrors flare/quic/_loss_recovery.mojo#LossRecovery.detect_lost sha=6d9e7d59b63f at=59bda50f -/
+mirrors flare/quic/_loss_recovery.mojo#LossRecovery.detect_lost sha=f263c5040ba2 at=0a183352 -/
 def detectLost (lost : Sent → Bool) (r : LR) : LR := retire lost r
 
 theorem inv_detectLost (lost : Sent → Bool) (r : LR) (h : Inv r) :
     Inv (detectLost lost r) := inv_retire lost r h
 
-/-- Remove index `i`. mirrors flare/quic/_loss_recovery.mojo#LossRecovery.fire_pto sha=7d5c7da30a36 at=59bda50f -/
+/-- Remove index `i`. mirrors flare/quic/_loss_recovery.mojo#LossRecovery.fire_pto sha=af7a00e7c016 at=0a183352 -/
 def removeAt : List Sent → Nat → List Sent
   | [], _ => []
   | _ :: xs, 0 => xs
@@ -157,9 +194,9 @@ theorem sum_removeAt (l : List Sent) (i : Nat) (hi : i < l.length) :
       have := ih i (by omega)
       simp [removeAt, sizeAt, sumSz]; omega
 
-/-- `fire_pto` with the oldest-index search abstracted to any valid
-index `idx` (or none when `sent` is empty).
-mirrors flare/quic/_loss_recovery.mojo#LossRecovery.fire_pto sha=7d5c7da30a36 at=59bda50f -/
+/-- `fire_pto` with the oldest-index search (the first live record)
+abstracted to any valid index `idx` (or none when `sent` is empty).
+mirrors flare/quic/_loss_recovery.mojo#LossRecovery.fire_pto sha=af7a00e7c016 at=0a183352 -/
 def firePto (r : LR) (idx : Nat) : LR :=
   if idx < r.sent.length then ⟨removeAt r.sent idx, r.inflight - sizeAt r.sent idx⟩ else r
 
@@ -178,13 +215,13 @@ theorem firePto_noUnderflow (r : LR) (idx : Nat) (h : Inv r) (hi : idx < r.sent.
 /-- Any operation sequence from `init` keeps the invariant. -/
 inductive Op
   | sent (pn now size frameLen : Nat)
-  | ack (acked : List Nat)
+  | ack (acked : List Nat) (nextPn : Nat)
   | lost (p : Sent → Bool)
   | pto (idx : Nat)
 
 def Op.apply : Op → LR → LR
   | .sent pn now size fl, r => onSent r pn now size fl
-  | .ack a, r => onAck r a
+  | .ack a n, r => onAck r a n
   | .lost p, r => detectLost p r
   | .pto i, r => firePto r i
 
@@ -197,7 +234,7 @@ theorem inv_run (ops : List Op) : Inv (ops.foldl (fun r o => o.apply r) init) :=
     apply ih
     cases o with
     | sent => exact inv_onSent _ _ _ _ _ h
-    | ack => exact inv_onAck _ _ h
+    | ack => exact inv_onAck_next _ _ _ h
     | lost => exact inv_detectLost _ _ h
     | pto => exact inv_firePto _ _ h
 

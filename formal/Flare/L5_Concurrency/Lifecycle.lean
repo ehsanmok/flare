@@ -7,13 +7,14 @@ import Flare.L5_Concurrency.Thread
 Three sequential parts of `flare/runtime/scheduler.mojo` that the
 interleaving model (`Flare.L5.Scheduler`) abstracts away.
 
-1. **`start`'s rollback** (:578-633). Allocation order (:361-575): stop flag,
-   shared listener (shared mode only), worker array, one stats cell per
+1. **`start`'s rollback**. Allocation order: stop flag,
+   shared listener (shared mode only), worker array, the accept-balancing
+   group (`n >= 2`), one stats cell per
    worker, one `SO_REUSEPORT` listener per worker plus the extras (prebind
    mode), then per worker a context and a `pthread_create`. When spawn `k`
    fails, the rollback joins the `k` spawned workers and frees the worker
    array, the `k` claimed contexts, the unclaimed one, the stats cells, the
-   shared listener and the stop flag. The heap is a counter per resource;
+   group, the listeners and the stop flag. The heap is a counter per resource;
    freeing a resource with count 0 sets `dbl` (double free), freeing anything
    a worker can reach while a worker thread is alive sets `uaf`.
 2. **Drain's stuck-worker branch** (:846-897): the sweep appends `i` to
@@ -32,7 +33,12 @@ namespace Flare.L5.Lifecycle
 inductive Res where
   | stop | shared | warr
   | stats (i : Nat) | pwl (i : Nat) | ctx (i : Nat)
+  | grp
   deriving DecidableEq, Repr
+
+/-- `start` allocates the balancing group for `n >= 2` workers.
+`FLARE_BALANCE_ACCEPT=0` and non-Linux targets allocate none (`n < 2` shape). -/
+def balOn (n : Nat) : Bool := decide (2 ≤ n)
 
 structure H where
   cnt : Res → Nat
@@ -66,14 +72,15 @@ def joinR : Nat → H → H
   | k + 1, h => join (joinR k h)
 
 /-- Spawns `0..k-1` succeeded: context `i` allocated, thread `i` running.
-mirrors flare/runtime/scheduler.mojo#Scheduler.start sha=1ab2edc505a7 at=59bda50f -/
+mirrors flare/runtime/scheduler.mojo#Scheduler.start sha=a1f17c56964f at=0a183352 -/
 def spawnR : Nat → H → H
   | 0, h => h
   | k + 1, h => { (alloc (.ctx k) (spawnR k h)) with thr := (spawnR k h).thr + 1 }
 
-/-- Allocation before the first spawn; `pre` is `prebind_per_worker`, `L`
+/-- Allocation before the first spawn but the balancing group (added by
+`startFail`; counts commute); `pre` is `prebind_per_worker`, `L`
 the number of per-worker listeners (`n * (1 + len(extra_addrs))`).
-mirrors flare/runtime/scheduler.mojo#Scheduler.start sha=1ab2edc505a7 at=59bda50f -/
+mirrors flare/runtime/scheduler.mojo#Scheduler.start sha=a1f17c56964f at=0a183352 -/
 def startAlloc (pre : Bool) (n L : Nat) : H :=
   let h := alloc .stop H.empty
   let h := if pre then h else alloc .shared h
@@ -83,29 +90,34 @@ def startAlloc (pre : Bool) (n L : Nat) : H :=
 
 /-- `start` with spawn `k` failing, then the rollback, which also frees
 `_per_worker_listener_addrs` (CONC-06).
-mirrors flare/runtime/scheduler.mojo#Scheduler.start sha=191d0ca804a9 at=a7838f62 (fixed, CONC-06) -/
+mirrors flare/runtime/scheduler.mojo#Scheduler.start sha=a1f17c56964f at=0a183352 (fixed, CONC-06) -/
 def startFail (pre : Bool) (n L k : Nat) : H :=
-  let h := spawnR k (startAlloc pre n L)
+  let h := startAlloc pre n L
+  let h := if balOn n then alloc .grp h else h
+  let h := spawnR k h
   let h := alloc (.ctx k) h
   let h := joinR k h
   let h := free .warr h
   let h := freeR .ctx k h
   let h := free (.ctx k) h
   let h := freeR .stats n h
+  let h := if balOn n then free .grp h else h
   let h := if pre then h else free .shared h
   let h := if pre then freeR .pwl L h else h
   free .stop h
 
 /-- `_abandon_start` after a failed per-worker bind, before any spawn:
 `b` listeners stored so far. `_free_resources` then the worker array.
-mirrors flare/runtime/scheduler.mojo#Scheduler.start+Scheduler._abandon_start+Scheduler._free_resources sha=4cc31f9f8857 at=59bda50f -/
+mirrors flare/runtime/scheduler.mojo#Scheduler.start+Scheduler._abandon_start+Scheduler._free_resources sha=902b9e98cc9d at=0a183352 -/
 def abandon (n b : Nat) : H :=
   let h := alloc .stop H.empty
   let h := alloc .warr h
+  let h := if balOn n then alloc .grp h else h
   let h := allocR .stats n h
   let h := allocR .pwl b h
   let h := freeR .pwl b h
   let h := freeR .stats n h
+  let h := if balOn n then free .grp h else h
   let h := free .stop h
   free .warr h
 
@@ -199,6 +211,7 @@ theorem hits_ctx (k : Nat) : ∀ r, hits .ctx k r = match r with | .ctx i => if 
   | .warr => hits_ne (fun _ h => by cases h) k
   | .stats _ => hits_ne (fun _ h => by cases h) k
   | .pwl _ => hits_ne (fun _ h => by cases h) k
+  | .grp => hits_ne (fun _ h => by cases h) k
 
 theorem hits_stats (k : Nat) : ∀ r, hits .stats k r = match r with | .stats i => if i < k then 1 else 0 | _ => 0
   | .stats i => hits_inj stats_inj i k
@@ -207,6 +220,7 @@ theorem hits_stats (k : Nat) : ∀ r, hits .stats k r = match r with | .stats i 
   | .warr => hits_ne (fun _ h => by cases h) k
   | .ctx _ => hits_ne (fun _ h => by cases h) k
   | .pwl _ => hits_ne (fun _ h => by cases h) k
+  | .grp => hits_ne (fun _ h => by cases h) k
 
 theorem hits_pwl (k : Nat) : ∀ r, hits .pwl k r = match r with | .pwl i => if i < k then 1 else 0 | _ => 0
   | .pwl i => hits_inj pwl_inj i k
@@ -215,6 +229,7 @@ theorem hits_pwl (k : Nat) : ∀ r, hits .pwl k r = match r with | .pwl i => if 
   | .warr => hits_ne (fun _ h => by cases h) k
   | .ctx _ => hits_ne (fun _ h => by cases h) k
   | .stats _ => hits_ne (fun _ h => by cases h) k
+  | .grp => hits_ne (fun _ h => by cases h) k
 
 theorem hits_pos {f : Nat → Res} {r : Res} : ∀ k, hits f k r ≠ 0 → ∃ i, i < k ∧ f i = r
   | 0, h => absurd rfl h
@@ -264,6 +279,7 @@ def cA (pre : Bool) (n L : Nat) : Res → Nat
   | .stats i => if i < n then 1 else 0
   | .pwl i => if pre && decide (i < L) then 1 else 0
   | .ctx _ => 0
+  | .grp => 0
 
 def cB (pre : Bool) (n L k : Nat) : Res → Nat
   | .ctx i => if i < k + 1 then 1 else 0
@@ -324,31 +340,100 @@ theorem phaseE (pre : Bool) (L : Nat) :
   all_goals simp only [H.empty, H.mk.injEq, and_true]
   all_goals funext r; cases r <;> simp [cD, hits_pwl]
 
+/-! The balancing group commutes with every other step and its free undoes
+its alloc. -/
+
+theorem alloc_grp_comm (r : Res) (hr : r ≠ .grp) (h : H) :
+    alloc r (alloc .grp h) = alloc .grp (alloc r h) := by
+  obtain ⟨cnt, thr, dbl, uaf⟩ := h
+  simp only [alloc, H.mk.injEq, and_true]
+  funext x; by_cases h1 : x = r <;> by_cases h2 : x = .grp <;> simp_all
+
+theorem spawnR_grp (k : Nat) (h : H) : spawnR k (alloc .grp h) = alloc .grp (spawnR k h) := by
+  rw [spawnR_eq, spawnR_eq]
+  obtain ⟨cnt, thr, dbl, uaf⟩ := h
+  simp only [alloc, H.mk.injEq, and_true]
+  funext x; by_cases h2 : x = .grp <;> simp [h2]; omega
+
+theorem joinR_grp : ∀ (k : Nat) (h : H), joinR k (alloc .grp h) = alloc .grp (joinR k h)
+  | 0, _ => rfl
+  | k + 1, h => by
+    rw [joinR, joinR_grp k h, joinR]
+    generalize joinR k h = g
+    obtain ⟨cnt, thr, dbl, uaf⟩ := g
+    simp only [join, alloc]; split <;> rfl
+
+theorem free_grp_comm (r : Res) (hr : r ≠ .grp) (h : H) :
+    free r (alloc .grp h) = alloc .grp (free r h) := by
+  obtain ⟨cnt, thr, dbl, uaf⟩ := h
+  have hc : (if r = .grp then cnt r + 1 else cnt r) = cnt r := by simp [hr]
+  simp only [free, alloc, hc]
+  split
+  · rfl
+  · simp only [H.mk.injEq, and_true]
+    funext x; by_cases h1 : x = r <;> by_cases h2 : x = .grp <;> simp_all
+
+theorem freeR_grp (f : Nat → Res) (hf : ∀ i, f i ≠ .grp) :
+    ∀ (k : Nat) (h : H), freeR f k (alloc .grp h) = alloc .grp (freeR f k h)
+  | 0, _ => rfl
+  | k + 1, h => by rw [freeR, freeR_grp f hf k h, free_grp_comm _ (hf k), freeR]
+
+theorem free_thr (r : Res) (h : H) : (free r h).thr = h.thr := by
+  unfold free; split <;> rfl
+
+theorem freeR_thr (f : Nat → Res) : ∀ (k : Nat) (h : H), (freeR f k h).thr = h.thr
+  | 0, _ => rfl
+  | k + 1, h => by rw [freeR, free_thr, freeR_thr f k h]
+
+theorem free_alloc_grp (h : H) (ht : h.thr = 0) : free .grp (alloc .grp h) = h := by
+  obtain ⟨cnt, thr, dbl, uaf⟩ := h
+  simp only at ht; subst ht
+  simp only [free, alloc, if_true, Nat.add_one_ne_zero, if_false, H.mk.injEq, gt_iff_lt,
+    Nat.lt_irrefl, decide_false, Bool.false_and, Bool.or_false, and_true]
+  funext x; by_cases h2 : x = .grp <;> simp [h2]
+
 /-- Headline: for every `n`, every listener count `L` and every failing
 spawn index `k`, in both listener modes, a failed `start` leaves nothing
 allocated, frees nothing twice, frees nothing under a running worker and
 joins every spawned worker. -/
 theorem rollback_clean (pre : Bool) (n L k : Nat) : startFail pre n L k = H.empty := by
-  simp only [startFail]
-  rw [phaseA, phaseB, phaseC]
-  have hD := phaseD pre n L
-  cases pre <;> simp only [Bool.false_eq_true, if_true, if_false] at hD ⊢ <;> rw [hD] <;>
-    first | exact phaseE false L | exact phaseE true L
+  cases hb : balOn n
+  · simp only [startFail, hb, Bool.false_eq_true, if_false]
+    rw [phaseA, phaseB, phaseC]
+    have hD := phaseD pre n L
+    cases pre <;> simp only [Bool.false_eq_true, if_true, if_false] at hD ⊢ <;> rw [hD] <;>
+      first | exact phaseE false L | exact phaseE true L
+  · simp only [startFail, hb, if_true]
+    rw [spawnR_grp, alloc_grp_comm (.ctx k) (by simp), joinR_grp, free_grp_comm .warr (by simp),
+      freeR_grp .ctx (by simp), free_grp_comm (.ctx k) (by simp), freeR_grp .stats (by simp)]
+    rw [phaseA, phaseB, phaseC, free_alloc_grp _ (by rw [freeR_thr])]
+    have hD := phaseD pre n L
+    cases pre <;> simp only [Bool.false_eq_true, if_true, if_false] at hD ⊢ <;> rw [hD] <;>
+      first | exact phaseE false L | exact phaseE true L
 
 /-- `_abandon_start` (a failed per-worker bind before any spawn) is clean. -/
 theorem abandon_clean (n b : Nat) : abandon n b = H.empty := by
-  simp only [abandon, allocR_eq, alloc, H.empty]
-  rw [freeR_pwl b _ rfl (by intro i hi; simp [hits_pwl, hi])]
-  rw [freeR_stats n _ rfl (by intro i hi; simp [hits_pwl, hits_stats, hi])]
-  rw [free_pos .stop _ (by simp [hits_pwl, hits_stats]) rfl]
-  rw [free_pos .warr _ (by simp [hits_pwl, hits_stats]) rfl]
-  simp only [H.mk.injEq, and_true]
-  funext r; cases r <;> simp [hits_pwl, hits_stats] <;> split <;> omega
+  cases hb : balOn n
+  · simp only [abandon, hb, Bool.false_eq_true, if_false, allocR_eq, alloc, H.empty]
+    rw [freeR_pwl b _ rfl (by intro i hi; simp [hits_pwl, hi])]
+    rw [freeR_stats n _ rfl (by intro i hi; simp [hits_pwl, hits_stats, hi])]
+    rw [free_pos .stop _ (by simp [hits_pwl, hits_stats]) rfl]
+    rw [free_pos .warr _ (by simp [hits_pwl, hits_stats]) rfl]
+    simp only [H.mk.injEq, and_true]
+    funext r; cases r <;> simp [hits_pwl, hits_stats] <;> split <;> omega
+  · simp only [abandon, hb, if_true, allocR_eq, alloc, H.empty]
+    rw [freeR_pwl b _ rfl (by intro i hi; simp [hits_pwl, hi])]
+    rw [freeR_stats n _ rfl (by intro i hi; simp [hits_pwl, hits_stats, hi])]
+    rw [free_pos .grp _ (by simp [hits_pwl, hits_stats]) rfl]
+    rw [free_pos .stop _ (by simp [hits_pwl, hits_stats]) rfl]
+    rw [free_pos .warr _ (by simp [hits_pwl, hits_stats]) rfl]
+    simp only [H.mk.injEq, and_true]
+    funext r; cases r <;> simp [hits_pwl, hits_stats] <;> split <;> omega
 
 /-! ## 2. Drain's stuck-worker index bookkeeping -/
 
 /-- Mojo `List.pop(idx)`.
-mirrors flare/runtime/scheduler.mojo#Scheduler.drain sha=df979eac331a at=59bda50f -/
+mirrors flare/runtime/scheduler.mojo#Scheduler.drain sha=25089b531e7a at=30fc5e99 -/
 def eraseAt {α : Type} : List α → Nat → List α
   | [], _ => []
   | _ :: l, 0 => l
@@ -360,14 +445,14 @@ def keepIdx {α : Type} (p : Nat → Bool) : List α → List α
   | a :: l => if p 0 then a :: keepIdx (fun j => p (j + 1)) l else keepIdx (fun j => p (j + 1)) l
 
 /-- The sweep appends `i` to `stuck` when worker `i` was detached.
-mirrors flare/runtime/scheduler.mojo#Scheduler.drain sha=df979eac331a at=59bda50f -/
+mirrors flare/runtime/scheduler.mojo#Scheduler.drain sha=25089b531e7a at=30fc5e99 -/
 def sweepStuck (det : Nat → Bool) : Nat → List Nat
   | 0 => []
   | k + 1 => sweepStuck det k ++ (if det k then [k] else [])
 
 /-- `for k in range(len(stuck) - 1, -1, -1): idx = stuck[k];
 if idx < len(l): l.pop(idx)`.
-mirrors flare/runtime/scheduler.mojo#Scheduler.drain sha=df979eac331a at=59bda50f -/
+mirrors flare/runtime/scheduler.mojo#Scheduler.drain sha=25089b531e7a at=30fc5e99 -/
 def popStuck {α : Type} (l : List α) (stuck : List Nat) : List α :=
   stuck.reverse.foldl (fun acc i => if i < acc.length then eraseAt acc i else acc) l
 
@@ -556,10 +641,11 @@ structure WOut where
 failed (with `EDEADLK` the caller *is* that worker). -/
 def liveAfter (w : WOut) : Bool := !w.done || w.rc != .ok
 
-/-- flare appends to `stuck` only when `detach` returned; a raising
+/-- flare appends to `stuck` only when `detach` returned (and then leaks the
+stop flag and the balancing group with it); a raising
 `join`/`detach` falls into `except: pass` and the worker's resources are
 freed with the rest (`_join_workers` has no stuck list at all).
-mirrors flare/runtime/scheduler.mojo#Scheduler._join_workers+Scheduler.drain sha=1096697d9634 at=59bda50f -/
+mirrors flare/runtime/scheduler.mojo#Scheduler._join_workers+Scheduler.drain sha=4385e44f79be at=30fc5e99 -/
 def keptImpl (w : WOut) : Bool := !w.done && w.rc == .ok
 
 /-- Hardened variant: treat a failed call like a detached worker. -/
@@ -595,7 +681,8 @@ theorem impl_safe_of_external_caller (ws : List WOut) (h : ∀ w ∈ ws, w.rc = 
 
 /-- The only reachable failure: `shutdown()` (or `drain(timeout_ms <= 0)`)
 called from worker `i` itself joins itself, gets `EDEADLK`, and flare frees
-that worker's context, stats cell and the stop flag under it. -/
+that worker's context, stats cell, the stop flag and the balancing group
+under it. -/
 theorem self_shutdown_frees_caller :
     freedUnderLive keptImpl [⟨true, pjoin true .joinable⟩] = true := by decide
 

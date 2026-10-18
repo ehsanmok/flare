@@ -7,7 +7,7 @@ A model of the connection-level state of flare's sans-I/O QUIC machine
 they change, namely an inbound frame (`handle_frame_buf` → the
 `_ConnFrameHandler` callbacks), the TLS adapter's `mark_handshake_complete`,
 and a local `connection_close`. Per-stream state, flow control and the
-per-frame validation that can raise (NEW_CONNECTION_ID, PATH_*) leave the
+per-frame validation that can raise (NEW_CONNECTION_ID, PATH_*, DATAGRAM, ACK_FREQUENCY) leave the
 connection state unchanged on success and are abstracted away; a raise is
 outside this model.
 
@@ -76,7 +76,7 @@ def localClose (s : CState) : CState :=
 /-- One step of flare's machine; `none` = connection error (a server receiving
 HANDSHAKE_DONE, QUIC-09: `Connection.is_server` makes `on_handshake_done` raise
 PROTOCOL_VIOLATION). `handle_frame_buf` drops every frame once the connection is CLOSED.
-mirrors flare/quic/state.mojo#_ConnFrameHandler.on_path_response+_ConnFrameHandler.on_connection_close+_ConnFrameHandler.on_handshake_done+_ConnFrameHandler.on_datagram sha=7f142082ff2a at=0fc661cf -/
+mirrors flare/quic/state.mojo#_ConnFrameHandler.on_path_response+_ConnFrameHandler.on_connection_close+_ConnFrameHandler.on_handshake_done+_ConnFrameHandler.on_datagram sha=9121cb50c3bd at=da6fb43a -/
 def implStep (role : Role) (s : CState) : Ev → Option CState
   | .frame f =>
     if s = .closed then some s

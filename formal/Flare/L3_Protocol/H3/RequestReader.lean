@@ -37,14 +37,14 @@ def T_GOAWAY : Nat := 0x07
 def T_MAX_PUSH_ID : Nat := 0x0D
 
 /-- Control-stream frame types the reader rejects on a request stream.
-mirrors flare/http3/request_reader.mojo#feed_into sha=a4e3d230d52b at=1e286111 -/
+mirrors flare/http3/request_reader.mojo#feed_into sha=da98c606579c at=0a183352 -/
 def isControlType (t : Nat) : Bool :=
   t == T_SETTINGS || t == T_GOAWAY || t == T_MAX_PUSH_ID || t == T_CANCEL_PUSH ||
     t == T_PUSH_PROMISE
 
 /-- HTTP/2 frame types reserved by RFC 9114 §7.2.8 / §11.2.1 (PRIORITY, PING,
 WINDOW_UPDATE, CONTINUATION): receipt MUST be H3_FRAME_UNEXPECTED.
-mirrors flare/http3/request_reader.mojo#feed_into sha=a4e3d230d52b at=1e286111 (fixed, H3-02) -/
+mirrors flare/http3/request_reader.mojo#feed_into sha=da98c606579c at=0a183352 (fixed, H3-02) -/
 def isH2Reserved (t : Nat) : Bool := t == 0x02 || t == 0x06 || t == 0x08 || t == 0x09
 
 inductive RState | init | body | trailers | done
@@ -77,7 +77,7 @@ def Ev.isError : Ev Hdrs → Bool
 
 /-- Dispatch of one fully present frame on type and state. The HTTP/2-reserved
 types are rejected next to the control types (H3-02).
-mirrors flare/http3/request_reader.mojo#feed_into sha=a4e3d230d52b at=1e286111 (fixed, H3-02) -/
+mirrors flare/http3/request_reader.mojo#feed_into sha=da98c606579c at=0a183352 (fixed, H3-02) -/
 def stepFrame (qd : Bytes → Option Hdrs) (r : Reader) (t : Nat) (p : Bytes) :
     Reader × Ev Hdrs :=
   if t = T_HEADERS then
@@ -97,7 +97,7 @@ def stepFrame (qd : Bytes → Option Hdrs) (r : Reader) (t : Nat) (p : Bytes) :
 /-- One `feed_into` call. A frame of any type other than HEADERS and DATA
 declaring more than `max_field_section_bytes` is refused from its header
 (`excessiveLoad`, H3-01).
-mirrors flare/http3/request_reader.mojo#_parse_frame_header+feed_into sha=30b62d74be71 at=4ba5acd3 (fixed, H3-01) -/
+mirrors flare/http3/request_reader.mojo#_parse_frame_header+feed_into sha=773b706e2145 at=0a183352 (fixed, H3-01) -/
 def feed (qd : Bytes → Option Hdrs) (r : Reader) (buf : Bytes) :
     Nat × Reader × Option (Ev Hdrs) :=
   if r.st = .done then (0, r, none)
@@ -220,17 +220,24 @@ theorem feed_append (qd : Bytes → Option Hdrs) (r : Reader) (buf c : Bytes)
               List.take_append_of_le_length (by simp; omega)]
           rw [e]
 
+/-- With `Http3Config.stream_request_bodies`, a request that is not an
+extended-CONNECT tunnel lifts its body limit when its HEADERS arrive
+(`lift h`); the body then streams to the handler. -/
+def liftR (lift : Hdrs → Bool) (r : Reader) : Option (Ev Hdrs) → Reader
+  | some (.headers h) => if lift h then { r with maxBody := 2 ^ 64 - 1 } else r
+  | _ => r
+
 /-- The server's drain loop: call `feed` until NEEDS_MORE; return the reader,
 the events and the unconsumed tail kept in `inbox`. A reader in `DONE`
 always reports NEEDS_MORE, so stopping on `consumed = 0` coincides with the
 Mojo loop's extra `break`s on error / DONE.
-mirrors flare/http3/server.mojo#Http3Connection.feed_stream_chunk+Http3Connection.signal_end_of_stream sha=5a4554dbf091 at=59bda50f -/
-def drain (qd : Bytes → Option Hdrs) (r : Reader) (buf : Bytes) :
+mirrors flare/http3/server.mojo#Http3Connection.feed_stream_chunk+Http3Connection.signal_end_of_stream sha=3ecba8b5284b at=30fc5e99 -/
+def drain (qd : Bytes → Option Hdrs) (lift : Hdrs → Bool) (r : Reader) (buf : Bytes) :
     Reader × List (Ev Hdrs) × Bytes :=
   match hf : feed qd r buf with
   | (n, r', e) =>
     if h : 0 < n then
-      let rest := drain qd r' (buf.drop n)
+      let rest := drain qd lift (liftR lift r' e) (buf.drop n)
       (rest.1, e.toList ++ rest.2.1, rest.2.2)
     else (r, [], buf)
 termination_by buf.length
@@ -239,35 +246,35 @@ decreasing_by
   rw [hf] at this
   simp only [List.length_drop]; omega
 
-/-- Two successive `feed_stream_chunk` calls: drain `a`, keep the residue in
-the inbox, append `b`, drain again; events concatenate. -/
-def drainTwice (qd : Bytes → Option Hdrs) (r : Reader) (a b : Bytes) :
+/-- Two successive drains: drain `a`, keep the residue in the inbox, append
+`b`, drain again; events concatenate. -/
+def drainTwice (qd : Bytes → Option Hdrs) (lift : Hdrs → Bool) (r : Reader) (a b : Bytes) :
     Reader × List (Ev Hdrs) × Bytes :=
-  match drain qd r a with
+  match drain qd lift r a with
   | (r1, e1, rest1) =>
-    match drain qd r1 (rest1 ++ b) with
+    match drain qd lift r1 (rest1 ++ b) with
     | (r2, e2, rest2) => (r2, e1 ++ e2, rest2)
 
-/-- Chunking independence of `feed_stream_chunk`: draining `a ++ b` gives the
+/-- Chunking independence of the drain loop: draining `a ++ b` gives the
 same reader, events and residue as draining `a`, keeping the residue, and
 draining it with `b` appended. -/
-theorem drain_append (qd : Bytes → Option Hdrs) (r : Reader) (a b : Bytes) :
-    drain qd r (a ++ b) = drainTwice qd r a b := by
+theorem drain_append (qd : Bytes → Option Hdrs) (lift : Hdrs → Bool) (r : Reader)
+    (a b : Bytes) : drain qd lift r (a ++ b) = drainTwice qd lift r a b := by
   unfold drainTwice
   rcases hf : feed qd r a with ⟨n, r', e⟩
   have hle : n ≤ a.length := by have := feed_le qd r a; rw [hf] at this; exact this
   by_cases hn : 0 < n
   · have hf' : feed qd r (a ++ b) = (n, r', e) := by
       rw [feed_append qd r a b (by rw [hf]; exact hn), hf]
-    have ih := drain_append qd r' (a.drop n) b
-    rw [drain.eq_def qd r (a ++ b), drain.eq_def qd r a]
+    have ih := drain_append qd lift (liftR lift r' e) (a.drop n) b
+    rw [drain.eq_def qd lift r (a ++ b), drain.eq_def qd lift r a]
     simp only [hf, hf', dif_pos hn]
     rw [List.drop_append_of_le_length hle, ih]
     unfold drainTwice
     simp
   · have hn0 : n = 0 := by omega
     subst hn0
-    have : drain qd r a = (r, [], a) := by rw [drain.eq_def]; simp [hf]
+    have : drain qd lift r a = (r, [], a) := by rw [drain.eq_def]; simp [hf]
     rw [this]
     simp
 termination_by a.length
@@ -275,61 +282,91 @@ decreasing_by simp only [List.length_drop]; omega
 
 /-- A drain always leaves a residue on which the reader makes no progress
 (the bytes kept in `inbox` are an incomplete frame, or the reader is DONE). -/
-theorem drain_residue (qd : Bytes → Option Hdrs) (r : Reader) (buf : Bytes) :
-    drain qd (drain qd r buf).1 (drain qd r buf).2.2 =
-      ((drain qd r buf).1, [], (drain qd r buf).2.2) := by
+theorem drain_residue (qd : Bytes → Option Hdrs) (lift : Hdrs → Bool) (r : Reader)
+    (buf : Bytes) :
+    drain qd lift (drain qd lift r buf).1 (drain qd lift r buf).2.2 =
+      ((drain qd lift r buf).1, [], (drain qd lift r buf).2.2) := by
   rcases hf : feed qd r buf with ⟨n, r', e⟩
   by_cases hn : 0 < n
-  · have ih := drain_residue qd r' (buf.drop n)
-    have : drain qd r buf = ((drain qd r' (buf.drop n)).1,
-        e.toList ++ (drain qd r' (buf.drop n)).2.1, (drain qd r' (buf.drop n)).2.2) := by
+  · have ih := drain_residue qd lift (liftR lift r' e) (buf.drop n)
+    have : drain qd lift r buf = ((drain qd lift (liftR lift r' e) (buf.drop n)).1,
+        e.toList ++ (drain qd lift (liftR lift r' e) (buf.drop n)).2.1,
+        (drain qd lift (liftR lift r' e) (buf.drop n)).2.2) := by
       rw [drain.eq_def]; simp only [hf, dif_pos hn]
     rw [this]; exact ih
-  · have : drain qd r buf = (r, [], buf) := by rw [drain.eq_def]; simp [hf, hn]
+  · have : drain qd lift r buf = (r, [], buf) := by rw [drain.eq_def]; simp [hf, hn]
     rw [this]; exact this
 termination_by buf.length
 decreasing_by
   have := feed_le qd r buf; rw [hf] at this; simp only [List.length_drop]; omega
 
 /-- Successive `feed_stream_chunk` calls with chunks `cs`, starting from
-inbox `inbox`. -/
-def feedChunks (qd : Bytes → Option Hdrs) (r : Reader) (inbox : Bytes) :
+inbox `inbox`. Once the reader is DONE a chunk is dropped, not appended.
+mirrors flare/http3/server.mojo#Http3Connection.feed_stream_chunk+Http3Connection.signal_end_of_stream sha=3ecba8b5284b at=30fc5e99 -/
+def feedChunks (qd : Bytes → Option Hdrs) (lift : Hdrs → Bool) (r : Reader) (inbox : Bytes) :
     List Bytes → Reader × List (Ev Hdrs) × Bytes
   | [] => (r, [], inbox)
   | c :: cs =>
-    match drain qd r (inbox ++ c) with
-    | (r1, e1, rest1) =>
-      match feedChunks qd r1 rest1 cs with
-      | (r2, e2, rest2) => (r2, e1 ++ e2, rest2)
+    if r.st = .done then feedChunks qd lift r inbox cs
+    else match drain qd lift r (inbox ++ c) with
+      | (r1, e1, rest1) =>
+        match feedChunks qd lift r1 rest1 cs with
+        | (r2, e2, rest2) => (r2, e1 ++ e2, rest2)
+
+theorem drain_done (qd : Bytes → Option Hdrs) (lift : Hdrs → Bool) (r : Reader) (buf : Bytes)
+    (h : r.st = .done) : drain qd lift r buf = (r, [], buf) := by
+  rw [drain.eq_def]; simp [feed, h]
+
+theorem feedChunks_done (qd : Bytes → Option Hdrs) (lift : Hdrs → Bool) (r : Reader)
+    (h : r.st = .done) : ∀ inbox cs, feedChunks qd lift r inbox cs = (r, [], inbox) := by
+  intro inbox cs
+  induction cs with
+  | nil => rfl
+  | cons c cs ih => simp only [feedChunks, h, ↓reduceIte, ih]
 
 /-- However a request stream is split into QUIC chunks, the server sees the
-same events, ends in the same reader state and keeps the same residue as if
-the bytes had arrived in one piece (starting from any residue inbox, in
-particular the empty one). -/
-theorem feedChunks_eq_drain (qd : Bytes → Option Hdrs) (cs : List Bytes) :
-    ∀ (r : Reader) (inbox : Bytes), drain qd r inbox = (r, [], inbox) →
-      feedChunks qd r inbox cs = drain qd r (inbox ++ cs.flatten) := by
+same events and ends in the same reader state as if the bytes had arrived in
+one piece (starting from any residue inbox, in particular the empty one);
+the residue kept in the inbox is the same too while the reader is not DONE. -/
+theorem feedChunks_eq_drain (qd : Bytes → Option Hdrs) (lift : Hdrs → Bool) (cs : List Bytes) :
+    ∀ (r : Reader) (inbox : Bytes), drain qd lift r inbox = (r, [], inbox) →
+      (feedChunks qd lift r inbox cs).1 = (drain qd lift r (inbox ++ cs.flatten)).1 ∧
+      (feedChunks qd lift r inbox cs).2.1 = (drain qd lift r (inbox ++ cs.flatten)).2.1 ∧
+      ((feedChunks qd lift r inbox cs).1.st ≠ .done →
+        (feedChunks qd lift r inbox cs).2.2 = (drain qd lift r (inbox ++ cs.flatten)).2.2) := by
   induction cs with
-  | nil => intro r inbox h; simp only [feedChunks, List.flatten_nil, List.append_nil, h]
+  | nil => intro r inbox h; simp only [feedChunks, List.flatten_nil, List.append_nil, h]; simp
   | cons c cs ih =>
     intro r inbox _
-    simp only [feedChunks, List.flatten_cons, ← List.append_assoc]
-    conv => rhs; rw [drain_append]
-    unfold drainTwice
-    have hres := drain_residue qd r (inbox ++ c)
-    rcases hd : drain qd r (inbox ++ c) with ⟨r1, e1, rest1⟩
-    rw [hd] at hres
-    simp only
-    rw [ih r1 rest1 hres]
+    by_cases hd : r.st = .done
+    · rw [feedChunks_done qd lift r hd, drain_done qd lift r _ hd]
+      simp [hd]
+    · simp only [feedChunks, hd, ↓reduceIte, List.flatten_cons, ← List.append_assoc]
+      rw [drain_append qd lift r (inbox ++ c) cs.flatten]
+      unfold drainTwice
+      have hres := drain_residue qd lift r (inbox ++ c)
+      rcases hdr : drain qd lift r (inbox ++ c) with ⟨r1, e1, rest1⟩
+      rw [hdr] at hres
+      obtain ⟨h1, h2, h3⟩ := ih r1 rest1 hres
+      rcases hf : feedChunks qd lift r1 rest1 cs with ⟨r2, e2, rest2⟩
+      rcases hg : drain qd lift r1 (rest1 ++ cs.flatten) with ⟨r2', e2', rest2'⟩
+      rw [hf, hg] at h1 h2 h3
+      simp only [hg] at h1 h2 h3 ⊢
+      exact ⟨h1, by rw [h2], h3⟩
 
-theorem drain_nil (qd : Bytes → Option Hdrs) (r : Reader) : drain qd r [] = (r, [], []) := by
+theorem drain_nil (qd : Bytes → Option Hdrs) (lift : Hdrs → Bool) (r : Reader) :
+    drain qd lift r [] = (r, [], []) := by
   rw [drain.eq_def]; simp [feed]
 
 /-- Corollary: from a fresh inbox, any chunking of the stream is equivalent
-to feeding it whole. -/
-theorem feedChunks_chunking_independent (qd : Bytes → Option Hdrs) (r : Reader)
-    (cs : List Bytes) : feedChunks qd r [] cs = drain qd r cs.flatten := by
-  have := feedChunks_eq_drain qd cs r [] (drain_nil qd r)
+to feeding it whole (the residue too, while the reader is not DONE). -/
+theorem feedChunks_chunking_independent (qd : Bytes → Option Hdrs) (lift : Hdrs → Bool)
+    (r : Reader) (cs : List Bytes) :
+    (feedChunks qd lift r [] cs).1 = (drain qd lift r cs.flatten).1 ∧
+    (feedChunks qd lift r [] cs).2.1 = (drain qd lift r cs.flatten).2.1 ∧
+    ((feedChunks qd lift r [] cs).1.st ≠ .done →
+      (feedChunks qd lift r [] cs).2.2 = (drain qd lift r cs.flatten).2.2) := by
+  have := feedChunks_eq_drain qd lift cs r [] (drain_nil qd lift r)
   simpa using this
 
 end Flare.L3.H3

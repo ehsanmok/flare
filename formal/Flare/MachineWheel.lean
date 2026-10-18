@@ -55,14 +55,16 @@ theorem pollStepWith_inv {c : Cfg S} (h : Machine.Inv c) (now : Nat) (toks : Lis
   have hmem : ∀ t ∈ fired, t ∈ c.wheel ∧ t.due ≤ now := fun t ht => (hf.2 t).1 ht
   unfold pollStepWith
   apply fireAll_inv
-  · refine ⟨?_, ?_, ?_, h.kills⟩
-    · intro t ht; exact h.own t (List.mem_filter.1 ht).1
-    · intro t ht; exact h.fresh t (List.mem_filter.1 ht).1
-    · exact h.nodup.sublist List.filter_sublist
+  · exact ⟨fun t ht => h.own t (List.mem_filter.1 ht).1, fun t ht => h.fresh t (List.mem_filter.1 ht).1,
+      h.nodup.sublist List.filter_sublist, h.kills, h.tfresh, h.live,
+      fun e he => (h.pend e he).mv rfl rfl rfl⟩
   · intro t ht; exact (hmem t ht).2
   · intro t ht
     obtain ⟨l, a, b, _⟩ := h.own t (hmem t ht).1
     exact ⟨l, a, b⟩
+  · intro t ht
+    obtain ⟨_, _, _, d⟩ := h.own t (hmem t ht).1
+    exact d
   · exact List.Pairwise.imp_of_mem
       (fun ha hb hab e => hab (h.tok_unique (hmem _ ha).1 (hmem _ hb).1 e)) hf.1
 
@@ -116,7 +118,7 @@ theorem lts_le_any (hP : P.cancelOnCleanup = true) (c c' : Cfg M.S) (lab : Label
     split at hs
     · rename_i hg
       cases hs
-      exact ⟨hg, _, filter_firedOk h now, by rw [hP]; rfl⟩
+      exact ⟨⟨hg.1, hg.2.1, pollGuard_pre _ c now toks hg.2.2⟩, _, filter_firedOk h now, by rw [hP]; rfl⟩
     · cases hs
   | accept fd r => exact hs
   | acceptDone => exact hs

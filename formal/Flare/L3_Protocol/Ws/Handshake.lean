@@ -240,7 +240,7 @@ theorem reactor_ok {r : Req} {key : Bytes} (h : reactor r = .upgrade key) :
 
 /-! ## Pairing flare's client with flare's servers -/
 
-/-- mirrors flare/ws/client.mojo#WsClient._connect_impl sha=816fc8bf74b3 at=59bda50f -/
+/-- mirrors flare/ws/client.mojo#WsClient._connect_impl sha=ce52b1d6b386 at=0a183352 -/
 def clientRequest (host target key : Bytes) : Req :=
   { method := GET, target := target, version := HTTP11,
     fields := [(HOST_CAP, host), (UPGRADE_CAP, WEBSOCKET), (CONNECTION_CAP, UPGRADE_CAP),

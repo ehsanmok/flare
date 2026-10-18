@@ -53,7 +53,7 @@ def varint (b : Bytes) : Parser UInt64 := fun pos =>
       let v ← rdTail b pos (length - 1) (first.toUInt64 &&& 0x3F)
       .ok (v, pos + length)
 
-/-- mirrors flare/quic/frame.mojo#_read_varint+_read_bytes sha=cce0d687973b at=59bda50f (`_read_bytes`: the
+/-- mirrors flare/quic/frame.mojo#_read_varint+_read_bytes sha=97b55d9228b5 at=da6fb43a (`_read_bytes`: the
 `pos + n > len(buf)` check precedes the copy loop). -/
 def bytes (b : Bytes) (n : Nat) : Parser Bytes := fun pos =>
   if pos + n > b.length then .error (.raise "quic frame: truncated payload")

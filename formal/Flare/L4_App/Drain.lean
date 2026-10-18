@@ -37,14 +37,15 @@ def pollCap : Nat := 100
 /-- Bytes of an in-flight response delivered when the stop flag is set
 `stopDelay` ms after the `drain` call and the reactor notices it `lag` ms
 later, then closes every live connection.
-mirrors flare/http/_unified_reactor_impl.mojo#_run_unified_loop_for_fd+_drain_remaining_conns_unified sha=5270acd9b3ff at=59bda50f -/
+mirrors flare/http/_unified_reactor_impl.mojo#_run_unified_loop_for_fd+_drain_remaining_conns_unified sha=c5fdb4d4e8b8 at=0a183352 -/
 def delivered (stopDelay lag rate pending : Nat) : Nat :=
   min pending (rate * (stopDelay + lag))
 
 /-- After closing the listener, `drain` waits out `timeout_ms`
-(negative clamps to 0) before setting `_stopping`.
-mirrors flare/http/server.mojo#HttpServer.drain sha=387b49a4a202 at=2348b24b (fixed, APP-46) -/
-def stopDelay (timeoutMs : Int) : Nat := timeoutMs.toNat
+(negative clamps to 0) before setting `_stopping`; a positive wait gets one
+extra millisecond tick, so a whole `timeout_ms` passes on a millisecond clock.
+mirrors flare/http/server.mojo#HttpServer.drain sha=2c107717424e at=0a183352 (fixed, APP-46) -/
+def stopDelay (timeoutMs : Int) : Nat := timeoutMs.toNat + (if 0 < timeoutMs then 1 else 0)
 
 /-- Graceful-drain contract: a response the peer can absorb within the
 timeout is delivered in full, whatever the poll lag. -/
@@ -54,12 +55,13 @@ def GracefulSpec (delay : Int → Nat) : Prop :=
 
 /-- `drain(0)` is the same as `close()`: the flag is set at once. -/
 theorem stopDelay_nonpos (t : Int) (ht : t ≤ 0) : stopDelay t = 0 := by
-  unfold stopDelay; omega
+  unfold stopDelay; split <;> omega
 
 theorem graceful : GracefulSpec stopDelay := by
   intro t lag rate pending _ hp
   unfold delivered stopDelay
-  have : rate * t.toNat ≤ rate * (t.toNat + lag) := Nat.mul_le_mul_left _ (by omega)
+  have : rate * t.toNat ≤ rate * (t.toNat + (if 0 < t then 1 else 0) + lag) :=
+    Nat.mul_le_mul_left _ (by omega)
   exact Nat.min_eq_left (Nat.le_trans hp this)
 
 end Flare.L4.Drain

@@ -45,7 +45,12 @@ when it is readable, or writable with the flag set
 776-779) and the inline cycle then runs `on_writable`
 (_unified_reactor_impl.mojo:184-190). The TLS layer is an oracle: each edge
 carries the plaintext `SSL_read` returns before it stops and why it stops,
-and how many bytes `SSL_write` takes before it stops and why.
+and how many bytes `SSL_write` takes before it stops and why. The interim
+`100 Continue` record that `_flush_write_buf_tls` retries from
+`continue_pending` before any response byte is not on the modelled wire; an
+edge on which that retry blocks is an edge with `sent = 0`. An h2c upgrade
+(which also takes the read driver on a writable edge) is never started on a
+TLS connection.
 
 * `blocked_interest`: whenever the pending operation stops on the opposite
   direction, the flag is set and both interests are armed.
@@ -409,7 +414,7 @@ structure St where
 
 /-- `_drain_recv_tls`: append the plaintext; on WANT_WRITE set the flag and
 arm both; on close_notify finish (the half-close rule is in `ConnSM`).
-mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._drain_recv_tls sha=fd8b067824b0 at=59bda50f -/
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._drain_recv_tls sha=abc2d72216c2 at=da6fb43a -/
 def drain (s : St) (e : Edge) : St :=
   let s1 := { s with rbuf := s.rbuf ++ e.plain, inp := s.inp ++ e.plain }
   match e.rstop with
@@ -419,7 +424,7 @@ def drain (s : St) (e : Edge) : St :=
 
 /-- `_flush_write_buf_tls` plus the partial / flushed handling of
 `on_writable`: on WANT_READ set the flag and arm both.
-mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._flush_write_buf_tls+ConnHandle.on_writable sha=5e86ac79edb0 at=59bda50f -/
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._flush_write_buf_tls+ConnHandle.on_writable sha=b1dac3759c10 at=da6fb43a -/
 def flush (s : St) (e : Edge) : St :=
   let x := min e.sent (s.wbuf.length - s.wpos)
   let s1 := { s with wpos := s.wpos + x, wire := s.wire ++ (s.wbuf.drop s.wpos).take x }
@@ -431,8 +436,8 @@ def flush (s : St) (e : Edge) : St :=
 
 /-- `_drive_h1`: `on_readable` drains while reading; while writing it
 returns `want_write` and the inline cycle runs `on_writable`.
-mirrors flare/http/_unified_reactor_impl.mojo#_drive_h1 sha=6001dd107a8a at=59bda50f,
-flare/http/_reactor/conn_handle.mojo#ConnHandle.on_readable sha=8aa82715ce9e at=59bda50f -/
+mirrors flare/http/_unified_reactor_impl.mojo#_drive_h1 sha=6001dd107a8a at=da6fb43a,
+flare/http/_reactor/conn_handle.mojo#ConnHandle.on_readable sha=5f85dfb8b98a at=da6fb43a -/
 def readDriver (s : St) (e : Edge) : St :=
   match s.phase with
   | .reading => drain s e
@@ -450,7 +455,7 @@ def writeDriver (s : St) (e : Edge) : St :=
 /-- The reactor's KIND_H1 dispatch: clear the flag, then the read driver on
 a readable edge or on a writable edge with the flag set, else the write
 driver on a writable edge.
-mirrors flare/http/_unified_reactor_impl.mojo#_unified_handle_conn_event sha=00929b6ecdff at=59bda50f -/
+mirrors flare/http/_unified_reactor_impl.mojo#_unified_handle_conn_event sha=bba7c346f73a at=da6fb43a -/
 def route (s : St) (e : Edge) : St :=
   if s.done then s
   else

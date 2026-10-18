@@ -70,8 +70,10 @@ structure Res where
   armedAtBlock : Bool
   deriving Repr
 
-/-- `poll`: `_try_arm_wakeup()` runs again after phase 1 (RT-03).
-mirrors flare/runtime/uring_reactor.mojo#UringReactor.poll sha=92a3ab38e2e4 at=8f1df299 (fixed, RT-03) -/
+/-- `poll`: `_try_arm_wakeup()` runs again after phase 1 (RT-03). A
+`timeout_ms >= 0` only bounds the phase-3 wait (`-ETIME` reads as nothing
+arrived); it submits the same SQEs, so it is not modelled.
+mirrors flare/runtime/uring_reactor.mojo#UringReactor.poll sha=fa94c924ea73 at=0a183352 (fixed, RT-03) -/
 def poll (s : W) (minC maxC : Nat) : Res :=
   let s0 := lazyArm s
   let s1 := ksubmit s0                                  -- phase 1

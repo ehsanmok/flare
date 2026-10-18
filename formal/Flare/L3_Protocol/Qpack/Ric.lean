@@ -233,7 +233,7 @@ def sectionSpec (dec : Option Nat) (ic : Nat) (refsOk : Bool) (blocked B : Nat) 
 /-- Every QPACK decode failure on a request stream is a connection error
 QPACK_DECOMPRESSION_FAILED: `feed_stream_chunk` sets `connection_error_code`
 and `_route_http3_stream_chunks` closes the slot with it.
-mirrors flare/http3/request_reader.mojo#feed_into sha=a4e3d230d52b at=ea1b9282, flare/http3/server.mojo#Http3Connection.feed_stream_chunk sha=1c0d566e11a3 at=ea1b9282, flare/quic/server.mojo#QuicListener._route_http3_stream_chunks sha=06a09c670a4f at=ea1b9282 (fixed, QPACK-05) -/
+mirrors flare/http3/request_reader.mojo#feed_into sha=da98c606579c at=0a183352, flare/http3/server.mojo#Http3Connection.feed_stream_chunk sha=eb2ac688b7da at=0a183352, flare/quic/server.mojo#QuicListener._route_http3_stream_chunks sha=dd96844227f2 at=0a183352 (fixed, QPACK-05) -/
 def sectionImpl (dec : Option Nat) (ic : Nat) (refsOk : Bool) : SectionRes :=
   match dec with
   | none => .connErr

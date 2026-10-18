@@ -91,23 +91,25 @@ def parsePort (s : Str) : Option Nat :=
     if v < 1 ∨ v > 65535 then none else some v
   else none
 
-/-- mirrors flare/http/url.mojo#Url.parse sha=8f83d2e2e03d at=59bda50f -/
+/-- mirrors flare/http/url.mojo#Url.parse sha=11eddb276c82 at=0a183352 -/
 def parse (raw : Str) : Option Url := do
   let se ← findSub raw "://".toList
   let scheme := raw.take se
   if ¬ (scheme = "http".toList ∨ scheme = "https".toList) then none
   let s := raw.drop (se + 3)
-  let (s, fragment) := match rfindChar s '#' with
+  let (s, fragment) := match findChar s '#' with
     | some fp => (s.take fp, s.drop (fp + 1))
     | none => (s, [])
-  let (authority, pq) := match findChar s '/' with
-    | some ps => (s.take ps, s.drop ps)
+  let (authority, pq) := match s.findIdx? (fun c => c == '/' || c == '?') with
+    | some ps => (s.take ps, match s.drop ps with
+      | '?' :: q => '/' :: '?' :: q
+      | pq => pq)
     | none => (s, ['/'])
   let (path, query) := match findChar pq '?' with
     | some qp => (pq.take qp, pq.drop (qp + 1))
     | none => (pq, [])
   let path := if path = [] then ['/'] else path
-  let authority := match findChar authority '@' with
+  let authority := match rfindChar authority '@' with
     | some ap => authority.drop (ap + 1)
     | none => authority
   let (host, port) ← match authority with

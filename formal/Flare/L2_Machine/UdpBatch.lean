@@ -12,14 +12,16 @@ Model of `flare/udp/batch.mojo` (Linux only: `recvmmsg`, `sendmmsg`,
   reproduces every comptime offset and size flare hard-codes
   (`layout_constants`). `CMSG_LEN(2) = 18`, `CMSG_SPACE(2) = 24`,
   `CMSG_DATA` at 16 (`cmsg_constants`).
-* **GSO control message** (batch.mojo:411-426). flare sets
-  `msg_controllen = CMSG_LEN(2) = 18`, not `CMSG_SPACE(2) = 24`. A model of
-  the kernel's `for_each_cmsghdr` / `CMSG_OK` walk
-  (include/linux/socket.h `__CMSG_FIRSTHDR`, `__cmsg_nxthdr`, `CMSG_OK`;
-  net/ipv4/udp.c `__udp_cmsg_send`) shows both lengths parse to the same
-  single header `(SOL_UDP, UDP_SEGMENT)` and the same segment size
-  (`gso_walk_18`, `gso_walk_24`, `gso_seg`): not a bug on Linux.
-* **Receiver buffers** (batch.mojo:176-218). Slot `i` of the data region is
+* **Send control messages** (`send_segmented`). A model of the kernel's
+  `for_each_cmsghdr` / `CMSG_OK` walk (include/linux/socket.h
+  `__CMSG_FIRSTHDR`, `__cmsg_nxthdr`, `CMSG_OK`; net/ipv4/udp.c
+  `__udp_cmsg_send`) shows the GSO header parses to the single header
+  `(SOL_UDP, UDP_SEGMENT)` with the requested segment size whether
+  `msg_controllen` is `CMSG_LEN(2) = 18` or `CMSG_SPACE(2) = 24`
+  (`gso_walk_18`, `gso_walk_24`, `gso_seg`). flare sends `CMSG_SPACE(2)`
+  per header, GSO first then the `IP_TOS` / `IPV6_TCLASS` ECN header;
+  with both the walk sees both headers (`send_walk_both`).
+* **Receiver buffers** (`BatchReceiver.__init__`). Slot `i` of the data region is
   `[i*max_payload, (i+1)*max_payload)`; with exact arithmetic every slot
   lies inside the `capacity*max_payload` allocation and slots are disjoint
   (`slot_in_bounds`, `slots_disjoint`). The size is a 64-bit `Int` product;
@@ -92,11 +94,26 @@ def rd (buf : Bytes) (off k : Nat) : Nat := Flare.Bytes.leNat ((buf.drop off).ta
 
 /-- the 24 zeroed bytes after `_poke_u64(ctrl, 0, 18)`,
 `_poke_u32(ctrl, 8, 17)`, `_poke_u32(ctrl, 12, 103)`,
-`_poke_u16(ctrl, 16, seg)`.
-mirrors flare/udp/batch.mojo#send_segmented sha=20195fd7a58a at=987ddc0f -/
+`_poke_u16(ctrl, 16, seg)`. -/
 def gsoCtrl (seg : Nat) : Bytes :=
   [18, 0, 0, 0, 0, 0, 0, 0, 17, 0, 0, 0, 103, 0, 0, 0,
    UInt8.ofNat (seg % 256), UInt8.ofNat (seg / 256 % 256), 0, 0, 0, 0, 0, 0]
+
+/-- the 24 zeroed bytes of the ECN header: `cmsg_len = CMSG_LEN(4) = 20`,
+`IPPROTO_IP (0) / IP_TOS (1)` or `IPPROTO_IPV6 (41) / IPV6_TCLASS (67)`,
+then the `u32` codepoint. -/
+def ecnCtrl (v6 : Bool) (ecn : Nat) : Bytes :=
+  [20, 0, 0, 0, 0, 0, 0, 0, if v6 then 41 else 0, 0, 0, 0, if v6 then 67 else 1, 0, 0, 0,
+   UInt8.ofNat (ecn % 256), UInt8.ofNat (ecn / 256 % 256), UInt8.ofNat (ecn / 65536 % 256),
+   UInt8.ofNat (ecn / 16777216 % 256), 0, 0, 0, 0]
+
+/-- the control buffer and `msg_controllen` (0: no control message):
+the GSO header when `seg_size > 0`, then the ECN header when `ecn != 0`.
+mirrors flare/udp/batch.mojo#send_segmented sha=d2238baabcf7 at=da6fb43a -/
+def sendCtrl (seg ecn : Nat) (v6 : Bool) : Bytes × Nat :=
+  let g := if seg > 0 then gsoCtrl seg else []
+  let e := if ecn ≠ 0 then ecnCtrl v6 ecn else []
+  (g ++ e, g.length + e.length)
 
 /-- Linux `for_each_cmsghdr` with the `CMSG_OK` check of `__udp_cmsg_send`:
 `none` = `-EINVAL`, otherwise the headers seen as
@@ -126,6 +143,14 @@ theorem gso_walk_18 (seg : Nat) : cmsgs (gsoCtrl seg) CMSG_LEN_GSO = some [(0, 1
 theorem gso_walk_24 (seg : Nat) : cmsgs (gsoCtrl seg) CMSG_SPACE_GSO = some [(0, 18, 17, 103)] := by
   simp [cmsgs, walk, rd, gsoCtrl, cmsgAlign, alignUp, Flare.Bytes.leNat, CMSG_SPACE_GSO]
 
+/-- GSO and ECN together: the kernel sees both headers, in that order. -/
+theorem send_walk_both (seg ecn : Nat) (v6 : Bool) (hs : 0 < seg) (he : ecn ≠ 0) :
+    cmsgs (sendCtrl seg ecn v6).1 (sendCtrl seg ecn v6).2 =
+      some [(0, 18, 17, 103), (24, 20, if v6 then 41 else 0, if v6 then 67 else 1)] := by
+  cases v6 <;>
+    simp [sendCtrl, hs, he, cmsgs, walk, rd, gsoCtrl, ecnCtrl, cmsgAlign, alignUp,
+      Flare.Bytes.leNat]
+
 /-- the `__u16` at `CMSG_DATA` is the requested segment size -/
 theorem gso_seg (seg : Nat) (h : seg < 65536) : rd (gsoCtrl seg) 16 2 = seg := by
   simp only [rd, gsoCtrl, List.drop, List.take, Flare.Bytes.leNat, UInt8.toNat_ofNat']
@@ -145,7 +170,7 @@ theorem slots_disjoint (mp i j : Nat) (hij : i < j) : i * mp + mp ≤ j * mp := 
 
 /-- the byte count passed to `_alloc_zeroed` for the data region: the Mojo
 `Int` (64-bit) product `capacity * max_payload`.
-mirrors flare/udp/batch.mojo#BatchReceiver.__init__ sha=098e7df0712e at=987ddc0f (fixed, NET-11) -/
+mirrors flare/udp/batch.mojo#BatchReceiver.__init__ sha=bb1d6f3144b3 at=da6fb43a (fixed, NET-11) -/
 def allocSize (cap mp : Int) : Int := (Int64.ofInt cap * Int64.ofInt mp).toInt
 
 /-- Spec: the region covers every slot `[i*mp, (i+1)*mp)`, `i < cap`. -/
@@ -155,8 +180,8 @@ def I64MAX : Int := 2 ^ 63 - 1
 
 /-- the shipped constructor checks: both arguments positive,
 `capacity <= Int.MAX // max_payload` and `capacity <= Int.MAX // 64`
-(`_MMSGHDR`, the largest per-slot array).
-mirrors flare/udp/batch.mojo#BatchReceiver.__init__ sha=098e7df0712e at=987ddc0f (fixed, NET-11) -/
+(`_MMSGHDR` and `_CTRL`, the largest per-slot arrays).
+mirrors flare/udp/batch.mojo#BatchReceiver.__init__ sha=bb1d6f3144b3 at=da6fb43a (fixed, NET-11) -/
 def accepts (cap mp : Int) : Prop :=
   0 < cap ∧ 0 < mp ∧ cap ≤ I64MAX / mp ∧ cap ≤ I64MAX / 64
 

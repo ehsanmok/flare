@@ -6,18 +6,20 @@ import Flare.L3_Protocol.Quic.AckExpand
 Model of the receive-side ACK bookkeeping both drivers share
 (flare/quic/_server_support.mojo @59bda50):
 
-* `record` — `_ack_record` (76-124): collect the `[low, high]` pairs, add
+* `record` — `_ack_record`: collect the `[low, high]` pairs, add
   `[pn, pn]`, insertion-sort ascending by `low` (`isort`), merge
   overlapping or adjacent ranges (`mergeAcc`), keep the 32 highest, store
-  descending;
+  descending. Its in-order fast path (`recordFast`: a number inside the
+  newest range is a no-op, one above it extends it) gives the same state on
+  every reachable one (`recordFast_eq`);
 * `contains` — `_ack_contains`, the duplicate filter at
   flare/quic/server.mojo:844: a number is seen if it lies in a stored range
   or below the floor, which `recordSt` raises past every range the cap drops
   (QUIC-14; the floor is the odd trailing slot of the flat list);
 * `fromRanges` — `_ack_from_ranges` (127-157);
 * `Rx`, `recv`, `drain` — the 1-RTT receive path and ACK emission of the
-  server driver (server.mojo:844-863, 2240-2268): record every packet,
-  owe an ACK after an ack-eliciting one, emit it on the next drain.
+  server driver: record every packet, owe an ACK after an ack-eliciting
+  one, emit it on the next drain on which `ack_due` holds.
 
 Pairs are kept as a list of `(low, high)`; arithmetic is over `Nat`. That
 matches the `UInt64` code: packet numbers are below 2^62, so `high + 1`
@@ -34,8 +36,9 @@ Results:
   §19.3.1).
 * `ack_roundtrip`: parsed back by flare's own `expand_ack_ranges`, the ACK
   retires exactly the stored numbers when they number at most 256.
-* `drain_after_recv`: after an ack-eliciting packet the next drain emits an
-  ACK, and that ACK claims the packet whenever its range is still stored.
+* `drain_after_recv`: after an ack-eliciting packet the next drain with
+  `ack_due` emits an ACK, and that ACK claims the packet whenever its range
+  is still stored (`drain_held`: without `ack_due` it stays owed).
 * `never_reaccepts`: over any packet trace, every number already received
   reads as seen, so no packet is processed twice (QUIC-14).
 -/
@@ -54,17 +57,17 @@ def Canon : Ranges → Prop
   | [p] => p.1 ≤ p.2
   | p :: q :: r => p.1 ≤ p.2 ∧ q.2 + 2 ≤ p.1 ∧ Canon (q :: r)
 
-/-- mirrors flare/quic/_server_support.mojo#_ack_record sha=01a9f005b604 at=59bda50f (one insertion
+/-- mirrors flare/quic/_server_support.mojo#_ack_record sha=018fa7a5b4ab at=0a183352 (one insertion
 step: the element goes after every `low` not greater than its own) -/
 def sortIns (x : Nat × Nat) : Ranges → Ranges
   | [] => [x]
   | y :: ys => if y.1 > x.1 then x :: y :: ys else y :: sortIns x ys
 
-/-- mirrors flare/quic/_server_support.mojo#_ack_record sha=01a9f005b604 at=59bda50f -/
+/-- mirrors flare/quic/_server_support.mojo#_ack_record sha=018fa7a5b4ab at=0a183352 -/
 def isort (l : Ranges) : Ranges := l.foldl (fun acc x => sortIns x acc) []
 
 /-- The merge loop; the accumulator is `(ml, mh)` reversed (head = last).
-mirrors flare/quic/_server_support.mojo#_ack_record sha=01a9f005b604 at=59bda50f -/
+mirrors flare/quic/_server_support.mojo#_ack_record sha=018fa7a5b4ab at=0a183352 -/
 def mergeAcc : Ranges → Ranges → Ranges
   | acc, [] => acc
   | [], x :: r => mergeAcc [x] r
@@ -77,7 +80,7 @@ def cap : Nat := 32
 /-- All merged ranges, descending, before the cap. -/
 def merged (flat : Ranges) (pn : Nat) : Ranges := mergeAcc [] (isort (flat ++ [(pn, pn)]))
 
-/-- mirrors flare/quic/_server_support.mojo#_ack_record sha=01a9f005b604 at=59bda50f -/
+/-- mirrors flare/quic/_server_support.mojo#_ack_record sha=018fa7a5b4ab at=0a183352 -/
 def record (flat : Ranges) (pn : Nat) : Ranges := (merged flat pn).take cap
 
 /-- The tracked state (fixed, QUIC-14): the stored ranges plus the floor, one
@@ -94,7 +97,7 @@ def floorAfter (s : St) (pn : Nat) : Nat :=
   | [] => s.floor
   | q :: _ => max s.floor (q.2 + 1)
 
-/-- mirrors flare/quic/_server_support.mojo#_ack_record sha=427e63a4a77d at=faa8bba1 incl. the floor
+/-- mirrors flare/quic/_server_support.mojo#_ack_record sha=018fa7a5b4ab at=0a183352 incl. the floor
 slot (fixed, QUIC-14) -/
 def recordSt (s : St) (pn : Nat) : St :=
   { flat := record s.flat pn, floor := floorAfter s pn }
@@ -455,23 +458,26 @@ theorem ack_roundtrip (flat : Ranges) (hc : Canon flat) {largest first : Nat}
 
 /-! ## Driver: owe an ACK, emit it on the next drain -/
 
-/-- mirrors flare/quic/server.mojo#QuicListener+QuicListener._process_one_packet sha=279dffedcf6a at=59bda50f (`rx_1rtt_ranges`,
+/-- mirrors flare/quic/server.mojo#QuicListener+QuicListener._process_one_packet sha=c86b2a14bdb6 at=0a183352 (`rx_1rtt_ranges`,
 `rx_1rtt_ack_pending`) -/
 structure Rx where
   flat : Ranges := []
   floor : Nat := 0
   pending : Bool := false
 
-/-- mirrors flare/quic/server.mojo#QuicListener._process_one_packet sha=5c17ba2a3a61 at=59bda50f (duplicates dropped,
+/-- mirrors flare/quic/server.mojo#QuicListener._process_one_packet sha=e7525f448f1f at=0a183352 (duplicates dropped,
 then record, then owe an ACK if the packet was ack-eliciting) -/
 def recv (s : Rx) (pn : Nat) (eliciting : Bool) : Rx :=
   if contains ⟨s.flat, s.floor⟩ pn then s
   else { flat := record s.flat pn, floor := floorAfter ⟨s.flat, s.floor⟩ pn,
          pending := s.pending || eliciting }
 
-/-- mirrors flare/quic/server.mojo#QuicListener._drain_1rtt_coalesced sha=c4e949b8a1a5 at=59bda50f -/
-def drain (s : Rx) : Option (Nat × Nat × List (Nat × Nat)) × Rx :=
-  if s.pending ∧ 2 ≤ 2 * s.flat.length then (fromRanges s.flat, { s with pending := false })
+/-- `due` is `ack_due`: false only while the peer's ACK_FREQUENCY lets the
+owed ACK wait (below its threshold and delay, no IMMEDIATE_ACK); the ACK
+then stays owed.
+mirrors flare/quic/server.mojo#QuicListener._drain_1rtt_coalesced sha=99380341168c at=0a183352 -/
+def drain (s : Rx) (due : Bool := true) : Option (Nat × Nat × List (Nat × Nat)) × Rx :=
+  if s.pending ∧ 2 ≤ 2 * s.flat.length ∧ due then (fromRanges s.flat, { s with pending := false })
   else (none, s)
 
 theorem recv_canon (s : Rx) (pn : Nat) (b : Bool) (hc : Canon s.flat) : Canon (recv s pn b).flat := by
@@ -609,5 +615,137 @@ theorem never_reaccepts (pns : List Nat) : ∀ n ∈ pns, contains (runF pns) n 
 /-- The floor does not change the stored ranges, and so every ACK frame
 sent. -/
 theorem recordSt_flat (s : St) (pn : Nat) : (recordSt s pn).flat = record s.flat pn := rfl
+
+theorem drain_held (s : Rx) : drain s false = (none, s) := by
+  simp [drain]
+
+/-! ## The in-order fast path of `_ack_record` -/
+
+/-- mirrors flare/quic/_server_support.mojo#_ack_record sha=018fa7a5b4ab at=0a183352 (the fast path,
+then the full rebuild `recordSt`) -/
+def recordFast (s : St) (pn : Nat) : St :=
+  match s.flat with
+  | (l, h) :: t =>
+    if l ≤ pn then
+      if pn ≤ h then s
+      else if pn = h + 1 then { s with flat := (l, pn) :: t }
+      else recordSt s pn
+    else recordSt s pn
+  | [] => recordSt s pn
+
+theorem isort_desc : ∀ (l acc : Ranges), l.Pairwise (fun a b => b.1 < a.1) →
+    (∀ x ∈ l, ∀ y ∈ acc, x.1 < y.1) →
+    l.foldl (fun acc x => sortIns x acc) acc = l.reverse ++ acc := by
+  intro l
+  induction l with
+  | nil => intro acc _ _; rfl
+  | cons x xs ih =>
+    intro acc hp hlt
+    have hp' := List.pairwise_cons.mp hp
+    have hs : sortIns x acc = x :: acc := by
+      cases acc with
+      | nil => rfl
+      | cons y ys =>
+        have := hlt x List.mem_cons_self y List.mem_cons_self
+        simp only [sortIns]; rw [if_pos this]
+    simp only [List.foldl_cons, hs]
+    rw [ih (x :: acc) hp'.2 (fun z hz y hy => by
+      rcases List.mem_cons.mp hy with rfl | hy
+      · exact hp'.1 z hz
+      · exact hlt z (List.mem_cons_of_mem _ hz) y hy)]
+    simp
+
+theorem sortIns_last (x : Nat × Nat) : ∀ m : Ranges, (∀ y ∈ m, y.1 ≤ x.1) → sortIns x m = m ++ [x] := by
+  intro m
+  induction m with
+  | nil => intro _; rfl
+  | cons y ys ih =>
+    intro hm
+    simp only [sortIns]
+    rw [if_neg (by have := hm y List.mem_cons_self; omega), ih (fun z hz => hm z (List.mem_cons_of_mem _ hz))]
+    rfl
+
+theorem mergeAcc_append : ∀ (a b acc : Ranges), mergeAcc acc (a ++ b) = mergeAcc (mergeAcc acc a) b := by
+  intro a
+  induction a with
+  | nil => intro b acc; cases acc <;> rfl
+  | cons x xs ih =>
+    intro b acc
+    obtain ⟨a1, b1⟩ := x
+    cases acc with
+    | nil => simp only [List.cons_append, mergeAcc]; exact ih b _
+    | cons p acc =>
+      obtain ⟨l, h⟩ := p
+      simp only [List.cons_append, mergeAcc]
+      split <;> exact ih b _
+
+theorem canon_desc : ∀ l : Ranges, Canon l → l.Pairwise (fun a b => b.1 < a.1) := by
+  intro l
+  induction l with
+  | nil => intro _; exact List.Pairwise.nil
+  | cons p r ih =>
+    intro hc
+    refine List.Pairwise.cons (fun q hq => ?_) (ih (canon_tail hc))
+    have := canon_below p r hc q hq
+    have := (canon_valid _ (canon_tail hc)) q hq
+    omega
+
+theorem mergeAcc_rev : ∀ t : Ranges, Canon t → mergeAcc [] t.reverse = t := by
+  intro t
+  induction t with
+  | nil => intro _; rfl
+  | cons p r ih =>
+    intro hc
+    rw [List.reverse_cons, mergeAcc_append, ih (canon_tail hc)]
+    obtain ⟨pl, ph⟩ := p
+    cases r with
+    | nil => rfl
+    | cons q r' =>
+      obtain ⟨ql, qh⟩ := q
+      have := hc.2.1
+      simp only at this
+      simp only [mergeAcc]
+      rw [if_neg (by omega)]
+
+theorem merged_fast (l h pn : Nat) (t : Ranges) (hc : Canon ((l, h) :: t)) (hl : l ≤ pn)
+    (hh : pn ≤ h + 1) : merged ((l, h) :: t) pn = (l, max h pn) :: t := by
+  have hd := canon_desc _ hc
+  unfold merged isort
+  rw [List.foldl_append, isort_desc _ [] hd (fun _ _ _ hy => by cases hy), List.append_nil]
+  simp only [List.foldl_cons, List.foldl_nil]
+  rw [sortIns_last _ _ (fun y hy => by
+    rcases List.mem_cons.mp (List.mem_reverse.mp hy) with rfl | hy
+    · exact hl
+    · have := canon_below _ _ hc y hy
+      have := (canon_valid _ (canon_tail hc)) y hy
+      simp only at this ⊢; omega)]
+  rw [mergeAcc_append, mergeAcc_rev _ hc]
+  simp only [mergeAcc]
+  rw [if_pos hh]
+
+/-- The fast path changes nothing: on every canonical state of at most
+`cap` ranges (every reachable one), it equals the full rebuild. -/
+theorem recordFast_eq (s : St) (pn : Nat) (hc : Canon s.flat) (hcap : s.flat.length ≤ cap) :
+    recordFast s pn = recordSt s pn := by
+  unfold recordFast
+  split
+  · rename_i l h t he
+    rw [he] at hc hcap
+    by_cases hl : l ≤ pn
+    · rw [if_pos hl]
+      by_cases hh : pn ≤ h + 1
+      · have hm := merged_fast l h pn t hc hl hh
+        have hlen : (merged s.flat pn).length ≤ cap := by rw [he, hm]; simpa using hcap
+        have hr : recordSt s pn = { s with flat := (l, max h pn) :: t } := by
+          unfold recordSt record floorAfter
+          rw [List.take_of_length_le hlen, List.drop_of_length_le hlen, he, hm]
+        rw [hr]
+        by_cases h1 : pn ≤ h
+        · rw [if_pos h1, Nat.max_eq_left h1]
+          cases s; simp only at he ⊢; rw [he]
+        · rw [if_neg h1, if_pos (by omega), Nat.max_eq_right (by omega)]
+      · rw [if_neg (by omega), if_neg (by omega)]
+    · rw [if_neg hl]
+  · rfl
 
 end Flare.L3.Quic.AckGen
