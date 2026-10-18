@@ -66,10 +66,11 @@ from flare.http.hpack_huffman import (
 
 from .static_table import (
     QPACK_STATIC_TABLE_SIZE,
-    _qpack_static_table,
+    static_name,
     static_table_find,
     static_table_find_name,
     static_table_lookup,
+    static_value,
 )
 
 
@@ -92,22 +93,15 @@ def _encode_string_literal(
     longer (a real concern for already-compressed payloads).
     """
     var raw = value.as_bytes()
-    var raw_list = List[UInt8](capacity=len(raw))
-    for b in raw:
-        raw_list.append(b)
-    var encoded = List[UInt8](capacity=len(raw))
-    huffman_encode(raw_list, encoded)
-    var huff_len = len(encoded)
-    var raw_len = len(raw_list)
+    var raw_len = len(raw)
+    var huff_len = huffman_encoded_length(raw)
     if huff_len < raw_len:
-        # Use Huffman path.
+        # Use Huffman path, encoded straight into ``out``.
         encode_integer(out, huff_len, prefix_bits, prefix_byte | huffman_flag)
-        for i in range(huff_len):
-            out.append(encoded[i])
+        huffman_encode(raw, out)
     else:
         encode_integer(out, raw_len, prefix_bits, prefix_byte)
-        for i in range(raw_len):
-            out.append(raw_list[i])
+        out.extend(raw)
 
 
 def encode_field_section(
@@ -146,44 +140,41 @@ def encode_field_section(
     out.append(UInt8(0x00))
     # Sign + Delta Base; sign=0 + 7-bit prefix integer 0 -> 0x00.
     out.append(UInt8(0x00))
-    # Build the static table once for the whole field section
-    # instead of rebuilding all 99 entries inside static_table_find
-    # / static_table_find_name on every header.
-    var stbl = _qpack_static_table()
     for i in range(len(headers)):
-        var h = headers[i].copy()
-        var idx = -1
-        for j in range(QPACK_STATIC_TABLE_SIZE):
-            if stbl[j].name == h.name and stbl[j].value == h.value:
-                idx = j
-                break
-        if idx >= 0:
-            # 4.5.2 Indexed Field Line: 1Txxxxxx, T=1 for static,
-            # 6-bit prefix integer for the index. Prefix byte
-            # 0xC0 carries the high "1T" bits.
-            encode_integer(out, idx, 6, UInt8(0xC0))
-            continue
-        var name_idx = -1
-        for j in range(QPACK_STATIC_TABLE_SIZE):
-            if stbl[j].name == h.name:
-                name_idx = j
-                break
-        if name_idx >= 0:
-            # 4.5.4 Literal Field Line With Name Reference:
-            # 01NTxxxx, T=1 for static, 4-bit prefix index.
-            # Prefix byte 0x50 carries the high "0101" bits with
-            # N=0 (allow indexing); 0x70 sets N=1 (never-indexed).
-            encode_integer(out, name_idx, 4, UInt8(0x50))
-            # 1-byte string-literal prefix: Hxxxxxxx (H=Huffman
-            # flag, 7-bit prefix length).
-            _encode_string_literal(out, h.value, UInt8(0x00), 7, UInt8(0x80))
-            continue
-        # 4.5.6 Literal Field Line With Literal Name:
-        # 001Nhppp, N=0, h=Huffman flag, 3-bit prefix name length.
-        # Prefix byte 0x20 carries the high "001N" bits; the
-        # Huffman flag occupies the next bit (0x08 = 1 << 3).
-        _encode_string_literal(out, h.name, UInt8(0x20), 3, UInt8(0x08))
-        _encode_string_literal(out, h.value, UInt8(0x00), 7, UInt8(0x80))
+        encode_field_line(headers[i].name, headers[i].value, out)
+
+
+def encode_field_line(name: String, value: String, mut out: List[UInt8]):
+    """Append one static-only field line (RFC 9204 §4.5) for
+    ``name: value`` to ``out``: indexed when the pair is in the static
+    table, a name reference when only the name is, otherwise a literal
+    name. Follows the two-byte prefix :func:`encode_field_section`
+    writes; exposed so an encoder can stream fields without building a
+    header list first."""
+    var idx = static_table_find(name, value)
+    if idx >= 0:
+        # 4.5.2 Indexed Field Line: 1Txxxxxx, T=1 for static,
+        # 6-bit prefix integer for the index. Prefix byte
+        # 0xC0 carries the high "1T" bits.
+        encode_integer(out, idx, 6, UInt8(0xC0))
+        return
+    var name_idx = static_table_find_name(name)
+    if name_idx >= 0:
+        # 4.5.4 Literal Field Line With Name Reference:
+        # 01NTxxxx, T=1 for static, 4-bit prefix index.
+        # Prefix byte 0x50 carries the high "0101" bits with
+        # N=0 (allow indexing); 0x70 sets N=1 (never-indexed).
+        encode_integer(out, name_idx, 4, UInt8(0x50))
+        # 1-byte string-literal prefix: Hxxxxxxx (H=Huffman
+        # flag, 7-bit prefix length).
+        _encode_string_literal(out, value, UInt8(0x00), 7, UInt8(0x80))
+        return
+    # 4.5.6 Literal Field Line With Literal Name:
+    # 001Nhppp, N=0, h=Huffman flag, 3-bit prefix name length.
+    # Prefix byte 0x20 carries the high "001N" bits; the
+    # Huffman flag occupies the next bit (0x08 = 1 << 3).
+    _encode_string_literal(out, name, UInt8(0x20), 3, UInt8(0x08))
+    _encode_string_literal(out, value, UInt8(0x00), 7, UInt8(0x80))
 
 
 # ── Decoder ────────────────────────────────────────────────────────────────
@@ -294,11 +285,6 @@ def decode_field_section(
     # parse the byte to advance the cursor.
     var base = decode_integer(buf, ric.offset, 7)
     var pos = base.offset
-    # Build the static table once for the whole field section; the
-    # decoder hits it on every indexed / name-reference line, and
-    # rebuilding all 99 (name, value) pairs per line was a top
-    # decode-side CPU cost under request concurrency.
-    var stbl = _qpack_static_table()
     while pos < len(buf):
         var b0 = buf[pos]
         if (b0 & UInt8(0x80)) != UInt8(0):
@@ -314,7 +300,12 @@ def decode_field_section(
                 raise Error(
                     "qpack: static index " + String(ip.value) + " out of range"
                 )
-            headers.append(stbl[ip.value].copy())
+            headers.append(
+                QpackHeader(
+                    String(static_name(ip.value)),
+                    String(static_value(ip.value)),
+                )
+            )
             pos = ip.offset
             continue
         if (b0 & UInt8(0x40)) != UInt8(0):
@@ -333,7 +324,7 @@ def decode_field_section(
                     + " out of range"
                 )
             var lit = _decode_string_literal(buf, ip.offset, 7, UInt8(0x80))
-            headers.append(QpackHeader(stbl[ip.value].name, lit[0]))
+            headers.append(QpackHeader(String(static_name(ip.value)), lit[0]))
             pos = lit[1]
             continue
         if (b0 & UInt8(0x20)) != UInt8(0):

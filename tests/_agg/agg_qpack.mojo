@@ -22,6 +22,9 @@ from test_qpack import (
     test_static_table_find_full_match as test_qpack__test_static_table_find_full_match,
 )
 from test_qpack import (
+    test_static_table_every_entry_round_trips as test_qpack__test_static_table_every_entry_round_trips,
+)
+from test_qpack import (
     test_static_table_find_name_only as test_qpack__test_static_table_find_name_only,
 )
 from test_qpack import (
@@ -138,6 +141,7 @@ def main() raises:
     suite.test[test_qpack__test_static_table_lookup_known_indices]()
     suite.test[test_qpack__test_static_table_lookup_out_of_range]()
     suite.test[test_qpack__test_static_table_find_full_match]()
+    suite.test[test_qpack__test_static_table_every_entry_round_trips]()
     suite.test[test_qpack__test_static_table_find_name_only]()
     suite.test[test_qpack__test_round_trip_full_static_match]()
     suite.test[test_qpack__test_round_trip_literal_with_name_reference]()

@@ -55,7 +55,13 @@ from flare.http2.hpack import (
 )
 
 from .codec import _decode_string_literal, _encode_string_literal
-from .static_table import QPACK_STATIC_TABLE_SIZE, _qpack_static_table
+from .static_table import (
+    QPACK_STATIC_TABLE_SIZE,
+    static_name,
+    static_table_find,
+    static_table_find_name,
+    static_value,
+)
 
 
 comptime _ENTRY_OVERHEAD: UInt64 = 32
@@ -332,7 +338,6 @@ def _apply_one_encoder_instruction(
 ) raises -> Tuple[Int, Int]:
     """Apply the single encoder instruction at ``pos``; return
     ``(inserts, new_pos)``."""
-    var stbl = _qpack_static_table()
     var b0 = buf[pos]
     if (b0 & UInt8(0x80)) != UInt8(0):
         var is_static = (b0 & UInt8(0x40)) != UInt8(0)
@@ -343,7 +348,7 @@ def _apply_one_encoder_instruction(
                 raise Error(
                     "QPACK_ENCODER_STREAM_ERROR: static name index out of range"
                 )
-            name = stbl[ip.value].name
+            name = String(static_name(ip.value))
         else:
             name = table.get_abs(_relative_to_abs(table, ip.value)).name
         var lit = _decode_string_literal(buf, ip.offset, 7, UInt8(0x80))
@@ -443,7 +448,6 @@ def encode_field_section_dynamic(
     (0 when no dynamic entry is referenced), and Base is set equal to it
     (delta_base 0), so every reference is pre-base.
     """
-    var stbl = _qpack_static_table()
     var max_abs: Int = -1
     # First pass: decide ric (max referenced abs + 1).
     for i in range(len(headers)):
@@ -476,19 +480,11 @@ def encode_field_section_dynamic(
             _encode_string_literal(out, h.value, UInt8(0x00), 7, UInt8(0x80))
             continue
         # Static-table fallbacks.
-        var s_full = -1
-        for j in range(QPACK_STATIC_TABLE_SIZE):
-            if stbl[j].name == h.name and stbl[j].value == h.value:
-                s_full = j
-                break
+        var s_full = static_table_find(h.name, h.value)
         if s_full >= 0:
             encode_integer(out, s_full, 6, UInt8(0xC0))
             continue
-        var s_name = -1
-        for j in range(QPACK_STATIC_TABLE_SIZE):
-            if stbl[j].name == h.name:
-                s_name = j
-                break
+        var s_name = static_table_find_name(h.name)
         if s_name >= 0:
             encode_integer(out, s_name, 4, UInt8(0x50))
             _encode_string_literal(out, h.value, UInt8(0x00), 7, UInt8(0x80))
@@ -579,7 +575,6 @@ def decode_field_section_dynamic(
     # Blocked-stream guard: a reference past what we've received fails.
     if ric > table.insert_count():
         raise Error("qpack: field section blocked on missing inserts")
-    var stbl = _qpack_static_table()
     var pos = delta.offset
     while pos < len(buf):
         var b0 = buf[pos]
@@ -590,7 +585,12 @@ def decode_field_section_dynamic(
             if t_static:
                 if ip.value < 0 or ip.value >= QPACK_STATIC_TABLE_SIZE:
                     raise Error("qpack: static index out of range")
-                headers.append(stbl[ip.value].copy())
+                headers.append(
+                    QpackHeader(
+                        String(static_name(ip.value)),
+                        String(static_value(ip.value)),
+                    )
+                )
             else:
                 headers.append(
                     table.get_abs(_pre_base_abs(base, ric, ip.value))
@@ -605,7 +605,7 @@ def decode_field_section_dynamic(
             if t_static:
                 if ip.value < 0 or ip.value >= QPACK_STATIC_TABLE_SIZE:
                     raise Error("qpack: static name index out of range")
-                name = stbl[ip.value].name
+                name = String(static_name(ip.value))
             else:
                 name = table.get_abs(_pre_base_abs(base, ric, ip.value)).name
             var lit = _decode_string_literal(buf, ip.offset, 7, UInt8(0x80))

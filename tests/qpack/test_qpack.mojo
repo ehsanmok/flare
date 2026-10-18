@@ -57,6 +57,24 @@ def test_static_table_find_full_match() raises:
     assert_equal(static_table_find("missing", "value"), -1)
 
 
+def test_static_table_every_entry_round_trips() raises:
+    """Each index finds itself (or an earlier duplicate pair) and
+    survives an encode/decode round trip as a single indexed line."""
+    for i in range(QPACK_STATIC_TABLE_SIZE):
+        var h = static_table_lookup(i)
+        var idx = static_table_find(h.name, h.value)
+        assert_true(idx >= 0 and idx <= i)
+        assert_equal(static_table_lookup(idx).value, h.value)
+        assert_true(static_table_find_name(h.name) <= idx)
+        var hs = List[QpackHeader]()
+        hs.append(h.copy())
+        var wire = List[UInt8]()
+        encode_field_section(hs, wire)
+        var back = decode_field_section(Span[UInt8, _](wire))
+        assert_equal(back[0].name, h.name)
+        assert_equal(back[0].value, h.value)
+
+
 def test_static_table_find_name_only() raises:
     var idx = static_table_find_name("x-frame-options")
     assert_true(idx >= 0)
@@ -221,6 +239,7 @@ def main() raises:
     test_static_table_lookup_known_indices()
     test_static_table_lookup_out_of_range()
     test_static_table_find_full_match()
+    test_static_table_every_entry_round_trips()
     test_static_table_find_name_only()
     test_round_trip_full_static_match()
     test_round_trip_literal_with_name_reference()
@@ -234,4 +253,4 @@ def main() raises:
     test_huffman_literal_value_that_is_not_utf8_is_refused()
     test_literal_name_that_is_not_utf8_is_refused()
     test_valid_utf8_literal_value_is_still_accepted()
-    print("test_qpack: 17 passed")
+    print("test_qpack: 18 passed")

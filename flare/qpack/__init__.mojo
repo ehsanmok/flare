@@ -21,6 +21,7 @@ that consumes it.
 from .codec import (
     QpackHeader,
     decode_field_section,
+    encode_field_line,
     encode_field_section,
 )
 from .dynamic import (
