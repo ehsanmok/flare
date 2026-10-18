@@ -161,6 +161,16 @@ def _do_ssl_ctx_disable_session_tickets(
         raise Error("flare_ssl_ctx_disable_session_tickets failed")
 
 
+def _do_ssl_ctx_set_min_proto(
+    imm lib: OwnedDLHandle, addr: Int, version: Int
+) raises:
+    var f = dl_sym[def(Int, c_int) thin abi("C") -> c_int](
+        lib, "flare_ssl_ctx_set_min_proto"
+    )
+    if Int(f(addr, c_int(version))) != 0:
+        raise Error("flare_ssl_ctx_set_min_proto: unsupported TLS version")
+
+
 def _do_ssl_new_accept(
     imm lib: OwnedDLHandle, ctx_addr: Int, fd: Int
 ) raises -> Int:
@@ -323,6 +333,12 @@ struct ServerCtx(Movable):
         NewSessionTicket messages and no server-side session cache, so no
         session is issued and none can be resumed."""
         _do_ssl_ctx_disable_session_tickets(self._lib, self._addr)
+
+    def set_min_protocol(self, version: Int) raises:
+        """Refuse protocol versions below ``version``
+        (``TLS_PROTOCOL_TLS12`` or ``TLS_PROTOCOL_TLS13``); anything else
+        raises."""
+        _do_ssl_ctx_set_min_proto(self._lib, self._addr, version)
 
     def addr(self) -> Int:
         """Underlying ``SSL_CTX*`` as an Int."""

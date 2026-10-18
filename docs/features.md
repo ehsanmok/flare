@@ -919,10 +919,10 @@ of what you might reasonably assume from the surrounding feature.
 
 **HTTP server**
 
-- `bind_tls` takes a certificate, a key and an ALPN list. mTLS, a
-  minimum protocol version and session tickets are configurable on
-  `TlsAcceptor` but are not reachable through `HttpServer`; the reactor
-  builds its own context.
+- `bind_tls(addr, TlsServerConfig)` applies mTLS, the minimum protocol
+  version and the session-ticket policy to the reactor's handshakes. A
+  certificate reload and per-SNI certificates are still `TlsAcceptor`-only
+  (the reactor's context is not swapped while it serves).
 - Multi-worker HTTP/3 (`QuicServerConfig.num_workers = N`) gives each
   worker its own `SO_REUSEPORT` socket, so the kernel spreads client
   flows by 4-tuple, not by load. A packet that arrives at the wrong

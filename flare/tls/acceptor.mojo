@@ -354,6 +354,11 @@ struct TlsAcceptor(Movable):
                     alpn_blob.append(b)
             self._ctx.set_alpn(alpn_blob)
 
+        # Minimum protocol version. It was stored and never applied, so a
+        # TLS 1.3-only configuration still accepted TLS 1.2.
+        if config.min_protocol != TLS_PROTOCOL_TLS12:
+            self._ctx.set_min_protocol(config.min_protocol)
+
         # mTLS.
         if config.require_client_cert:
             self._ctx.set_verify_client_cert(config.client_ca_bundle)
@@ -368,6 +373,12 @@ struct TlsAcceptor(Movable):
             self._ctx.disable_session_tickets()
 
         self.config = config^
+
+    def into_ctx(deinit self) -> ServerCtx:
+        """Hand over the configured ``SSL_CTX`` (ALPN, mTLS, minimum
+        version, session-ticket policy applied), e.g. to the HTTP
+        reactor, which drives its own non-blocking handshakes."""
+        return self._ctx^
 
     def reload(mut self) raises:
         """Re-read the cert + key files from ``config`` and swap in

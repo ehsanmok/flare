@@ -532,6 +532,21 @@ int flare_ssl_ctx_disable_session_tickets(flare_ssl_ctx_t ctx) {
     return 0;
 }
 
+int flare_ssl_ctx_set_min_proto(flare_ssl_ctx_t ctx, int version) {
+    SSL_CTX* c = static_cast<SSL_CTX*>(ctx);
+    if (!c) { set_error("ctx is null"); return -1; }
+    /* Fail closed: TLS 1.0 / 1.1 are never re-enabled. */
+    if (version < TLS1_2_VERSION || version > TLS1_3_VERSION) {
+        set_error("flare_ssl_ctx_set_min_proto: version must be TLS 1.2 or 1.3");
+        return -1;
+    }
+    if (SSL_CTX_set_min_proto_version(c, version) != 1) {
+        capture_openssl_errors();
+        return -1;
+    }
+    return 0;
+}
+
 // ── Error ────────────────────────────────────────────────────────────────────
 
 const char* flare_ssl_last_error(void) {

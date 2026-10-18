@@ -61,6 +61,7 @@ from ._h3_workers import (
     serve_h3,
 )
 from ..tls._server_ffi import ServerCtx
+from ..tls.acceptor import TlsAcceptor, TlsServerConfig
 
 
 # ── ShutdownReport ───────────────────────────────────────────────────────────
@@ -447,6 +448,27 @@ struct HttpServer(Movable):
                 for b in p.as_bytes():
                     wire.append(b)
             ctx.set_alpn(wire)
+        var srv = HttpServer(listener^, config^)
+        srv._tls_ctx = Optional[ServerCtx](ctx^)
+        return srv^
+
+    @staticmethod
+    def bind_tls(
+        addr: SocketAddr,
+        var tls: TlsServerConfig,
+        var config: ServerConfig = ServerConfig(),
+    ) raises -> HttpServer:
+        """Bind an HTTPS server from a full :class:`TlsServerConfig`.
+
+        The context is built by :class:`TlsAcceptor`, so everything the
+        config carries applies to the reactor's handshakes: ALPN, client
+        certificate verification (mTLS), the minimum protocol version and
+        the session-ticket policy (off unless enabled). The cert/key form
+        of :meth:`bind_tls` reached none of these. A misconfiguration
+        raises here, at bind time.
+        """
+        var listener = TcpListener.bind(addr)
+        var ctx = TlsAcceptor(tls^).into_ctx()
         var srv = HttpServer(listener^, config^)
         srv._tls_ctx = Optional[ServerCtx](ctx^)
         return srv^

@@ -188,6 +188,10 @@ int flare_ssl_ctx_enable_session_tickets(flare_ssl_ctx_t ctx, int lifetime_s);
  */
 int flare_ssl_ctx_disable_session_tickets(flare_ssl_ctx_t ctx);
 
+/* Raise the minimum protocol version: TLS1_2_VERSION (0x0303) or
+ * TLS1_3_VERSION (0x0304). Anything else fails; returns 0 on success. */
+int flare_ssl_ctx_set_min_proto(flare_ssl_ctx_t ctx, int version);
+
 /* ── Error ─────────────────────────────────────────────────────────────────── */
 
 const char* flare_ssl_last_error(void);
