@@ -220,6 +220,10 @@ struct QuicServerConfig(Copyable, Defaultable):
     """1-RTT packets sent under one key before the server starts a key
     update (RFC 9001 sec 6). Default 2^23, the AES-GCM confidentiality
     limit of RFC 9001 sec 6.6, which also covers ChaCha20-Poly1305."""
+    var max_datagram_frame_size: UInt64
+    """``max_datagram_frame_size`` to advertise (RFC 9221 sec 3); 0, the
+    default, leaves DATAGRAM frames off and a peer that sends one is
+    closed with PROTOCOL_VIOLATION."""
     var max_pto_count: Int
     """Consecutive probe timeouts before the connection is given up on.
 
@@ -248,6 +252,7 @@ struct QuicServerConfig(Copyable, Defaultable):
         self.require_address_validation = False
         self.retry_token_max_age_ms = UInt64(10_000)
         self.max_pto_count = 10
+        self.max_datagram_frame_size = UInt64(0)
         self.key_update_interval = UInt64(1) << 23
         self.http3 = Http3Config()
         self.num_workers = 1
@@ -491,6 +496,15 @@ struct QuicConnection(Copyable):
     """Whether an ack-eliciting packet was sent since the last packet
     that was received and processed. Only the first such send restarts
     the idle timer (RFC 9000 sec 10.1)."""
+    var peer_max_datagram: UInt64
+    """The client's ``max_datagram_frame_size`` (RFC 9221 sec 3); 0 until
+    its transport parameters were read, or when it takes no DATAGRAMs."""
+    var dg_rx: List[List[UInt8]]
+    """DATAGRAM payloads received and not yet taken."""
+    var dg_tx: List[List[UInt8]]
+    """DATAGRAM payloads queued for the next drain."""
+    var dg_rx_bytes: Int
+    var dg_tx_bytes: Int
 
     def __init__(
         out self,
@@ -513,6 +527,11 @@ struct QuicConnection(Copyable):
         self.pto_timer_id = UInt64(0)
         self.peer_idle_ms = UInt64(0)
         self.idle_sent_since_rx = False
+        self.peer_max_datagram = 0
+        self.dg_rx = List[List[UInt8]]()
+        self.dg_tx = List[List[UInt8]]()
+        self.dg_rx_bytes = 0
+        self.dg_tx_bytes = 0
         self.closing = False
         self.closing_rx = 0
         self.close_frame = List[UInt8]()
@@ -890,4 +909,6 @@ def _encode_server_transport_params(
     tp.initial_max_streams_bidi = Optional(config.initial_max_streams_bidi)
     tp.initial_max_streams_uni = Optional(config.initial_max_streams_uni)
     tp.active_connection_id_limit = Optional(UInt64(2))
+    if config.max_datagram_frame_size > 0:
+        tp.max_datagram_frame_size = Optional(config.max_datagram_frame_size)
     return encode_transport_parameters(tp)

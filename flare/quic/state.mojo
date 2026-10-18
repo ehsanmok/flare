@@ -332,6 +332,16 @@ struct Connection(Copyable):
     ``initial_max_stream_data_bidi_local`` (RFC 9000 sec 18.2). The
     server holds it at 0 until it has read the client's transport
     parameters, then raises it and every open stream's limit."""
+    var max_datagram_recv: UInt64
+    """The ``max_datagram_frame_size`` we advertised (RFC 9221 sec 3); 0
+    when we did not, and then any DATAGRAM frame is a PROTOCOL_VIOLATION,
+    as is one larger than this."""
+
+
+comptime MAX_QUEUED_DATAGRAM_BYTES: Int = 64 * 1024
+"""Most DATAGRAM payload bytes a connection queues in either direction
+(RFC 9221 sec 5: unreliable, so past it a datagram is dropped rather
+than letting a peer or a slow application pin memory)."""
 
 
 def new_connection(
@@ -369,6 +379,7 @@ def new_connection(
         next_local_bidi=UInt64(1) if is_server else UInt64(0),
         next_local_uni=UInt64(3) if is_server else UInt64(2),
         peer_initial_max_stream_data=initial_max_data,
+        max_datagram_recv=UInt64(0),
     )
 
 
@@ -882,7 +893,20 @@ struct _ConnFrameHandler(FrameHandler):
         # RFC 9221 §5: DATAGRAM frames are ack-eliciting; the payload
         # is surfaced for the reactor/application to drain. The
         # sans-I/O layer keeps no per-datagram ordering or retransmit
-        # state -- they are unreliable by contract.
+        # state -- they are unreliable by contract. One we did not
+        # advertise, or larger than we advertised, is a PROTOCOL_VIOLATION
+        # (RFC 9221 sec 3); they used to be accepted from any peer.
+        var n = len(dg.data)
+        var size = 1 + n
+        if dg.has_length:
+            size += 1 if n < 64 else (2 if n < 16384 else 4)
+        if UInt64(size) > self._conn()[].max_datagram_recv:
+            connection_close(
+                self._conn()[],
+                QUIC_PROTOCOL_VIOLATION,
+                "DATAGRAM frame not allowed or too large",
+            )
+            raise Error("QUIC PROTOCOL_VIOLATION: DATAGRAM frame refused")
         _arrive(self._conn()[], self.now_us, ack_eliciting=True)
         self._events()[].datagrams.append(dg.data.copy())
 

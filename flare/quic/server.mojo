@@ -69,7 +69,9 @@ from .frame import (
     ResetStreamFrame,
     StreamDataBlockedFrame,
     StreamFrame,
+    DatagramFrame,
     encode_ack,
+    encode_datagram,
     encode_connection_close,
     encode_crypto,
     encode_data_blocked,
@@ -107,6 +109,7 @@ from .transport_params import (
 from .state import (
     CONN_STATE_CLOSING,
     CONN_STATE_DRAINING,
+    MAX_QUEUED_DATAGRAM_BYTES,
     QUIC_FLOW_CONTROL_ERROR,
     QUIC_PROTOCOL_VIOLATION,
     QUIC_STREAM_LIMIT_ERROR,
@@ -987,6 +990,13 @@ struct QuicListener(Movable):
             ok = False  # Retry not handled here
         if not ok:
             return False
+        if len(events.datagrams) > 0:
+            ref qd = self.connections[slot]
+            for i in range(len(events.datagrams)):
+                var n = len(events.datagrams[i])
+                if qd.dg_rx_bytes + n <= MAX_QUEUED_DATAGRAM_BYTES:
+                    qd.dg_rx_bytes += n
+                    qd.dg_rx.append(events.datagrams[i].copy())
         self._dispatch_crypto_frames(slot, events, inbound_lvl)
         # LossRecovery tracks the 1-RTT packets we send, so only
         # application-space ACKs name its packet numbers. An Initial or
@@ -1602,6 +1612,9 @@ struct QuicListener(Movable):
             self.connections[
                 slot
             ].peer_cid_limit = tp.active_connection_id_limit.or_else(UInt64(2))
+            self.connections[
+                slot
+            ].peer_max_datagram = tp.max_datagram_frame_size.or_else(0)
             var msd = tp.initial_max_stream_data_bidi_local.or_else(UInt64(0))
             c.peer_initial_max_stream_data = msd
             var open_sids = List[UInt64]()
@@ -2142,6 +2155,7 @@ struct QuicListener(Movable):
         qc.fc_adv_max_bidi = self.config.initial_max_streams_bidi
         qc.conn.adv_max_streams_bidi = self.config.initial_max_streams_bidi
         qc.conn.adv_max_streams_uni = self.config.initial_max_streams_uni
+        qc.conn.max_datagram_recv = self.config.max_datagram_frame_size
         if retry_odcid:
             qc.addr_validated = True  # the Retry token proved it
         var live = len(self.connections) - len(self.free_slots)
@@ -2898,6 +2912,12 @@ struct QuicListener(Movable):
                     plaintext,
                 )
 
+        if len(self.connections[slot].dg_tx) > 0:
+            if self._flush_1rtt(slot, plaintext, peer, budget):
+                emitted = True
+            if self._drain_datagrams(slot, peer, budget):
+                emitted = True
+
         # Response bytes, as far as the peer's MAX_STREAM_DATA and
         # MAX_DATA (RFC 9000 sec 4.1) and the congestion window (RFC 9002
         # sec 7) allow. What does not fit stays queued on the stream and
@@ -3024,6 +3044,86 @@ struct QuicListener(Movable):
         self._flush_gso()
         self._gso_active = False
         return emitted
+
+    def send_datagram(mut self, slot: Int, payload: Span[UInt8, _]) -> Bool:
+        """Queue ``payload`` as an unreliable DATAGRAM (RFC 9221) for the
+        next drain. False, and nothing queued, when the client takes no
+        DATAGRAMs, the frame would exceed its ``max_datagram_frame_size``
+        or one packet, or the queue is full."""
+        if slot < 0 or slot >= len(self.connections):
+            return False
+        ref c = self.connections[slot]
+        var n = len(payload)
+        var frame = n + 9  # type + length varint, at most
+        if (
+            UInt64(frame) > c.peer_max_datagram
+            or frame > Int(self.config.max_udp_payload_size) - 64
+            or c.dg_tx_bytes + n > MAX_QUEUED_DATAGRAM_BYTES
+        ):
+            return False
+        c.dg_tx_bytes += n
+        c.dg_tx.append(List[UInt8](payload))
+        return True
+
+    def take_datagrams(mut self, slot: Int) -> List[List[UInt8]]:
+        """The DATAGRAM payloads received on ``slot`` since the last call,
+        in arrival order."""
+        var out = List[List[UInt8]]()
+        if slot >= 0 and slot < len(self.connections):
+            swap(out, self.connections[slot].dg_rx)
+            self.connections[slot].dg_rx_bytes = 0
+        return out^
+
+    def _drain_datagrams(
+        mut self, slot: Int, peer: SocketAddr, budget: Int
+    ) raises -> Bool:
+        """Send the queued DATAGRAMs, packed into packets of their own:
+        they count against the congestion window and the pacer, but are
+        not kept for retransmission (RFC 9221 sec 5.2). What the window
+        does not admit stays queued."""
+        var dgs = List[List[UInt8]]()
+        swap(dgs, self.connections[slot].dg_tx)
+        self.connections[slot].dg_tx_bytes = 0
+        var frames = List[UInt8](capacity=budget)
+        var emitted = False
+        var i = 0
+        while i < len(dgs):
+            if len(frames) + len(dgs[i]) + 9 > budget:
+                emitted = self._send_untracked(slot, frames, peer) or emitted
+                frames.clear()
+            if len(frames) == 0:
+                if not self.loss[slot].can_send(UInt64(budget)):
+                    break
+                var wait = self.loss[slot].pace_admit(
+                    _monotonic_ms(), UInt64(budget)
+                )
+                if wait > 0:
+                    self._arm_send_timer(slot, Int(wait))
+                    break
+            encode_datagram(DatagramFrame(dgs[i].copy(), True), frames)
+            i += 1
+        emitted = self._send_untracked(slot, frames, peer) or emitted
+        ref c = self.connections[slot]
+        while i < len(dgs):
+            c.dg_tx_bytes += len(dgs[i])
+            c.dg_tx.append(dgs[i].copy())
+            i += 1
+        return emitted
+
+    def _send_untracked(
+        mut self, slot: Int, frames: List[UInt8], peer: SocketAddr
+    ) raises -> Bool:
+        """Send ``frames`` as an ack-eliciting 1-RTT packet whose frames
+        loss recovery does not keep."""
+        if len(frames) == 0:
+            return False
+        var dg = self._build_1rtt_response(
+            slot, frames.copy(), ack_eliciting=True, keep_frames=False
+        )
+        if len(dg) == 0:
+            return False
+        self._queue_datagram(dg, peer)
+        return True
 
     def _reclaim_http3_stream(mut self, slot: Int, sid: Int) raises:
         """Drop the H3 driver's and the QUIC connection's state for a
@@ -3420,6 +3520,7 @@ struct QuicListener(Movable):
         var plaintext: List[UInt8],
         var pn_length: Int = 2,
         ack_eliciting: Bool = False,
+        keep_frames: Bool = True,
     ) raises -> List[UInt8]:
         """Wrap an arbitrary 1-RTT plaintext payload (CRYPTO
         bytes from rustls's post-handshake KeyChange::OneRtt
@@ -3458,7 +3559,7 @@ struct QuicListener(Movable):
         # ACK, PADDING and CONNECTION_CLOSE, and only those are
         # retransmittable.
         var tracked_frames = List[UInt8]()
-        if ack_eliciting:
+        if ack_eliciting and keep_frames:
             tracked_frames = plaintext.copy()
         if slot >= len(self.tls_sessions):
             return List[UInt8]()

@@ -79,6 +79,7 @@ from .frame import (
     AckFrame,
     ConnectionCloseFrame,
     CryptoFrame,
+    DatagramFrame,
     PathChallengeFrame,
     PathResponseFrame,
     RetireConnectionIdFrame,
@@ -94,6 +95,7 @@ from .frame import (
     encode_ack,
     encode_connection_close,
     encode_crypto,
+    encode_datagram,
     encode_path_challenge,
     encode_path_response,
     encode_ping,
@@ -194,6 +196,7 @@ def _encode_client_transport_params(
     scid: ConnectionId,
     max_idle_timeout_ms: UInt64,
     initial_max_data: UInt64,
+    max_datagram_frame_size: UInt64 = 0,
 ) raises -> List[UInt8]:
     """Encode the client's QUIC transport parameters (RFC 9000
     §18) for the ClientHello ``quic_transport_parameters``
@@ -216,6 +219,8 @@ def _encode_client_transport_params(
     tp.initial_max_streams_bidi = Optional(_CLIENT_MAX_STREAMS)
     tp.initial_max_streams_uni = Optional(_CLIENT_MAX_STREAMS)
     tp.active_connection_id_limit = Optional(UInt64(2))
+    if max_datagram_frame_size > 0:
+        tp.max_datagram_frame_size = Optional(max_datagram_frame_size)
     return encode_transport_parameters(tp)
 
 
@@ -478,6 +483,7 @@ struct QuicClientConnection(Movable):
         max_udp_payload_size: Int = 1452,
         aead_choice: Int = QuicAead.AES_128_GCM,
         enable_0rtt: Bool = False,
+        max_datagram_frame_size: UInt64 = 0,
     ) raises -> QuicClientConnection:
         """Open a client connection and emit the first Initial
         (ClientHello) packet without blocking on the response.
@@ -488,11 +494,15 @@ struct QuicClientConnection(Movable):
         Initial datagram. Drive the handshake to completion with
         :meth:`poll` (or use :meth:`connect` for the blocking
         convenience).
+
+        ``max_datagram_frame_size`` > 0 accepts DATAGRAM frames up to
+        that size (RFC 9221); they arrive in ``poll``'s
+        ``events.datagrams``.
         """
         var initial_dcid = _random_cid(8)
         var scid = _random_cid(8)
         var tp = _encode_client_transport_params(
-            scid, max_idle_timeout_ms, initial_max_data
+            scid, max_idle_timeout_ms, initial_max_data, max_datagram_frame_size
         )
         var session = connector.connect(server_name, tp)
         # Bind an ephemeral local UDP port; the peer address is
@@ -503,6 +513,7 @@ struct QuicClientConnection(Movable):
         var conn = new_connection(
             max_idle_timeout_ms * UInt64(1_000), initial_max_data
         )
+        conn.max_datagram_recv = max_datagram_frame_size
         var self = QuicClientConnection(
             conn^,
             session^,
@@ -537,6 +548,7 @@ struct QuicClientConnection(Movable):
         max_udp_payload_size: Int = 1452,
         aead_choice: Int = QuicAead.AES_128_GCM,
         enable_0rtt: Bool = False,
+        max_datagram_frame_size: UInt64 = 0,
     ) raises -> QuicClientConnection:
         """Open a client connection and block until the QUIC + TLS
         handshake completes (or ``handshake_timeout_ms`` elapses).
@@ -557,6 +569,7 @@ struct QuicClientConnection(Movable):
             max_udp_payload_size,
             aead_choice,
             enable_0rtt,
+            max_datagram_frame_size,
         )
         var deadline = _monotonic_ms() + UInt64(handshake_timeout_ms)
         while not self.established:
@@ -1385,6 +1398,7 @@ struct QuicClientConnection(Movable):
         var plaintext: List[UInt8],
         var pn_length: Int = 2,
         ack_eliciting: Bool = False,
+        keep_frames: Bool = True,
     ) raises -> List[UInt8]:
         """Build a protected 1-RTT short-header datagram around an
         already-encoded ``plaintext`` frame buffer. AEAD + header
@@ -1401,7 +1415,8 @@ struct QuicClientConnection(Movable):
             return List[UInt8]()  # RFC 9000 sec 10.2.2: send nothing
         var frames_copy = List[UInt8]()
         if ack_eliciting:
-            frames_copy = plaintext.copy()
+            if keep_frames:
+                frames_copy = plaintext.copy()
             self._note_ack_eliciting_send()
         pn_length = max(
             pn_length,
@@ -1427,7 +1442,9 @@ struct QuicClientConnection(Movable):
         )
         self.tx_1rtt_pn = pn + UInt64(1)
         if ack_eliciting:
-            self._loss.on_sent(pn, frames_copy^, _monotonic_ms())
+            self._loss.on_sent(
+                pn, frames_copy^, _monotonic_ms(), size=UInt64(len(dg))
+            )
         return dg^
 
     def _protect_via_rustls(
@@ -1569,6 +1586,34 @@ struct QuicClientConnection(Movable):
                 break
         self.send_offsets[stream_id] = off
         self._conn_send_total += UInt64(total)
+
+    def send_datagram(mut self, payload: Span[UInt8, _]) raises -> Bool:
+        """Send ``payload`` now as an unreliable DATAGRAM (RFC 9221) in a
+        packet of its own, never retransmitted (sec 5.2). False, and
+        nothing sent, before the server's transport parameters are known,
+        when it takes no DATAGRAMs or the frame exceeds its
+        ``max_datagram_frame_size`` or one packet, or when the congestion
+        window is full."""
+        var frame = len(payload) + 9  # type + length varint, at most
+        if (
+            not self.have_1rtt_keys
+            or not self._peer_limits_known
+            or UInt64(frame) > self._peer_limits.max_datagram_frame_size
+            or frame > self._stream_chunk_cap()
+            or not self._loss.can_send(UInt64(self.max_udp_payload_size))
+        ):
+            return False
+        var frames = List[UInt8](capacity=frame)
+        encode_datagram(DatagramFrame(List[UInt8](payload), True), frames)
+        while len(frames) < 16:
+            frames.append(UInt8(0))  # header-protection sample floor
+        var dg = self._build_1rtt(
+            frames^, ack_eliciting=True, keep_frames=False
+        )
+        if len(dg) == 0:
+            return False
+        _ = self.sock.send_to(Span[UInt8, _](dg), self.peer)
+        return True
 
     def cancel_stream(mut self, stream_id: UInt64) raises:
         """Cancel both directions of an HTTP/3 request (H3_REQUEST_CANCELLED).
