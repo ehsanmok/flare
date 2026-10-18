@@ -110,6 +110,7 @@ from .state import (
     ConnectionEvents,
     connection_close,
     empty_events,
+    mark_handshake_complete,
     mark_local_stream_opened,
 )
 from ..http3.server import (
@@ -1392,6 +1393,18 @@ struct QuicListener(Movable):
             # rustls has just processed (RFC 9000 sec 7.4, 18.2).
             if not self._client_params_ok(slot, handle):
                 return
+        # The client's Finished completes the handshake (RFC 9001 sec
+        # 4.1.1); HANDSHAKE_DONE then goes out on the next drain, not on
+        # the client's first ack-eliciting 1-RTT packet.
+        if (
+            inbound_lvl == QuicEncryptionLevel.HANDSHAKE
+            and not self.connections[slot].conn.handshake_complete
+            and _do_is_handshake_complete(self.tls_acceptor._lib, handle)
+        ):
+            var hs_events = empty_events()
+            mark_handshake_complete(
+                self.connections[slot].conn, UInt64(0), hs_events
+            )
 
         # 0-RTT (EarlyData) keys: only when the listener is configured
         # for early data (budget > 0) and we have not already installed
@@ -2516,12 +2529,18 @@ struct QuicListener(Movable):
 
         # ACK (+ HANDSHAKE_DONE once + flow-control credit) leads
         # the first datagram. These frames are small and always fit.
-        if (
+        var owe_ack = (
             self.rx_1rtt_ack_pending[slot]
             and len(self.rx_1rtt_ranges[slot]) >= 2
-        ):
-            var ack = _ack_from_ranges(self.rx_1rtt_ranges[slot], UInt64(0))
-            encode_ack(ack, plaintext)
+        )
+        var first_flight = (
+            not self.handshake_done_sent[slot]
+            and self.connections[slot].conn.handshake_complete
+        )
+        if owe_ack or first_flight:
+            if owe_ack:
+                var ack = _ack_from_ranges(self.rx_1rtt_ranges[slot], UInt64(0))
+                encode_ack(ack, plaintext)
             if not self.handshake_done_sent[slot]:
                 encode_handshake_done(plaintext)
             # Credit from consumption: at most _MAX_DATA_WINDOW bytes

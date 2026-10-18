@@ -489,6 +489,9 @@ from test_quic_handshake_loss import (
 from test_quic_handshake_loss import (
     test_ack_eliciting_initial_datagram_is_padded as test_quic_handshake_loss__test_ack_eliciting_initial_datagram_is_padded,
 )
+from test_quic_handshake_loss import (
+    test_handshake_done_goes_out_without_client_data as test_quic_handshake_loss__test_handshake_done_goes_out_without_client_data,
+)
 from test_quic_idle_timeout import (
     test_effective_idle_is_min_of_nonzero_values as test_quic_idle_timeout__test_effective_idle_is_min_of_nonzero_values,
 )
@@ -1302,6 +1305,9 @@ def main() raises:
     suite.test[test_quic_handshake_loss__test_lost_server_flight_is_resent]()
     suite.test[
         test_quic_handshake_loss__test_ack_eliciting_initial_datagram_is_padded
+    ]()
+    suite.test[
+        test_quic_handshake_loss__test_handshake_done_goes_out_without_client_data
     ]()
     # tests/quic/test_quic_idle_timeout.mojo
     suite.test[

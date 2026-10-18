@@ -1,5 +1,5 @@
-"""Server handshake flight loss (RFC 9002 sec 6) and Initial padding
-(RFC 9000 sec 14.1).
+"""Server handshake flight loss (RFC 9002 sec 6), Initial padding
+(RFC 9000 sec 14.1) and handshake confirmation (RFC 9001 sec 4.1.2).
 
 The client's first poll is skipped and the server's first flight is
 read off the client socket and dropped, as a lossy path would. The
@@ -83,6 +83,21 @@ def test_ack_eliciting_initial_datagram_is_padded() raises:
     assert_true(len(dropped) > 0)
     # The first datagram carries the ServerHello Initial.
     assert_true(dropped[0] >= 1200, "Initial datagram under 1200 bytes")
+    server.close()
+
+
+def test_handshake_done_goes_out_without_client_data() raises:
+    """HANDSHAKE_DONE confirms the handshake as soon as it completes
+    (RFC 9001 sec 4.1.2); it used to wait for the client's first
+    ack-eliciting 1-RTT packet."""
+    var server = _server()
+    var client = _client(server)
+    for _ in range(40):
+        _ = server.tick(timeout_ms=20)
+        _ = client.poll(timeout_ms=20)
+        if server.handshake_done_sent[0]:
+            break
+    assert_true(server.handshake_done_sent[0], "HANDSHAKE_DONE never sent")
     server.close()
 
 
