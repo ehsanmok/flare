@@ -1535,6 +1535,9 @@ from test_h3_live_dial import (
 from test_h3_pool_reuse import (
     test_two_gets_reuse_one_connection as test_h3_pool_reuse__test_two_gets_reuse_one_connection,
 )
+from test_h3_pool_reuse import (
+    test_a_redial_presents_the_servers_token as test_h3_pool_reuse__test_a_redial_presents_the_servers_token,
+)
 from test_handler import (
     test_struct_handler_basic as test_handler__test_struct_handler_basic,
 )
@@ -5392,6 +5395,7 @@ def main() raises:
     suite.test[test_h3_live_dial__test_alt_svc_auto_upgrade]()
     # tests/http/test_h3_pool_reuse.mojo
     suite.test[test_h3_pool_reuse__test_two_gets_reuse_one_connection]()
+    suite.test[test_h3_pool_reuse__test_a_redial_presents_the_servers_token]()
     # tests/http/test_handler.mojo
     suite.test[test_handler__test_struct_handler_basic]()
     suite.test[test_handler__test_struct_handler_reads_state]()
