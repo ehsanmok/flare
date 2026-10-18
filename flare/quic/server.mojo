@@ -160,6 +160,7 @@ from ..tls._rustls_quic_ffi import (
 from .packet import encode_short_header
 from .retry import (
     encode_retry_packet,
+    encode_version_negotiation,
     mint_retry_token,
     validate_retry_token,
 )
@@ -1830,6 +1831,9 @@ struct QuicListener(Movable):
     ) raises -> Int:
         """Long-header path: parse the full header, route by DCID,
         and accept an Initial packet against an unknown DCID."""
+        if len(datagram) >= 7 and not _is_quic_v1(datagram):
+            self._maybe_negotiate_version(datagram, peer)
+            return -1
         var lh: LongHeader
         try:
             lh = parse_long_header(datagram)
@@ -1854,6 +1858,47 @@ struct QuicListener(Movable):
                     return -1
             return self._accept_initial(lh, peer, retry_odcid)
         return -1
+
+    def _maybe_negotiate_version(
+        mut self, datagram: Span[UInt8, _], peer: SocketAddr
+    ):
+        """Answer a long-header packet of a version we do not speak with
+        Version Negotiation (RFC 9000 sec 6.1), listing QUIC v1 and a
+        reserved grease version (sec 6.3). Only the version-independent
+        fields are read (RFC 8999 sec 5.1). A Version Negotiation packet
+        (version 0) is never answered, and neither is a datagram under
+        1200 bytes, so the reply cannot amplify (sec 5.2.2, 14.1)."""
+        if len(datagram) < _MIN_INITIAL_DATAGRAM:
+            return
+        if (
+            datagram[1] == 0
+            and datagram[2] == 0
+            and datagram[3] == 0
+            and datagram[4] == 0
+        ):
+            return
+        var dlen = Int(datagram[5])
+        if dlen > MAX_CID_LENGTH or 7 + dlen > len(datagram):
+            return
+        var slen = Int(datagram[6 + dlen])
+        if slen > MAX_CID_LENGTH or 7 + dlen + slen > len(datagram):
+            return
+        var dcid = ConnectionId(
+            bytes=List[UInt8](Span[UInt8, _](datagram)[6 : 6 + dlen])
+        )
+        var scid = ConnectionId(
+            bytes=List[UInt8](
+                Span[UInt8, _](datagram)[7 + dlen : 7 + dlen + slen]
+            )
+        )
+        var versions = List[UInt32]()
+        versions.append(QUIC_VERSION_1)
+        versions.append(UInt32(0x1A2A3A4A))
+        try:
+            var vn = encode_version_negotiation(scid, dcid, versions)
+            _ = self.send_to(Span[UInt8, _](vn), peer)
+        except:
+            pass
 
     def _retry_gate(
         mut self, lh: LongHeader, datagram: Span[UInt8, _], peer: SocketAddr
@@ -3709,3 +3754,14 @@ def _queue_rest(q: List[UInt8], sent: Int) -> List[UInt8]:
     if sent >= len(q):
         return List[UInt8]()
     return List[UInt8](Span[UInt8, _](q)[sent:])
+
+
+def _is_quic_v1(datagram: Span[UInt8, _]) -> Bool:
+    """Whether a long-header datagram carries QUIC version 1 (the
+    version field is bytes 1..4, RFC 8999 sec 5.1)."""
+    return (
+        datagram[1] == 0
+        and datagram[2] == 0
+        and datagram[3] == 0
+        and datagram[4] == 1
+    )

@@ -140,6 +140,12 @@ from test_h3_dispatch import (
     test_response_drops_connection_specific_fields as test_h3_dispatch__test_response_drops_connection_specific_fields,
 )
 from test_h3_dispatch import (
+    test_buffered_response_carries_its_trailers as test_h3_dispatch__test_buffered_response_carries_its_trailers,
+)
+from test_h3_dispatch import (
+    test_extended_connect_follows_the_config as test_h3_dispatch__test_extended_connect_follows_the_config,
+)
+from test_h3_dispatch import (
     test_stream_frames_are_reassembled_by_offset as test_h3_dispatch__test_stream_frames_are_reassembled_by_offset,
 )
 from test_h3_dispatch import (
@@ -192,6 +198,9 @@ from test_h3_end_to_end import (
 )
 from test_h3_end_to_end import (
     test_undecodable_field_section_closes_the_connection as test_h3_end_to_end__test_undecodable_field_section_closes_the_connection,
+)
+from test_h3_end_to_end import (
+    test_http3_config_reaches_each_connection as test_h3_end_to_end__test_http3_config_reaches_each_connection,
 )
 from test_h3_flow_control import (
     test_upload_past_initial_window as test_h3_flow_control__test_upload_past_initial_window,
@@ -465,6 +474,8 @@ def main() raises:
     suite.test[
         test_h3_dispatch__test_response_drops_connection_specific_fields
     ]()
+    suite.test[test_h3_dispatch__test_buffered_response_carries_its_trailers]()
+    suite.test[test_h3_dispatch__test_extended_connect_follows_the_config]()
     suite.test[test_h3_dispatch__test_stream_frames_are_reassembled_by_offset]()
     suite.test[
         test_h3_dispatch__test_retransmit_after_the_response_does_not_rerun_the_request
@@ -512,6 +523,7 @@ def main() raises:
     suite.test[
         test_h3_end_to_end__test_undecodable_field_section_closes_the_connection
     ]()
+    suite.test[test_h3_end_to_end__test_http3_config_reaches_each_connection]()
     # tests/h3/test_h3_flow_control.mojo
     suite.test[test_h3_flow_control__test_upload_past_initial_window]()
     suite.test[test_h3_flow_control__test_download_past_initial_window]()
