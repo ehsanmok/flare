@@ -149,10 +149,8 @@ struct StreamSlab[S: Copyable & Deinitable](Copyable, Defaultable, Sized):
         """
         if Self._fits_fast(sid):
             if self.fast[sid]:
-                var out = self.fast[sid].value().copy()
-                self.fast[sid] = Optional[Self.S](None)
                 self.fast_count -= 1
-                return out^
+                return self.fast[sid].take()
             raise Error("StreamSlab: pop on unknown stream id")
         var out = self.overflow.pop(sid)
         self.overflow_count -= 1

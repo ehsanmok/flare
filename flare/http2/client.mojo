@@ -999,7 +999,7 @@ struct Http2ClientConnection(Defaultable, Movable):
 
     # ── Inbound completion polling ───────────────────────────────────────
 
-    def response_ready(self, sid: Int) raises -> Bool:
+    def response_ready(mut self, sid: Int) raises -> Bool:
         """Return ``True`` when the response on stream ``sid`` is fully
         buffered and ready to be popped via :meth:`take_response`.
 
@@ -1015,10 +1015,14 @@ struct Http2ClientConnection(Defaultable, Movable):
             return True
         if sid not in self.conn.streams:
             return False
-        var s = self.conn.streams[sid].copy()
-        if not s.headers_complete:
-            return False
-        return s.data_complete or s.state.value == StreamState.CLOSED().value
+        # Moved out and back: a copy duplicated the whole buffered body
+        # on every poll, quadratic in the response size.
+        var s = self.conn.streams.pop(sid)
+        var ready = s.headers_complete and (
+            s.data_complete or s.state.value == StreamState.CLOSED().value
+        )
+        self.conn.streams[sid] = s^
+        return ready
 
     def stream_error(self, sid: Int) raises -> Optional[Int]:
         """Return the peer-supplied RST_STREAM error code for ``sid``,

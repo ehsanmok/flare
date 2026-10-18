@@ -1469,7 +1469,7 @@ struct Connection(Copyable, Defaultable):
                         Http2ErrorCode.PROTOCOL_ERROR().value
                     )
                 return self._conn_error(Http2ErrorCode.STREAM_CLOSED().value)
-            var s = self.streams[sid].copy()
+            var s = self.streams.pop(sid)
             var st = s.state.value
             if (
                 st == StreamState.CLOSED().value
@@ -1480,6 +1480,7 @@ struct Connection(Copyable, Defaultable):
                 # head yet" case below: a stream the server reset before
                 # answering is closed, so its DATA is STREAM_CLOSED, not
                 # PROTOCOL_ERROR (RFC 9113 sec 5.1, H2-20).
+                self._put_stream(s^)
                 return self._conn_error(Http2ErrorCode.STREAM_CLOSED().value)
             if self.is_client and not s.headers_complete:
                 # RFC 9113 sec 8.1 / 8.1.1: a response that starts with DATA
@@ -1503,6 +1504,7 @@ struct Connection(Copyable, Defaultable):
             try:
                 body = self._strip_pad_and_priority(f, False)
             except:
+                self._put_stream(s^)
                 return self._conn_error(Http2ErrorCode.PROTOCOL_ERROR().value)
             # Flow control is accounted on the whole frame payload,
             # padding included (sec 6.9.1).
@@ -1563,8 +1565,7 @@ struct Connection(Copyable, Defaultable):
                 if len(f.payload) > 0:
                     out.append(self._conn_window_update(len(f.payload)))
                 return out^
-            for j in range(len(body)):
-                s.data.append(body[j])
+            s.data.extend(Span[UInt8, _](body))
             s.received_body_bytes += len(body)
             # sec 8.1.1: more DATA than content-length declared is
             # malformed on the frame that goes over, not only at

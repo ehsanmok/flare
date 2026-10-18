@@ -4,12 +4,12 @@ import Flare.L3_Protocol.H2.Validate
 # HTTP/2 connection state machine (impl)
 
 An executable transliteration of `Connection.handle_frame`
-(`flare/http2/state.mojo#Connection.handle_frame sha=50db43d21518 at=ea1b9282`) and the code it calls:
+(`flare/http2/state.mojo#Connection.handle_frame sha=75ac9ea2cd82 at=0900da03`) and the code it calls:
 `_commit_header_block` (781-1003), `_ensure_stream` / pruning (538-566),
 `_rst_stream_frame` (587-605), `_conn_error` (676-688),
 `_strip_pad_and_priority` (690-716), `_declared_content_length` (748-765),
 `_active_stream_count` (767-779), `release_request_credit` (619-633),
-plus the server driver's frame loop (`flare/http2/server.mojo#Http2Connection.feed sha=82ec663d0e3d at=ea1b9282`)
+plus the server driver's frame loop (`flare/http2/server.mojo#Http2Connection.feed sha=82ec663d0e3d at=0900da03`)
 and the local actions that change stream or window state
 (`emit_response` 603-681, `queue_stream_data` 870-921, client
 `send_request` 788-798 and `take_response` 1021).
@@ -242,7 +242,7 @@ def closeIfKnown (c : Conn) (k : Nat) : Conn :=
   | none => c
 
 /-- RST_STREAM, then put `s` back closed (the recurring stream-error tail).
-mirrors flare/http2/state.mojo#Connection.handle_frame sha=50db43d21518 at=ea1b9282 -/
+mirrors flare/http2/state.mojo#Connection.handle_frame sha=75ac9ea2cd82 at=0900da03 -/
 def rstCloseX (c : Conn) (k code : Nat) (s : Stream) (extra : List Out) : Conn × List Out :=
   (put (rstC c k) k { s with state := .closed }, .rst k code :: extra)
 
@@ -356,7 +356,7 @@ def hlSize (hs : List Header) : Nat := (hs.map (fun h => h.name.length + h.value
 /-- The tail of `_commit_header_block` after validation (958-1003). A
 malformed content-length (-2) is answered with RST_STREAM
 (PROTOCOL_ERROR) and closes the stream.
-mirrors flare/http2/state.mojo#Connection._commit_header_block+Connection.handle_frame sha=54e10f467738 at=ea1b9282 -/
+mirrors flare/http2/state.mojo#Connection._commit_header_block+Connection.handle_frame sha=8b0f6cc11f78 at=0900da03 -/
 def commitTail (c : Conn) (k : Nat) (s : Stream) (isTr es : Bool) (hdrs : List Header) :
     Conn × List Out :=
   let cl := if isTr then s.contentLength
@@ -410,7 +410,7 @@ def isIdleId (c : Conn) (k : Nat) : Bool :=
   if c.isClient then decide (k > c.maxLocalSid) || k % 2 == 0
   else decide (k > c.lastPeer) || k % 2 == 0
 
-/-- CONTINUATION while a block is open. mirrors flare/http2/state.mojo#Connection.handle_frame sha=50db43d21518 at=ea1b9282 -/
+/-- CONTINUATION while a block is open. mirrors flare/http2/state.mojo#Connection.handle_frame sha=75ac9ea2cd82 at=0900da03 -/
 def contBranch (dec : Dec) (c : Conn) (f : Fr) : Conn × List Out :=
   if f.ty ≠ tCONT || f.sid ≠ c.continuing then connErr c ePROTOCOL
   else
@@ -424,7 +424,7 @@ def contBranch (dec : Dec) (c : Conn) (f : Fr) : Conn × List Out :=
       else commit dec { c with continuing := 0 } f.sid
 
 /-- Frame-shape validation; `some r` returns early.
-mirrors flare/http2/state.mojo#Connection.handle_frame sha=50db43d21518 at=ea1b9282 -/
+mirrors flare/http2/state.mojo#Connection.handle_frame sha=75ac9ea2cd82 at=0900da03 -/
 def shapeCheck (c : Conn) (f : Fr) : Option (Conn × List Out) :=
   if f.ty = tPING then
     if f.sid ≠ 0 then some (connErr c ePROTOCOL)
@@ -456,7 +456,7 @@ def shapeCheck (c : Conn) (f : Fr) : Option (Conn × List Out) :=
 
 /-- Server-side stream-id monotonicity (`state.mojo:1117-1126`):
 `last_peer_stream_id > 0 and sid <= last_peer_stream_id`; `.inl` returns early.
-mirrors flare/http2/state.mojo#Connection.handle_frame sha=50db43d21518 at=ea1b9282 -/
+mirrors flare/http2/state.mojo#Connection.handle_frame sha=75ac9ea2cd82 at=0900da03 -/
 def idCheck (c : Conn) (f : Fr) : (Conn × List Out) ⊕ Conn :=
   if f.ty = tHEADERS && !c.isClient then
     if f.sid ≠ 0 && f.sid % 2 = 0 then .inl (connErr c ePROTOCOL)
@@ -475,7 +475,7 @@ def settingError (id v : Nat) : Nat :=
 /-- The INITIAL_WINDOW_SIZE delta over the stream table (1158-1174);
 `false` = a stream would pass `_MAX_WINDOW` (the streams before it are
 already updated, as in Mojo).
-mirrors flare/http2/state.mojo#Connection.handle_frame sha=50db43d21518 at=ea1b9282 -/
+mirrors flare/http2/state.mojo#Connection.handle_frame sha=75ac9ea2cd82 at=0900da03 -/
 def applyDelta (delta : Int) : List (Nat × Stream) → List (Nat × Stream) × Bool
   | [] => ([], true)
   | p :: t =>
@@ -487,7 +487,7 @@ def applyDelta (delta : Int) : List (Nat × Stream) → List (Nat × Stream) × 
       let r := applyDelta delta t
       ((p.1, { p.2 with sendW := p.2.sendW + delta }) :: r.1, r.2)
 
-/-- One SETTINGS pair. mirrors flare/http2/state.mojo#Connection.handle_frame sha=50db43d21518 at=ea1b9282 -/
+/-- One SETTINGS pair. mirrors flare/http2/state.mojo#Connection.handle_frame sha=75ac9ea2cd82 at=0900da03 -/
 def applySetting (c : Conn) (id v : Nat) : Conn ⊕ (Conn × List Out) :=
   let bad := settingError id v
   if bad ≠ 0 then .inr (connErr c bad)
@@ -504,7 +504,7 @@ def applySetting (c : Conn) (id v : Nat) : Conn ⊕ (Conn × List Out) :=
   else if id = 8 then .inl { c with peerConnect := v ≠ 0 }
   else .inl c
 
-/-- mirrors flare/http2/state.mojo#Connection.handle_frame sha=50db43d21518 at=ea1b9282 -/
+/-- mirrors flare/http2/state.mojo#Connection.handle_frame sha=75ac9ea2cd82 at=0900da03 -/
 def applySettings (c : Conn) : List (Nat × Nat) → Conn ⊕ (Conn × List Out)
   | [] => .inl c
   | (id, v) :: t =>
@@ -512,14 +512,14 @@ def applySettings (c : Conn) : List (Nat × Nat) → Conn ⊕ (Conn × List Out)
     | .inl c => applySettings c t
     | .inr r => .inr r
 
-/-- mirrors flare/http2/state.mojo#Connection.handle_frame sha=50db43d21518 at=ea1b9282 -/
+/-- mirrors flare/http2/state.mojo#Connection.handle_frame sha=75ac9ea2cd82 at=0900da03 -/
 def settingsH (c : Conn) (f : Fr) : Conn × List Out :=
   if f.f1 then ({ c with settingsAcked := true }, [])
   else match applySettings c f.settings with
     | .inl c => (c, [.settingsAck])
     | .inr r => r
 
-/-- mirrors flare/http2/state.mojo#Connection.handle_frame sha=50db43d21518 at=ea1b9282 -/
+/-- mirrors flare/http2/state.mojo#Connection.handle_frame sha=75ac9ea2cd82 at=0900da03 -/
 def wuH (c : Conn) (f : Fr) : Conn × List Out :=
   let inc := f.word % 2147483648
   if inc = 0 then
@@ -537,7 +537,7 @@ def wuH (c : Conn) (f : Fr) : Conn × List Out :=
 
 /-- Checks against an existing stream (1268-1288): `.inl` is a
 connection error, `.inr code` the refusal code so far (0 = none).
-mirrors flare/http2/state.mojo#Connection.handle_frame sha=50db43d21518 at=ea1b9282 -/
+mirrors flare/http2/state.mojo#Connection.handle_frame sha=75ac9ea2cd82 at=0900da03 -/
 def headersPre (c : Conn) (f : Fr) : (Conn × List Out) ⊕ Nat :=
   match get c f.sid with
   | some p =>
@@ -548,13 +548,13 @@ def headersPre (c : Conn) (f : Fr) : (Conn × List Out) ⊕ Nat :=
   | none => .inr 0
 
 /-- The concurrency refusal (1289-1298).
-mirrors flare/http2/state.mojo#Connection.handle_frame sha=50db43d21518 at=ea1b9282 -/
+mirrors flare/http2/state.mojo#Connection.handle_frame sha=75ac9ea2cd82 at=0900da03 -/
 def headersRefuse (c : Conn) (f : Fr) (refuse0 : Nat) : Nat :=
   if refuse0 = 0 && !c.isClient && !mem c f.sid && activeCount c ≥ c.maxConcurrent
   then eREFUSED else refuse0
 
 /-- Start the header block (1313-1333).
-mirrors flare/http2/state.mojo#Connection.handle_frame sha=50db43d21518 at=ea1b9282 -/
+mirrors flare/http2/state.mojo#Connection.handle_frame sha=75ac9ea2cd82 at=0900da03 -/
 def headersOpen (dec : Dec) (c : Conn) (f : Fr) (refuse : Nat) : Conn × List Out :=
   let c := { c with block := f.frag, blockES := f.f1, blockRefuse := refuse, blockConts := 0 }
   let c := if refuse = 0 then put (ensure c f.sid).1 f.sid (ensure c f.sid).2 else c
@@ -563,7 +563,7 @@ def headersOpen (dec : Dec) (c : Conn) (f : Fr) (refuse : Nat) : Conn × List Ou
 
 /-- In client role an id not in the stream table is a connection error at
 the top of the HEADERS branch.
-mirrors flare/http2/state.mojo#Connection.handle_frame sha=50db43d21518 at=ea1b9282 -/
+mirrors flare/http2/state.mojo#Connection.handle_frame sha=75ac9ea2cd82 at=0900da03 -/
 def headersH (dec : Dec) (c : Conn) (f : Fr) : Res :=
   if f.sid = 0 then .ok (connErr c ePROTOCOL)
   else if c.isClient && !mem c f.sid then .ok (connErr c ePROTOCOL)
@@ -582,7 +582,7 @@ def recount (c : Conn) : Nat :=
   (c.streams.filter (fun p => p.2.state != .closed)).foldl (fun a p => a + p.2.dataLen) 0
 
 /-- The connection-credit tail of the DATA branch (1492-1511).
-mirrors flare/http2/state.mojo#Connection.handle_frame sha=50db43d21518 at=ea1b9282 -/
+mirrors flare/http2/state.mojo#Connection.handle_frame sha=75ac9ea2cd82 at=0900da03 -/
 def dataCredit (c : Conn) (f : Fr) (credit : Nat) : Conn × List Out :=
   if f.plen > 0 then
     let o1 : List Out := if credit > 0 then [.wu f.sid credit] else []
@@ -597,7 +597,7 @@ def dataCredit (c : Conn) (f : Fr) (credit : Nat) : Conn × List Out :=
 counts the body in `buffered`, `s` has the stream credit restored. The
 content-length mismatch reset returns the frame's connection credit; no
 stream WINDOW_UPDATE goes out on a stream this frame closes.
-mirrors flare/http2/state.mojo#Connection.handle_frame+Connection.make_response+Connection.make_response_with_trailers sha=80b1b4dc1662 at=ea1b9282 -/
+mirrors flare/http2/state.mojo#Connection.handle_frame+Connection.make_response+Connection.make_response_with_trailers sha=23bd5858ca65 at=0900da03 -/
 def dataFinish (c : Conn) (f : Fr) (s : Stream) (cr : Nat) : Conn × List Out :=
   if f.f1 && (0 : Int) ≤ s.contentLength && (s.received : Int) ≠ s.contentLength then
     rstCloseX c f.sid ePROTOCOL s (wu0If f.plen)
@@ -613,7 +613,7 @@ def deferOf (s : Stream) (body : Nat) : Nat := if s.deferCredit then body else 0
 
 /-- The accepted-body part of the DATA branch (1428-1456); `s` already
 counts the body in `dataLen` and `received`.
-mirrors flare/http2/state.mojo#Connection.handle_frame sha=50db43d21518 at=ea1b9282 -/
+mirrors flare/http2/state.mojo#Connection.handle_frame sha=75ac9ea2cd82 at=0900da03 -/
 def dataAccept (c : Conn) (f : Fr) (s : Stream) (body : Nat) : Conn × List Out :=
   if !c.isClient && (0 : Int) ≤ s.contentLength && (s.received : Int) > s.contentLength then
     rstCloseX c f.sid ePROTOCOL { s with dataLen := 0, buf := [] } (wu0If f.plen)
@@ -625,7 +625,7 @@ def dataAccept (c : Conn) (f : Fr) (s : Stream) (body : Nat) : Conn × List Out 
 /-- The per-stream checks of the DATA branch (1374-1427); `s` already has
 `recvW` debited by the frame length. A stream-window overrun returns the
 connection credit.
-mirrors flare/http2/state.mojo#Connection.handle_frame sha=50db43d21518 at=ea1b9282 -/
+mirrors flare/http2/state.mojo#Connection.handle_frame sha=75ac9ea2cd82 at=0900da03 -/
 def dataBody (c : Conn) (f : Fr) (s : Stream) (body : Nat) : Conn × List Out :=
   if s.recvW < 0 then
     rstCloseX c f.sid eFLOW s (wu0If f.plen)
@@ -638,7 +638,7 @@ def dataBody (c : Conn) (f : Fr) (s : Stream) (body : Nat) : Conn × List Out :=
 
 /-- A closed / half-closed (remote) stream is tested before the client's
 headers-complete test; DATA before the response HEADERS is a stream error.
-mirrors flare/http2/state.mojo#Connection.handle_frame sha=50db43d21518 at=9f407b38 -/
+mirrors flare/http2/state.mojo#Connection.handle_frame sha=75ac9ea2cd82 at=0900da03 -/
 def dataH (c : Conn) (f : Fr) : Conn × List Out :=
   if f.sid ∈ c.resetByUs then (c, wu0If f.plen)
   else match get c f.sid with
@@ -652,18 +652,18 @@ def dataH (c : Conn) (f : Fr) : Conn × List Out :=
     | some body => dataBody c f { s with recvW := s.recvW - f.plen } body
 
 /-- The flood check of the RST_STREAM branch (1529-1540).
-mirrors flare/http2/state.mojo#Connection.handle_frame sha=50db43d21518 at=ea1b9282 -/
+mirrors flare/http2/state.mojo#Connection.handle_frame sha=75ac9ea2cd82 at=0900da03 -/
 def rstFlood (c : Conn) (f : Fr) : Conn × List Out :=
   if c.rstCount > RST_FLOOD && !c.goawaySent then
     ({ c with goawaySent := true }, [.goaway f.sid eCALM])
   else (c, [])
 
-/-- mirrors flare/http2/state.mojo#Connection.handle_frame sha=50db43d21518 at=ea1b9282 -/
+/-- mirrors flare/http2/state.mojo#Connection.handle_frame sha=75ac9ea2cd82 at=0900da03 -/
 def rstH (c : Conn) (f : Fr) : Conn × List Out :=
   rstFlood { closeIfKnown c f.sid with rstCount := (closeIfKnown c f.sid).rstCount + 1 } f
 
 /-- Per-type dispatch after the common checks (1128-1547).
-mirrors flare/http2/state.mojo#Connection.handle_frame sha=50db43d21518 at=ea1b9282 -/
+mirrors flare/http2/state.mojo#Connection.handle_frame sha=75ac9ea2cd82 at=0900da03 -/
 def dispatch (dec : Dec) (c : Conn) (f : Fr) : Res :=
   if f.ty = tSETTINGS then .ok (settingsH c f)
   else if f.ty = tPING then .ok (if f.f1 then (c, []) else (c, [.pingAck]))
@@ -675,7 +675,7 @@ def dispatch (dec : Dec) (c : Conn) (f : Fr) : Res :=
   else if f.ty = tRST then .ok (rstH c f)
   else .ok (c, [])
 
-/-- mirrors flare/http2/state.mojo#Connection.handle_frame sha=50db43d21518 at=ea1b9282 -/
+/-- mirrors flare/http2/state.mojo#Connection.handle_frame sha=75ac9ea2cd82 at=0900da03 -/
 def handle (dec : Dec) (c : Conn) (f : Fr) : Res :=
   if c.continuing ≠ 0 then .ok (contBranch dec c f)
   else match shapeCheck c f with
@@ -722,7 +722,7 @@ inductive Ev
 /-- Connection flow control layered on `handle`: account every DATA payload
 against `recvW`, refuse a frame that overruns it, and add back every
 connection-level WINDOW_UPDATE that is emitted.
-mirrors flare/http2/state.mojo#Connection.handle_frame+Connection._conn_window_update sha=2bc1b588b17a at=ea1b9282 -/
+mirrors flare/http2/state.mojo#Connection.handle_frame+Connection._conn_window_update sha=6ba0292a6e6e at=0900da03 -/
 def handleW (dec : Dec) (c : Conn) (f : Fr) : Res :=
   if reachesData c f && decide ((f.plen : Int) > c.recvW) then .ok (connErr c eFLOW)
   else match handle dec c f with
