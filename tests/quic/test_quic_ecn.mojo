@@ -66,7 +66,9 @@ def test_validator() raises:
     assert_false(ect1.ok, "ECT(1) we never sent")
 
 
-def _pair(ecn: Bool) raises -> Tuple[QuicListener, QuicClientConnection]:
+def _pair(
+    ecn: Bool, client_ecn: Bool = True
+) raises -> Tuple[QuicListener, QuicClientConnection]:
     var alpn = List[String]()
     alpn.append(String("h3"))
     var cfg = QuicServerConfig()
@@ -81,8 +83,8 @@ def _pair(ecn: Bool) raises -> Tuple[QuicListener, QuicClientConnection]:
         listener.local_addr(),
         RustlsQuicConnector(Path(_FIXDIR + "ca.pem").read_text(), alpn^),
         String("localhost"),
+        ecn=client_ecn,
     )
-    quic.sock.set_ecn(3)  # every client packet arrives marked CE
     return (listener^, quic^)
 
 
@@ -90,6 +92,7 @@ def test_server_reports_the_marks_it_receives() raises:
     var p = _pair(False)
     ref listener = p[0]
     ref quic = p[1]
+    quic.sock.set_ecn(3)  # every client packet arrives marked CE
     var reported = UInt64(0)
     for _ in range(60):
         _ = listener.tick(timeout_ms=10)
@@ -105,8 +108,33 @@ def test_server_reports_the_marks_it_receives() raises:
     quic.close()
 
 
-def test_marking_stops_when_the_peer_reports_no_counts() raises:
+def test_both_ends_validate_and_keep_marking() raises:
     var p = _pair(True)
+    ref listener = p[0]
+    ref quic = p[1]
+    for i in range(80):
+        _ = listener.tick(timeout_ms=10)
+        _ = listener.drain_all_egress()
+        _ = quic.poll(timeout_ms=10)
+        if quic.is_established() and i % 10 == 0:
+            quic.keepalive()  # ack-eliciting, so the server acks with counts
+        if (
+            listener.connection_count() > 0
+            and listener.connections[0].ecn_tx.counted
+            and quic._ecn_tx.counted
+        ):
+            break
+    assert_true(listener.connections[0].ecn_tx.counted, "server validated")
+    assert_true(listener.connections[0].ecn_mark)
+    assert_true(quic._ecn_tx.counted, "client validated")
+    assert_true(quic._ecn_mark)
+    assert_true(quic.ecn_rx[0] > 0, "the client counted ECT(0) marks")
+    listener.close()
+    quic.close()
+
+
+def test_marking_stops_when_the_peer_reports_no_counts() raises:
+    var p = _pair(True, client_ecn=False)
     ref listener = p[0]
     ref quic = p[1]
     var marked = False

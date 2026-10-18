@@ -74,12 +74,14 @@ from std.collections.span import Span
 
 from ..net.address import IpAddr, SocketAddr
 from ..udp import UdpSocket
+from ..udp.batch import BatchReceiver, udp_batch_supported
 from .crypto import QuicAead
 from .frame import (
     AckFrame,
     ConnectionCloseFrame,
     CryptoFrame,
     DatagramFrame,
+    EcnCounts,
     PathChallengeFrame,
     PathResponseFrame,
     RetireConnectionIdFrame,
@@ -102,6 +104,7 @@ from .frame import (
     encode_retire_connection_id,
     encode_stream,
 )
+from ._ecn import EcnValidator
 from ._pmtud import PmtuDiscovery, split_frames
 from .packet import (
     ConnectionId,
@@ -376,6 +379,17 @@ struct QuicClientConnection(Movable):
     :meth:`send_stream_early`), retained so :meth:`finish_early_data`
     can replay them at 1-RTT if the server rejects early data. Empty on
     a non-0-RTT connection."""
+    var _rx: Optional[BatchReceiver]
+    """recvmmsg receiver (Linux): it also delivers each datagram's ECN
+    codepoint."""
+    var _rx_ecn: Int
+    var ecn_rx: List[UInt64]
+    """ECT(0), ECT(1) and CE counts of 1-RTT packets received, reported
+    in ACK_ECN frames (RFC 9000 sec 13.4.1)."""
+    var _ecn_tx: EcnValidator
+    var _ecn_mark: Bool
+    """Sent packets are marked ECT(0), until the server's counts fail
+    validation or never come (RFC 9000 sec 13.4.2)."""
     var _pmtu: PmtuDiscovery
     """Datagram size validated on the path (RFC 9000 sec 14.3); sends
     fill to it, :attr:`max_udp_payload_size` is the receive size."""
@@ -472,6 +486,11 @@ struct QuicClientConnection(Movable):
         )
         self._peer_limits_known = False
         self._pmtu = PmtuDiscovery()
+        self._rx = None
+        self._rx_ecn = 0
+        self.ecn_rx = List[UInt64](length=3, fill=0)
+        self._ecn_tx = EcnValidator()
+        self._ecn_mark = False
         self._conn_send_total = UInt64(0)
         self._idle_local_ms = self.conn.idle_timeout_us // UInt64(1_000)
         self._idle_peer_ms = UInt64(0)
@@ -492,6 +511,7 @@ struct QuicClientConnection(Movable):
         enable_0rtt: Bool = False,
         max_datagram_frame_size: UInt64 = 0,
         token: List[UInt8] = List[UInt8](),
+        ecn: Bool = True,
     ) raises -> QuicClientConnection:
         """Open a client connection and emit the first Initial
         (ClientHello) packet without blocking on the response.
@@ -507,7 +527,8 @@ struct QuicClientConnection(Movable):
         that size (RFC 9221); they arrive in ``poll``'s
         ``events.datagrams``. ``token`` is an earlier connection's
         :meth:`address_token` for the same server, which spares a Retry
-        round trip (RFC 9000 sec 8.1.3).
+        round trip (RFC 9000 sec 8.1.3). ``ecn`` marks packets ECT(0) and
+        reports the server's marks (RFC 9000 sec 13.4; Linux).
         """
         var initial_dcid = _random_cid(8)
         var scid = _random_cid(8)
@@ -540,6 +561,12 @@ struct QuicClientConnection(Movable):
         )
         self.enable_0rtt = enable_0rtt
         self.retry_token = token.copy()
+        if ecn and udp_batch_supported():
+            self.sock.set_ecn(2)
+            self._ecn_mark = True
+            self._rx = BatchReceiver(
+                capacity=_POLL_BATCH, max_payload=max_udp_payload_size
+            )
         self._send_first_initial()
         if enable_0rtt:
             # On a resumed connection (same connector reused, server
@@ -565,6 +592,7 @@ struct QuicClientConnection(Movable):
         enable_0rtt: Bool = False,
         max_datagram_frame_size: UInt64 = 0,
         token: List[UInt8] = List[UInt8](),
+        ecn: Bool = True,
     ) raises -> QuicClientConnection:
         """Open a client connection and block until the QUIC + TLS
         handshake completes (or ``handshake_timeout_ms`` elapses).
@@ -587,6 +615,7 @@ struct QuicClientConnection(Movable):
             enable_0rtt,
             max_datagram_frame_size,
             token,
+            ecn,
         )
         var deadline = _monotonic_ms() + UInt64(handshake_timeout_ms)
         while not self.established:
@@ -629,9 +658,22 @@ struct QuicClientConnection(Movable):
         flight. Returns empty events on a clean timeout.
         """
         var events = empty_events()
+        self.sock.set_recv_timeout(timeout_ms)
+        if self._rx:
+            var n = self._rx.value().recv(self.sock.fd(), wait=True)
+            if n == 0:
+                self._drain_egress()
+                self._check_pto()
+                self._check_idle(events)
+                return events^
+            for i in range(n):
+                self._rx_ecn = self._rx.value().ecn(i)
+                self._process_datagram(self._rx.value().message(i), events)
+            self._rx_ecn = 0
+            self._after_receive(events)
+            return events^
         var buf = List[UInt8]()
         buf.resize(self.max_udp_payload_size, 0)
-        self.sock.set_recv_timeout(timeout_ms)
         var got: Int
         try:
             var pair = self.sock.recv_from(Span[UInt8, _](buf))
@@ -656,12 +698,35 @@ struct QuicClientConnection(Movable):
             if nb_got <= 0:
                 break
             self._process_datagram(Span[UInt8, _](buf[:nb_got]), events)
+        self._after_receive(events)
+        return events^
+
+    def _after_receive(mut self, mut events: ConnectionEvents) raises:
+        """Everything a poll does once a burst has been processed."""
         self._flush_migration(events)
         if len(events.acked_ranges) > 0:
+            var prev_largest = self._loss.largest_acked
+            var had_largest = self._loss.has_largest_acked
+            var now = _monotonic_ms()
             _ = self._loss.on_ack_ranges(
-                events.acked_ranges, _monotonic_ms(), self.tx_1rtt_pn
+                events.acked_ranges, now, self.tx_1rtt_pn
             )
             self._pmtu.on_acked(events.acked_ranges)
+            if self._ecn_mark:
+                # Only an ACK that moves the largest acknowledged is
+                # checked (RFC 9000 sec 13.4.2.1).
+                var advanced = (
+                    not had_largest or self._loss.largest_acked > prev_largest
+                )
+                if self._ecn_tx.on_ack(
+                    self._loss.last_newly_acked if advanced else 0,
+                    events.ack_ecn,
+                ):
+                    self._loss.cc.on_congestion_event(
+                        self._loss.last_acked_sent_ms, now
+                    )
+                if not self._ecn_tx.ok:
+                    self._stop_marking()
             self._retransmit_lost()
         self._drain_egress()
         self._check_pto()
@@ -672,7 +737,13 @@ struct QuicClientConnection(Movable):
                 self._apply_peer_transport_params()
                 self._check_peer_cids()
         self._check_idle(events)
-        return events^
+
+    def _stop_marking(mut self):
+        self._ecn_mark = False
+        try:
+            self.sock.set_ecn(0)
+        except:
+            pass
 
     def _check_idle(mut self, mut events: ConnectionEvents):
         """RFC 9000 sec 10.1: silently close the connection once it has
@@ -795,6 +866,14 @@ struct QuicClientConnection(Movable):
         # (RFC 8899 sec 4.3): fall back so the re-sends get through.
         if self._loss.pto_count >= 1:
             self._pmtu.on_black_hole(_monotonic_ms())
+        # Marked packets that never come back acknowledged with ECN counts
+        # may be dropped for the mark (RFC 9000 sec 13.4.2.1): stop.
+        if (
+            self._ecn_mark
+            and self._loss.pto_count >= 2
+            and not self._ecn_tx.counted
+        ):
+            self._stop_marking()
         self._resend(self._loss.fire_pto())
 
     def _resend(mut self, frames: List[UInt8]) raises:
@@ -1020,6 +1099,12 @@ struct QuicClientConnection(Movable):
                 _ack_record(self.rx_1rtt_ranges, dec[1])
                 if self.conn.ack_pending:
                     self.rx_1rtt_ack_pending = True
+                if self._rx_ecn != 0:
+                    # ECT(0) = 2, ECT(1) = 1, CE = 3 (RFC 9000 sec 13.4.1).
+                    self.ecn_rx[
+                        0 if self._rx_ecn
+                        == 2 else (1 if self._rx_ecn == 1 else 2)
+                    ] += 1
             except:
                 self._fail_on_state_error(events)
                 return
@@ -1266,6 +1351,9 @@ struct QuicClientConnection(Movable):
             var payload = List[UInt8]()
             if len(self.rx_1rtt_ranges) >= 2:
                 var ack = _ack_from_ranges(self.rx_1rtt_ranges, UInt64(0))
+                ref e = self.ecn_rx
+                if e[0] + e[1] + e[2] > 0:
+                    ack.ecn.append(EcnCounts(ect0=e[0], ect1=e[1], ce=e[2]))
                 encode_ack(ack, payload)
             var carries_crypto = len(self.tx_1rtt_crypto) > 0
             if carries_crypto:
@@ -1930,6 +2018,8 @@ struct QuicClientConnection(Movable):
         if rebind:
             var local = SocketAddr(IpAddr.parse("0.0.0.0"), UInt16(0))
             var newsock = UdpSocket.bind(local)
+            if self._rx:
+                newsock.set_ecn(2 if self._ecn_mark else 0)
             self.sock.close()
             self.sock = newsock^
         var probe = _random_cid(8)
