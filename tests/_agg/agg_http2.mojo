@@ -511,7 +511,7 @@ from test_h2_streaming_state import (
     test_h2_truncated_content_length_is_a_stream_error as test_h2_streaming_state__test_h2_truncated_content_length_is_a_stream_error,
 )
 from test_h2_streaming_state import (
-    test_h2_client_opens_large_receive_windows as test_h2_streaming_state__test_h2_client_opens_large_receive_windows,
+    test_h2_client_window_grows_with_the_measured_bdp as test_h2_streaming_state__test_h2_client_window_grows_with_the_measured_bdp,
 )
 from test_h2_streaming_state import (
     test_h2_streaming_credit_follows_body_drains as test_h2_streaming_state__test_h2_streaming_credit_follows_body_drains,
@@ -916,7 +916,7 @@ def main() raises:
         test_h2_streaming_state__test_h2_truncated_content_length_is_a_stream_error
     ]()
     suite.test[
-        test_h2_streaming_state__test_h2_client_opens_large_receive_windows
+        test_h2_streaming_state__test_h2_client_window_grows_with_the_measured_bdp
     ]()
     suite.test[
         test_h2_streaming_state__test_h2_streaming_credit_follows_body_drains

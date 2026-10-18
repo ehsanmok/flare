@@ -132,7 +132,9 @@ struct GrpcServerStream(Movable):
         var n = self._t.read(buf.unsafe_ptr(), _READ_BUF_SIZE)
         if n == 0:
             return False
-        self._conn.feed(Span[UInt8, _](unsafe_ptr=buf.unsafe_ptr(), length=n))
+        self._conn.receive(
+            Span[UInt8, _](unsafe_ptr=buf.unsafe_ptr(), length=n)
+        )
         var ack = self._conn.drain()
         if len(ack) > 0:
             self._t.write_all(Span[UInt8, _](ack))
@@ -265,7 +267,9 @@ struct GrpcBidiStream(Movable):
         var n = self._t.read(buf.unsafe_ptr(), _READ_BUF_SIZE)
         if n == 0:
             return False
-        self._conn.feed(Span[UInt8, _](unsafe_ptr=buf.unsafe_ptr(), length=n))
+        self._conn.receive(
+            Span[UInt8, _](unsafe_ptr=buf.unsafe_ptr(), length=n)
+        )
         var ack = self._conn.drain()
         if len(ack) > 0:
             self._t.write_all(Span[UInt8, _](ack))

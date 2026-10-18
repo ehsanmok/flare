@@ -190,7 +190,7 @@ def h2_roundtrip(
                 + String(sid)
             )
         # Name the slice's lifetime via ``buf`` itself.
-        link.conn.feed(Span[UInt8, _](unsafe_ptr=buf.unsafe_ptr(), length=n))
+        link.conn.receive(Span[UInt8, _](unsafe_ptr=buf.unsafe_ptr(), length=n))
         link.flush()
     var maybe_err = link.conn.stream_error(sid)
     if Bool(maybe_err):
@@ -329,7 +329,7 @@ def _send_h2c_via_upgrade(
         for i in range(hdr_end, len(raw)):
             leftover.append(raw[i])
         if len(leftover) > 0:
-            h2_conn.feed(Span[UInt8, _](leftover))
+            h2_conn.receive(Span[UInt8, _](leftover))
             var ack_bytes = h2_conn.drain()
             if len(ack_bytes) > 0:
                 stream.write_all(Span[UInt8, _](ack_bytes))
@@ -356,7 +356,7 @@ def _send_h2c_via_upgrade(
         # over ``buf``'s backing storage so the lifetime is the
         # named ``buf`` (which lives across the whole loop), not
         # the slice's anonymous temporary.
-        h2_conn.feed(Span[UInt8, _](unsafe_ptr=buf.unsafe_ptr(), length=n))
+        h2_conn.receive(Span[UInt8, _](unsafe_ptr=buf.unsafe_ptr(), length=n))
         var ack_bytes = h2_conn.drain()
         if len(ack_bytes) > 0:
             stream.write_all(Span[UInt8, _](ack_bytes))

@@ -172,7 +172,7 @@ struct Http2Download(Movable):
         var n = self._t.read(Pointer(to=buf[0]), _H2_READ_BUF)
         if n <= 0:
             return False
-        self._conn.feed(Span[UInt8, _](buf)[0:n])
+        self._conn.receive(Span[UInt8, _](buf)[0:n])
         self._flush()
         return True
 

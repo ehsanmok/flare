@@ -74,6 +74,7 @@ plumbing) lives here.
 # methods across files, so the file sits over the 1000-line Pass-B cap.
 # Allowlisted in tests/tools/check_reactor_size.sh until then.
 from std.collections import Dict, Optional
+from std.time import perf_counter_ns
 
 from .frame import (
     Frame,
@@ -88,7 +89,7 @@ from .hpack import HpackHeader
 from .state import Connection, Http2Error, Http2ErrorCode, Stream, StreamState
 
 from ._client_types import (
-    CLIENT_CONNECTION_WINDOW,
+    BDP_WINDOW_MAX,
     Http2ClientConfig,
     Http2Response,
     _h2_response_to_http,
@@ -97,6 +98,10 @@ from ._client_types import (
 
 
 # ── Http2ClientConnection ────────────────────────────────────────────────
+
+
+def _bdp_ping_payload() -> List[UInt8]:
+    return List[UInt8]("flarebdp".as_bytes())
 
 
 struct Http2ClientConnection(Defaultable, Movable):
@@ -184,6 +189,18 @@ struct Http2ClientConnection(Defaultable, Movable):
     (RFC 9113 §5.1.1: odd integers, monotonically increasing).
     Starts at 1 and increments by 2 on every
     :meth:`next_stream_id` call."""
+    var _bdp_window: Int
+    """Current stream and connection receive window. Grown from PING
+    round-trip samples of the bytes in flight (the bandwidth-delay
+    product), as hyper does, up to :data:`BDP_WINDOW_MAX`."""
+    var _bdp_bytes: Int
+    var _bdp_sent_ns: Int
+    """When the outstanding BDP PING went out; 0 when none is."""
+    var _bdp_next_ns: Int
+    var _bdp_hdr: List[UInt8]
+    """Partial frame header :meth:`receive` is reading."""
+    var _bdp_skip: Int
+    """Payload bytes left of the frame :meth:`receive` is in."""
 
     var _stream_errors: Dict[Int, Int]
     """Stream-id -> peer-supplied RST_STREAM error code
@@ -211,6 +228,12 @@ struct Http2ClientConnection(Defaultable, Movable):
         self.config = Http2ClientConfig()
         self.conn.initial_window_size = self.config.initial_window_size
         self._next_sid = 1
+        self._bdp_window = 65535
+        self._bdp_bytes = 0
+        self._bdp_sent_ns = 0
+        self._bdp_next_ns = 0
+        self._bdp_hdr = List[UInt8]()
+        self._bdp_skip = 0
         self._stream_errors = Dict[Int, Int]()
         self._pending_body = Dict[Int, List[UInt8]]()
         self._pending_body_fin = Dict[Int, Bool]()
@@ -363,15 +386,16 @@ struct Http2ClientConnection(Defaultable, Movable):
         var bytes = encode_frame(f^)
         for i in range(len(bytes)):
             self.outbox.append(bytes[i])
-        # Open the connection-level receive window past its 65535 start.
-        self.outbox.extend(
-            encode_frame(
-                Connection._window_update_frame(
-                    0, CLIENT_CONNECTION_WINDOW - 65535
+        # The connection window starts at 65535 (RFC 9113 sec 6.9.2);
+        # open it to match a larger configured stream window.
+        self._bdp_window = max(65535, self.config.initial_window_size)
+        if self._bdp_window > 65535:
+            self.outbox.extend(
+                encode_frame(
+                    Connection._window_update_frame(0, self._bdp_window - 65535)
                 )
             )
-        )
-        self.conn.recv_window = CLIENT_CONNECTION_WINDOW
+            self.conn.recv_window = self._bdp_window
         self.greeted = True
 
     def _append_setting(self, mut buf: List[UInt8], id: Int, value: Int):
@@ -528,6 +552,88 @@ struct Http2ClientConnection(Defaultable, Movable):
         # more upload bytes on newly granted credit.
         if window_updated and not self.conn.goaway_sent:
             self._pump_all_pending()
+
+    def receive(mut self, data: Span[UInt8, _]) raises:
+        """:meth:`feed` that also grows the receive windows with the
+        measured bandwidth-delay product: drivers call this."""
+        var i = 0
+        while i < len(data):
+            if self._bdp_skip > 0:
+                var k = min(self._bdp_skip, len(data) - i)
+                i += k
+                self._bdp_skip -= k
+                continue
+            self._bdp_hdr.append(data[i])
+            i += 1
+            if len(self._bdp_hdr) < 9:
+                continue
+            ref h = self._bdp_hdr
+            var n = Int(h[0]) << 16 | Int(h[1]) << 8 | Int(h[2])
+            if h[3] == UInt8(FrameType.DATA().value):
+                self._bdp_on_data(n)
+            elif h[3] == UInt8(FrameType.PING().value) and (h[4] & 1) != 0:
+                self._bdp_on_ack()
+            self._bdp_skip = n
+            self._bdp_hdr.clear()
+        self.feed(data)
+
+    def _bdp_on_data(mut self, n: Int):
+        """Count DATA toward the outstanding sample, or start one with a
+        PING when the window can still grow."""
+        if self._bdp_sent_ns != 0:
+            self._bdp_bytes += n
+            return
+        if (
+            n == 0
+            or self._bdp_window >= BDP_WINDOW_MAX
+            or self.conn.goaway_sent
+        ):
+            return
+        var now = perf_counter_ns()
+        if now < self._bdp_next_ns:
+            return
+        var ping = Frame()
+        ping.header.type = FrameType.PING()
+        ping.payload = _bdp_ping_payload()
+        ping.header.length = 8
+        self.outbox.extend(encode_frame(ping^))
+        self._bdp_sent_ns = now
+        self._bdp_bytes = n
+
+    def _bdp_on_ack(mut self) raises:
+        """The PING came back (the client sends no other PING): when the
+        round trip's DATA filled two thirds of the window, grow both
+        windows to twice it."""
+        if self._bdp_sent_ns == 0:
+            return
+        self._bdp_sent_ns = 0
+        if self._bdp_bytes * 3 < self._bdp_window * 2:
+            self._bdp_next_ns = perf_counter_ns() + 1_000_000_000
+            return
+        var w = min(self._bdp_bytes * 2, BDP_WINDOW_MAX)
+        if w <= self._bdp_window:
+            return
+        var delta = w - self._bdp_window
+        var p = List[UInt8]()
+        self._append_setting(p, 0x4, w)
+        var f = Frame()
+        f.header.type = FrameType.SETTINGS()
+        f.header.length = len(p)
+        f.payload = p^
+        self.outbox.extend(encode_frame(f^))
+        self.conn.initial_window_size = w
+        var sids = List[Int]()
+        for entry in self.conn.streams.items():
+            sids.append(entry[0])
+        for sid in sids:
+            var st = self.conn.streams.pop(sid)
+            st.recv_window += delta
+            self.conn.streams[sid] = st^
+        self.outbox.extend(
+            encode_frame(Connection._window_update_frame(0, delta))
+        )
+        self.conn.recv_window += delta
+        self._bdp_window = w
 
     # ── Stream id allocation ─────────────────────────────────────────────
 

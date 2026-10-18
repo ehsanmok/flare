@@ -490,7 +490,9 @@ struct WsAutoClient(Movable):
             # ``Span`` directly over ``scratch``'s backing storage so
             # the lifetime is the named local, not the slice's
             # anonymous temporary.
-            h2.feed(Span[UInt8, _](unsafe_ptr=scratch.unsafe_ptr(), length=n))
+            h2.receive(
+                Span[UInt8, _](unsafe_ptr=scratch.unsafe_ptr(), length=n)
+            )
             var auto_out = h2.drain()
             if len(auto_out) > 0:
                 tls.write_all(Span[UInt8, _](auto_out))
@@ -538,7 +540,9 @@ struct WsAutoClient(Movable):
             # explicit ptr+length Span form to keep the lifetime
             # tied to the named ``scratch`` rather than a slice
             # temporary that the heap may reuse.
-            h2.feed(Span[UInt8, _](unsafe_ptr=scratch.unsafe_ptr(), length=n))
+            h2.receive(
+                Span[UInt8, _](unsafe_ptr=scratch.unsafe_ptr(), length=n)
+            )
             var auto_out = h2.drain()
             if len(auto_out) > 0:
                 tls.write_all(Span[UInt8, _](auto_out))

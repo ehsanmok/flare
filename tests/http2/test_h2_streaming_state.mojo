@@ -142,35 +142,84 @@ def _h2_credit(wire: List[UInt8], sid: Int) raises -> Int:
     return credit
 
 
-def test_h2_client_opens_large_receive_windows() raises:
-    """The preface advertises a 4 MiB stream window and opens the
-    connection window to 16 MiB; the 64 KiB defaults held a download
-    to 64 KiB per round trip."""
-    var conn = Http2ClientConnection()
-    var out = conn.drain()
-    var frames = List[UInt8](Span[UInt8, _](out)[24:])  # past the preface
-    assert_equal(_h2_credit(frames, 0), (16 << 20) - 65535)
-    assert_equal(conn.conn.initial_window_size, 4 << 20)
-    assert_equal(conn.conn.recv_window, 16 << 20)
-    var found = False
-    var pos = 24
-    while pos + 9 <= len(out):
-        var f = parse_frame(Span[UInt8, _](out)[pos:]).value().copy()
-        if f.header.type.value == FrameType.SETTINGS().value:
-            var i = 0
-            while i + 6 <= len(f.payload):
-                var id = Int(f.payload[i]) << 8 | Int(f.payload[i + 1])
-                var v = (
-                    Int(f.payload[i + 2]) << 24
-                    | Int(f.payload[i + 3]) << 16
-                    | Int(f.payload[i + 4]) << 8
-                    | Int(f.payload[i + 5])
-                )
-                if id == 4:
-                    found = v == (4 << 20)
-                i += 6
+def _frames(wire: List[UInt8], ty: FrameType) raises -> List[Frame]:
+    var out = List[Frame]()
+    var pos = 0
+    while pos + 9 <= len(wire):
+        var f = parse_frame(Span(wire)[pos:]).value().copy()
         pos += 9 + f.header.length
-    assert_true(found, "SETTINGS_INITIAL_WINDOW_SIZE is not 4 MiB")
+        if f.header.type.value == ty.value:
+            out.append(f^)
+    return out^
+
+
+def _bdp_data(mut conn: Http2ClientConnection, size: Int) raises:
+    var f = Frame()
+    f.header.type = FrameType.DATA()
+    f.header.stream_id = 1
+    f.payload = List[UInt8](length=size, fill=97)
+    f.header.length = size
+    conn.receive(Span(encode_frame(f^)))
+
+
+def _bdp_round(
+    mut conn: Http2ClientConnection, sizes: List[Int]
+) raises -> List[UInt8]:
+    """Deliver ``sizes`` as DATA in one round trip of the client's BDP
+    PING, then its ACK; return what the client sends."""
+    _bdp_data(conn, sizes[0])
+    var pings = _frames(conn.drain(), FrameType.PING())
+    assert_equal(len(pings), 1, "the first DATA starts a sample")
+    for i in range(1, len(sizes)):
+        _bdp_data(conn, sizes[i])
+    var ack = pings[0].copy()
+    ack.header.flags = FrameFlags(FrameFlags.ACK())
+    conn.receive(Span(encode_frame(ack^)))
+    return conn.drain()
+
+
+def test_h2_client_window_grows_with_the_measured_bdp() raises:
+    """The client opens 4 MiB windows and grows them (stream and
+    connection together) when a PING round trip carried at least two
+    thirds of the window, as hyper's estimator does; shown from a 64 KiB
+    start."""
+    var dflt = Http2ClientConnection()
+    var preface = dflt.drain()
+    assert_equal(
+        _h2_credit(List[UInt8](Span[UInt8, _](preface)[24:]), 0),
+        (4 << 20) - 65535,
+    )
+    assert_equal(dflt.conn.initial_window_size, 4 << 20)
+    var conn = _small_window_client()
+    _ = conn.drain()
+    var empty = List[UInt8]()
+    conn.send_request(
+        1, "GET", "https", "example.test", "/", List[HpackHeader](), Span(empty)
+    )
+    var encoder = HpackEncoder()
+    _h2_head(conn, encoder, [HpackHeader(":status", "200")])
+    _ = conn.drain()
+    var before = conn.conn.streams[1].recv_window
+    var out = _bdp_round(conn, [16384, 16384, 16384])
+    var settings = _frames(out, FrameType.SETTINGS())
+    assert_equal(len(settings), 1)
+    assert_equal(Int(settings[0].payload[1]), 4)  # INITIAL_WINDOW_SIZE
+    assert_equal(conn.conn.initial_window_size, 2 * 49152)
+    var grown = False
+    for f in _frames(out, FrameType.WINDOW_UPDATE()):
+        if f.header.stream_id == 0:
+            var inc = (
+                Int(f.payload[1]) << 16
+                | Int(f.payload[2]) << 8
+                | Int(f.payload[3])
+            )
+            grown = grown or inc == 2 * 49152 - 65535
+    assert_true(grown, "the connection window grows by the same amount")
+    assert_equal(conn.conn.streams[1].recv_window, before + 2 * 49152 - 65535)
+    # A round trip that fills less than two thirds leaves it alone.
+    out = _bdp_round(conn, [1024])
+    assert_equal(len(_frames(out, FrameType.SETTINGS())), 0)
+    assert_equal(conn.conn.initial_window_size, 2 * 49152)
 
 
 def _small_window_client() raises -> Http2ClientConnection:

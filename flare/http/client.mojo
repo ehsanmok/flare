@@ -1956,7 +1956,7 @@ struct HttpClient(Movable):
                 raise NetworkError(
                     "h2 streaming request: peer closed before response headers"
                 )
-            conn.feed(Span[UInt8, _](buf)[0:n])
+            conn.receive(Span[UInt8, _](buf)[0:n])
             var pending = conn.drain()
             if len(pending) > 0:
                 t.write_all(Span[UInt8, _](pending))
