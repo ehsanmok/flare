@@ -1624,7 +1624,7 @@ struct QuicListener(Movable):
             h3_code = h3.connection_error_code
             h3_reason = h3.connection_error_reason
         if h3_code != 0:
-            self._close_for(slot, h3_code, h3_reason)
+            self._close_for(slot, h3_code, h3_reason, application=True)
 
     def _grant_stream_credit(mut self, slot: Int, sid: Int, end: UInt64):
         """Keep a client stream's receive limit a window ahead of what
@@ -2474,16 +2474,27 @@ struct QuicListener(Movable):
                 "frame rejected",
             )
 
-    def _close_for(mut self, slot: Int, code: UInt64, reason: String):
-        """Close ``slot`` with transport error ``code``: the connection
-        error is signalled with a 1-RTT CONNECTION_CLOSE (RFC 9000
-        sec 11.1) and the slot enters the closing state (sec 10.2) --
-        see :meth:`_enter_closing`."""
+    def _close_for(
+        mut self,
+        slot: Int,
+        code: UInt64,
+        reason: String,
+        application: Bool = False,
+    ):
+        """Close ``slot`` with error ``code``: the connection error is
+        signalled with a 1-RTT CONNECTION_CLOSE (RFC 9000 sec 11.1) and
+        the slot enters the closing state (sec 10.2) -- see
+        :meth:`_enter_closing`. ``application`` selects the
+        application-level frame (0x1d) that HTTP/3 and QPACK codes travel
+        in (RFC 9114 sec 8); their values overlap the transport CRYPTO
+        range, so they were sent as transport errors."""
         connection_close(self.connections[slot].conn, code, reason)
         self.connections[slot].alive = False
-        self._enter_closing(slot, code)
+        self._enter_closing(slot, code, application)
 
-    def _enter_closing(mut self, slot: Int, code: UInt64):
+    def _enter_closing(
+        mut self, slot: Int, code: UInt64, application: Bool = False
+    ):
         """Send CONNECTION_CLOSE(``code``) and keep ``slot`` routable for
         three PTOs (capped at :data:`_MAX_CLOSING_MS`), answering each
         packet it receives meanwhile (RFC 9000 sec 10.2, 10.2.1).
@@ -2498,7 +2509,9 @@ struct QuicListener(Movable):
         try:
             var plaintext = List[UInt8]()
             encode_connection_close(
-                ConnectionCloseFrame(False, code, UInt64(0), List[UInt8]()),
+                ConnectionCloseFrame(
+                    application, code, UInt64(0), List[UInt8]()
+                ),
                 plaintext,
             )
             # Enough ciphertext for the header-protection sample.

@@ -124,6 +124,25 @@ def test_close_reaches_the_client_as_connection_close() raises:
     client.close()
 
 
+def test_http3_errors_close_with_the_application_frame() raises:
+    """HTTP/3 and QPACK codes travel in the application CONNECTION_CLOSE
+    (0x1d, RFC 9114 sec 8); they went out as transport closes (0x1c),
+    where 0x100-0x1ff means a TLS alert."""
+    var server = _bind()
+    var connector = RustlsQuicConnector(
+        Path(_FIXDIR + "ca.pem").read_text(), _alpn()
+    )
+    var client = _established(server, connector)
+    var slot = _live_slot(server)
+    server._close_for(slot, UInt64(0x100), String(""), application=True)
+    assert_equal(Int(server.connections[slot].close_frame[0]), 0x1D)
+    var ev = client.poll(timeout_ms=200)
+    assert_true(ev.connection_closed)
+    assert_equal(Int(ev.error_code), 0x100)
+    server.close()
+    client.close()
+
+
 def test_closing_state_answers_packets_and_lasts_three_ptos() raises:
     """RFC 9000 sec 10.2.1: in the closing state an endpoint answers
     incoming packets with CONNECTION_CLOSE; sec 10.2: the state lasts at
@@ -234,7 +253,8 @@ def test_close_before_1rtt_keys_sends_nothing_and_does_not_linger() raises:
 
 def main() raises:
     test_close_reaches_the_client_as_connection_close()
+    test_http3_errors_close_with_the_application_frame()
     test_closing_state_answers_packets_and_lasts_three_ptos()
     test_connection_close_answers_are_rate_limited()
     test_close_before_1rtt_keys_sends_nothing_and_does_not_linger()
-    print("test_quic_server_close: 4 passed")
+    print("test_quic_server_close: 5 passed")
