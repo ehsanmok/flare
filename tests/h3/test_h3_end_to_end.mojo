@@ -639,6 +639,21 @@ def test_undecodable_field_section_closes_the_connection() raises:
     assert_equal(len(listener.take_http3_completed_streams(other)), 1)
 
 
+def test_http3_config_reaches_each_connection() raises:
+    """``QuicServerConfig.http3`` builds every accepted connection's H3
+    driver; the drivers were always built with the defaults."""
+    var cfg = QuicServerConfig()
+    cfg.host = String("127.0.0.1")
+    cfg.port = UInt16(0)
+    cfg.http3.max_field_section_size = UInt64(1234)
+    var listener = QuicListener.bind(cfg^)
+    var slot = _seed_slot(listener)
+    assert_equal(
+        listener.http3_connections[slot].config.max_field_section_size,
+        UInt64(1234),
+    )
+
+
 def main() raises:
     test_get_request_dispatches_through_handler()
     test_post_request_body_echo()
@@ -651,4 +666,5 @@ def main() raises:
     test_buffered_response_not_registered_as_stream()
     test_stream_limits_and_flow_control_are_enforced()
     test_undecodable_field_section_closes_the_connection()
-    print("test_h3_end_to_end: 11 passed")
+    test_http3_config_reaches_each_connection()
+    print("test_h3_end_to_end: 12 passed")

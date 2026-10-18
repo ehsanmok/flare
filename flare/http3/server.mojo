@@ -223,9 +223,10 @@ struct Http3Config(Copyable, Defaultable):
     0 (paired with qpack_max_table_capacity=0)."""
 
     var enable_connect_protocol: Bool
-    """RFC 9220 §3 -- whether to advertise CONNECT-Protocol
-    support for WebSocket / WebTransport bootstrapping. Default
-    True since the rest of flare supports CONNECT semantics."""
+    """RFC 9220 §3 -- whether to advertise SETTINGS_ENABLE_CONNECT_PROTOCOL
+    and accept extended CONNECT (``:protocol``) requests. Default False:
+    advertising it obliges the server to accept such requests (RFC 8441
+    sec 3), and it used to be advertised while every one was refused."""
 
     var goaway_threshold_streams: UInt64
     """Local soft cap on the stream count above which the server
@@ -237,7 +238,7 @@ struct Http3Config(Copyable, Defaultable):
         self.max_field_section_size = UInt64(65536)
         self.qpack_max_table_capacity = UInt64(0)
         self.qpack_blocked_streams = UInt64(0)
-        self.enable_connect_protocol = True
+        self.enable_connect_protocol = False
         self.goaway_threshold_streams = UInt64((1 << 63) - 1)
 
 
@@ -980,7 +981,9 @@ struct Http3Connection(Copyable, Defaultable):
         # validate_request_fields. A request with no pseudo-headers used
         # to be served as GET /. Malformed raises; the dispatcher
         # answers 400.
-        if not validate_request_fields(state.headers, False, False):
+        if not validate_request_fields(
+            state.headers, False, self.config.enable_connect_protocol
+        ):
             state.request_taken = True
             raise Error(
                 "Http3Connection.take_request: malformed request on stream "

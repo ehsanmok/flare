@@ -2021,7 +2021,9 @@ struct QuicListener(Movable):
             self.pending_migration_tx[slot] = List[UInt8]()
             self.rx_stream_bytes[slot] = UInt64(0)
             self.rx_bidi_stream_count[slot] = UInt64(0)
-            self.http3_connections[slot] = Http3Connection()
+            self.http3_connections[slot] = Http3Connection.with_config(
+                self.config.http3
+            )
             self.loss[slot] = LossRecovery()
             self.loss_init[slot] = LossRecovery()
             self.loss_hs[slot] = LossRecovery()
@@ -2040,7 +2042,9 @@ struct QuicListener(Movable):
             self.pending_migration_tx.append(List[UInt8]())
             self.rx_stream_bytes.append(UInt64(0))
             self.rx_bidi_stream_count.append(UInt64(0))
-            self.http3_connections.append(Http3Connection())
+            self.http3_connections.append(
+                Http3Connection.with_config(self.config.http3)
+            )
             self.loss.append(LossRecovery())
             self.loss_init.append(LossRecovery())
             self.loss_hs.append(LossRecovery())

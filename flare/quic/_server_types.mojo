@@ -50,6 +50,7 @@ from .transport_params import (
     empty_transport_parameters,
     encode_transport_parameters,
 )
+from ..http3.server import Http3Config
 from ..tls.rustls_quic import RustlsQuicConfig
 
 
@@ -197,6 +198,10 @@ struct QuicServerConfig(Copyable, Defaultable):
     short enough to bound replay. Only consulted when
     :attr:`require_address_validation` is set."""
 
+    var http3: Http3Config
+    """HTTP/3 settings every accepted connection's driver is built with
+    (field-section limit, QPACK capacity, extended CONNECT, GOAWAY
+    threshold). They were always the defaults."""
     var key_update_interval: UInt64
     """1-RTT packets sent under one key before the server starts a key
     update (RFC 9001 sec 6). Default 2^23, the AES-GCM confidentiality
@@ -230,6 +235,7 @@ struct QuicServerConfig(Copyable, Defaultable):
         self.retry_token_max_age_ms = UInt64(10_000)
         self.max_pto_count = 10
         self.key_update_interval = UInt64(1) << 23
+        self.http3 = Http3Config()
 
 
 # -- Per-connection driver ----------------------------------------------

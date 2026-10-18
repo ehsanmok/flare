@@ -363,6 +363,29 @@ def test_buffered_response_carries_its_trailers() raises:
     assert_equal(tr[0].value, "0")
 
 
+def test_extended_connect_follows_the_config() raises:
+    """``:protocol`` is refused unless extended CONNECT is enabled, the
+    same setting that advertises it (RFC 9220 sec 3)."""
+    var hs = List[QpackHeader]()
+    hs.append(QpackHeader(":method", "CONNECT"))
+    hs.append(QpackHeader(":protocol", "websocket"))
+    hs.append(QpackHeader(":scheme", "https"))
+    hs.append(QpackHeader(":authority", "example.com"))
+    hs.append(QpackHeader(":path", "/chat"))
+    for enabled in range(2):
+        var cfg = Http3Config()
+        cfg.enable_connect_protocol = enabled == 1
+        var c = Http3Connection.with_config(cfg)
+        c.feed_stream_chunk(0, _encode_headers_frame(hs))
+        c.signal_end_of_stream(0)
+        var accepted = True
+        try:
+            _ = c.take_request(0)
+        except:
+            accepted = False
+        assert_equal(accepted, enabled == 1)
+
+
 def test_stream_frames_are_reassembled_by_offset() raises:
     """STREAM data was fed to the reader in arrival order, whatever its
     offset, so a reordered request was parsed from scrambled bytes and
@@ -482,6 +505,7 @@ def main() raises:
     test_request_without_pseudo_headers_is_refused()
     test_response_drops_connection_specific_fields()
     test_buffered_response_carries_its_trailers()
+    test_extended_connect_follows_the_config()
     test_stream_frames_are_reassembled_by_offset()
     test_retransmit_after_the_response_does_not_rerun_the_request()
     test_undecodable_field_section_is_a_connection_error()
@@ -489,4 +513,4 @@ def main() raises:
     test_h2_reserved_request_frame_is_a_connection_error()
     test_a_decodable_request_is_not_a_connection_error()
     test_h3_error_codes_are_named_in_error_messages()
-    print("test_h3_dispatch: 21 passed")
+    print("test_h3_dispatch: 22 passed")

@@ -29,12 +29,13 @@ def test_stream_type_codepoints() raises:
 def test_config_defaults() raises:
     """:class:`Http3Config` defaults match the production
     posture: 64 KiB max field section, static-only QPACK,
-    CONNECT-Protocol advertised, no GOAWAY soft cap."""
+    extended CONNECT off (advertising it obliges accepting it), no
+    GOAWAY soft cap."""
     var cfg = Http3Config()
     assert_equal(cfg.max_field_section_size, UInt64(65536))
     assert_equal(cfg.qpack_max_table_capacity, UInt64(0))
     assert_equal(cfg.qpack_blocked_streams, UInt64(0))
-    assert_true(cfg.enable_connect_protocol)
+    assert_false(cfg.enable_connect_protocol)
     assert_equal(cfg.goaway_threshold_streams, UInt64((1 << 63) - 1))
 
 
@@ -57,10 +58,10 @@ def test_with_config_overrides() raises:
     fresh-construction values."""
     var cfg = Http3Config()
     cfg.max_field_section_size = UInt64(1024)
-    cfg.enable_connect_protocol = False
+    cfg.enable_connect_protocol = True
     var c = Http3Connection.with_config(cfg)
     assert_equal(c.config.max_field_section_size, UInt64(1024))
-    assert_false(c.config.enable_connect_protocol)
+    assert_true(c.config.enable_connect_protocol)
     assert_false(c.peer_settings_received)
 
 
