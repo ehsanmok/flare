@@ -76,8 +76,11 @@ def encode_request_headers(
     path: String,
     headers: List[QpackHeader],
     mut out: List[UInt8],
+    protocol: String = "",
 ) raises:
     """Append the HEADERS-frame bytes for an HTTP/3 request to ``out``.
+    A non-empty ``protocol`` adds ``:protocol`` (an extended CONNECT,
+    RFC 9220).
 
     Emits the four request pseudo-headers ``:method`` / ``:scheme``
     / ``:authority`` / ``:path`` in canonical order (RFC 9114
@@ -96,6 +99,8 @@ def encode_request_headers(
         raise Error("h3 request writer: empty :path")
     var emit = List[QpackHeader]()
     emit.append(QpackHeader(":method", method.copy()))
+    if len(protocol.as_bytes()) > 0:
+        emit.append(QpackHeader(":protocol", protocol.copy()))
     emit.append(QpackHeader(":scheme", scheme.copy()))
     if len(authority.as_bytes()) > 0:
         emit.append(QpackHeader(":authority", authority.copy()))

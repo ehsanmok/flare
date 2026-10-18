@@ -72,6 +72,7 @@ from .frame import (
 from .client import WsClient, WsHandshakeError, WsMessage
 from .server import WsHandler, WsServer, WsConnection
 from .client_h2 import WsOverH2Stream, bootstrap_ws_over_h2
+from .client_h3 import WsOverH3Stream
 from .server_h2 import WsOverH2ServerStream, WsH2Handler
 from .server_h3 import WsOverH3ServerStream, WsH3Handler
 from .auto_client import (

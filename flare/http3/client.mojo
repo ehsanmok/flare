@@ -50,7 +50,12 @@ from flare.quic.state import ConnectionEvents
 from flare.quic.varint import decode_varint
 from flare.runtime.pool import PoolableConn
 
-from .frame import H3_FRAME_TYPE_GOAWAY
+from .frame import (
+    H3_FRAME_TYPE_GOAWAY,
+    H3_FRAME_TYPE_SETTINGS,
+    H3_SETTINGS_ENABLE_CONNECT_PROTOCOL,
+    decode_http3_settings,
+)
 
 from .request_writer import (
     encode_client_control_stream,
@@ -254,6 +259,10 @@ struct Http3ClientConnection(Movable, PoolableConn):
     """The server's GOAWAY stream id (RFC 9114 sec 5.2): requests on
     streams at or above it will not be processed. ``UInt64.MAX`` until
     a GOAWAY arrives."""
+    var peer_settings: Bool
+    """The server's SETTINGS frame has arrived."""
+    var peer_connect_protocol: Bool
+    """The server enables extended CONNECT (RFC 9220 sec 3)."""
 
     def __init__(
         out self,
@@ -271,6 +280,8 @@ struct Http3ClientConnection(Movable, PoolableConn):
         self._ctrl_pending = Dict[UInt64, List[UInt8]]()
         self._ctrl_typed = False
         self.goaway_id = UInt64.MAX
+        self.peer_settings = False
+        self.peer_connect_protocol = False
 
     def _send_stream(
         mut self,
@@ -419,8 +430,10 @@ struct Http3ClientConnection(Movable, PoolableConn):
         path: String,
         headers: List[QpackHeader],
         timeout_ms: Int = 30000,
+        protocol: String = "",
     ) raises -> UInt64:
-        """Send request headers without FIN and register its response reader."""
+        """Send request headers without FIN and register its response
+        reader; a non-empty ``protocol`` makes it an extended CONNECT."""
         self.open_streams()
         if self.goaway_id != UInt64.MAX:
             raise Error("h3 client: server sent GOAWAY; open a new connection")
@@ -430,7 +443,9 @@ struct Http3ClientConnection(Movable, PoolableConn):
             Http3ResponseReader(self.max_field_section_size, method),
         )
         var wire = List[UInt8]()
-        encode_request_headers(method, scheme, authority, path, headers, wire)
+        encode_request_headers(
+            method, scheme, authority, path, headers, wire, protocol
+        )
         self._send_request_wire(sid, wire, timeout_ms)
         return sid
 
@@ -737,10 +752,8 @@ struct Http3ClientConnection(Movable, PoolableConn):
         return self.quic.is_established() and self.goaway_id == UInt64.MAX
 
     def _scan_control(mut self, events: ConnectionEvents) raises:
-        """Follow the server's control stream (stream 3) for GOAWAY.
-        Chunks are taken in offset order; frames other than GOAWAY are
-        skipped (SETTINGS arrives first and needs nothing here, since
-        the client sends static-only QPACK)."""
+        """Follow the server's control stream (stream 3) for its
+        SETTINGS and GOAWAY. Chunks are taken in offset order."""
         for i in range(len(events.stream_chunks)):
             ref ch = events.stream_chunks[i]
             if ch.stream_id != UInt64(3):
@@ -774,6 +787,11 @@ struct Http3ClientConnection(Movable, PoolableConn):
             var flen = hdr[2]
             if start + flen > len(view):
                 break
+            if ftype == H3_FRAME_TYPE_SETTINGS and not self.peer_settings:
+                self.peer_settings = True
+                for st in decode_http3_settings(view[start : start + flen]):
+                    if st.identifier == H3_SETTINGS_ENABLE_CONNECT_PROTOCOL:
+                        self.peer_connect_protocol = st.value == 1
             if ftype == H3_FRAME_TYPE_GOAWAY and flen > 0:
                 var id = decode_varint(view[start : start + flen])
                 if id.value < self.goaway_id:

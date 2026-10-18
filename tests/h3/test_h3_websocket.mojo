@@ -25,6 +25,7 @@ from flare.testing import kill_forked_server
 from flare.tls import RustlsQuicConnector
 from flare.utils import exit, fork
 from flare.ws import WsFrame, WsOpcode
+from flare.ws.client_h3 import WsOverH3Stream
 from flare.ws.server_h3 import WsH3Handler, WsOverH3ServerStream
 
 
@@ -223,6 +224,36 @@ def test_websocket_over_h3_on_several_workers() raises:
                 echoed += 1
     kill_forked_server(s[0])
     assert_equal(echoed, 8)
+
+
+def test_the_client_side_echoes_and_closes() raises:
+    var s = _serve()
+    var connector = RustlsQuicConnector(
+        Path(_FIXDIR + "ca.pem").read_text(), _alpn()
+    )
+    var quic = QuicClientConnection.connect(
+        s[1], connector, String("localhost")
+    )
+    var h3 = Http3ClientConnection(quic^)
+    var ws = WsOverH3Stream.open(h3, "localhost", "/chat")
+    ws.send_frame(h3, WsFrame.text("hey"))
+    var echo = String("")
+    for _ in range(100):
+        var f = ws.try_pull_frame(h3, 20)
+        if f:
+            echo = f.value().text_payload()
+            break
+    ws.close(h3)
+    var closed = False
+    for _ in range(100):
+        var f = ws.try_pull_frame(h3, 20)
+        if f and f.value().opcode == WsOpcode.CLOSE:
+            closed = True
+            break
+    h3.close()
+    kill_forked_server(s[0])
+    assert_equal(echo, "hey")
+    assert_true(closed, "the server answered the CLOSE")
 
 
 def test_another_protocol_gets_501() raises:
