@@ -491,6 +491,7 @@ struct QuicClientConnection(Movable):
         aead_choice: Int = QuicAead.AES_128_GCM,
         enable_0rtt: Bool = False,
         max_datagram_frame_size: UInt64 = 0,
+        token: List[UInt8] = List[UInt8](),
     ) raises -> QuicClientConnection:
         """Open a client connection and emit the first Initial
         (ClientHello) packet without blocking on the response.
@@ -504,7 +505,9 @@ struct QuicClientConnection(Movable):
 
         ``max_datagram_frame_size`` > 0 accepts DATAGRAM frames up to
         that size (RFC 9221); they arrive in ``poll``'s
-        ``events.datagrams``.
+        ``events.datagrams``. ``token`` is an earlier connection's
+        :meth:`address_token` for the same server, which spares a Retry
+        round trip (RFC 9000 sec 8.1.3).
         """
         var initial_dcid = _random_cid(8)
         var scid = _random_cid(8)
@@ -536,6 +539,7 @@ struct QuicClientConnection(Movable):
             max_udp_payload_size,
         )
         self.enable_0rtt = enable_0rtt
+        self.retry_token = token.copy()
         self._send_first_initial()
         if enable_0rtt:
             # On a resumed connection (same connector reused, server
@@ -560,6 +564,7 @@ struct QuicClientConnection(Movable):
         aead_choice: Int = QuicAead.AES_128_GCM,
         enable_0rtt: Bool = False,
         max_datagram_frame_size: UInt64 = 0,
+        token: List[UInt8] = List[UInt8](),
     ) raises -> QuicClientConnection:
         """Open a client connection and block until the QUIC + TLS
         handshake completes (or ``handshake_timeout_ms`` elapses).
@@ -581,6 +586,7 @@ struct QuicClientConnection(Movable):
             aead_choice,
             enable_0rtt,
             max_datagram_frame_size,
+            token,
         )
         var deadline = _monotonic_ms() + UInt64(handshake_timeout_ms)
         while not self.established:
@@ -1954,6 +1960,11 @@ struct QuicClientConnection(Movable):
         out under the next key generation and the other phase bit."""
         _ = self.session.key_update()
         self.key_phase = not self.key_phase
+
+    def address_token(self) -> List[UInt8]:
+        """The server's latest NEW_TOKEN token (empty if none), to pass as
+        ``token`` when connecting to it again (RFC 9000 sec 8.1.3)."""
+        return self.conn.new_token.copy()
 
     def is_established(self) -> Bool:
         """Whether the QUIC + TLS handshake has completed and 1-RTT

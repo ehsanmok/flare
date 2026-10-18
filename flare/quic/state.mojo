@@ -337,6 +337,9 @@ struct Connection(Copyable):
     ``initial_max_stream_data_bidi_local`` (RFC 9000 sec 18.2). The
     server holds it at 0 until it has read the client's transport
     parameters, then raises it and every open stream's limit."""
+    var new_token: List[UInt8]
+    """The latest NEW_TOKEN token the server sent (client side, RFC 9000
+    sec 8.1.3), for the Initial of a later connection to it."""
     var max_datagram_recv: UInt64
     """The ``max_datagram_frame_size`` we advertised (RFC 9221 sec 3); 0
     when we did not, and then any DATAGRAM frame is a PROTOCOL_VIOLATION,
@@ -384,6 +387,7 @@ def new_connection(
         next_local_bidi=UInt64(1) if is_server else UInt64(0),
         next_local_uni=UInt64(3) if is_server else UInt64(2),
         peer_initial_max_stream_data=initial_max_data,
+        new_token=List[UInt8](),
         max_datagram_recv=UInt64(0),
     )
 
@@ -824,7 +828,16 @@ struct _ConnFrameHandler(FrameHandler):
         self._events()[].crypto_frames.append(c.copy())
 
     def on_new_token(mut self, t: NewTokenFrame) raises:
+        # RFC 9000 sec 19.7: only a server issues tokens.
+        if self._conn()[].is_server:
+            connection_close(
+                self._conn()[],
+                QUIC_PROTOCOL_VIOLATION,
+                "NEW_TOKEN received by a server",
+            )
+            raise Error("QUIC PROTOCOL_VIOLATION: NEW_TOKEN sent to a server")
         _arrive(self._conn()[], self.now_us, ack_eliciting=True)
+        self._conn()[].new_token = t.token.copy()
 
     def on_stream(mut self, sf: StreamFrame) raises:
         if self._conn()[].check_stream_ids:

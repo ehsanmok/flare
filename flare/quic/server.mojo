@@ -65,6 +65,7 @@ from .frame import (
     MaxStreamDataFrame,
     MaxStreamsFrame,
     NewConnectionIdFrame,
+    NewTokenFrame,
     PathResponseFrame,
     ResetStreamFrame,
     StreamDataBlockedFrame,
@@ -81,6 +82,7 @@ from .frame import (
     encode_max_stream_data,
     encode_max_streams,
     encode_new_connection_id,
+    encode_new_token,
     encode_path_response,
     encode_ping,
     encode_reset_stream,
@@ -170,9 +172,12 @@ from ..tls._rustls_quic_ffi import (
 )
 from .packet import encode_short_header, packet_number_length
 from .retry import (
+    NEW_TOKEN_VERSION,
     encode_retry_packet,
     encode_version_negotiation,
+    mint_new_token,
     mint_retry_token,
+    validate_new_token,
     validate_retry_token,
 )
 from ._server_0rtt import (
@@ -210,6 +215,15 @@ from ._server_types import (
     _encode_server_transport_params,
     cid_to_hex,
 )
+
+
+comptime _NEW_TOKEN_MAX_AGE_MS: UInt64 = 24 * 3600 * 1000
+"""How long a NEW_TOKEN token is honoured."""
+
+
+def _ip_bytes(peer: SocketAddr) -> List[UInt8]:
+    """The client IP a NEW_TOKEN token is bound to (not the port)."""
+    return List[UInt8](String(peer.ip).as_bytes())
 
 
 comptime _MAX_CLOSING_MS: UInt64 = 10_000
@@ -560,7 +574,13 @@ struct QuicListener(Movable):
         # ticks at a day's uptime) and fired every armed timer at once.
         self.timer_wheel = TimerWheel(now_ms=_monotonic_ms())
         self._reset_key = _random_bytes(32)
+        # Workers share the token key, so a NEW_TOKEN token one issued is
+        # honoured by the worker a later connection lands on.
         self._retry_key = _random_bytes(32)
+        if len(config.cid_route_key) > 0:
+            self._retry_key = hmac_sha256(
+                config.cid_route_key, List[UInt8]("flare token key".as_bytes())
+            )
         self._socket = sock^
         self._local_addr = addr
         self._stopping = False
@@ -2108,6 +2128,11 @@ struct QuicListener(Movable):
         if lh.packet_type == PACKET_TYPE_INITIAL:
             var retry_odcid = Optional[ConnectionId]()
             if self.config.require_address_validation:
+                if self._new_token_ok(lh, datagram, peer):
+                    # Skips the Retry round trip only: the address stays
+                    # unvalidated (3x limit) until the handshake proves
+                    # it, so a replayed token amplifies nothing.
+                    return self._accept_initial(lh, peer)
                 retry_odcid = self._retry_gate(lh, datagram, peer)
                 if not retry_odcid:
                     # A Retry was issued, or the token was absent/invalid:
@@ -2157,6 +2182,23 @@ struct QuicListener(Movable):
         except:
             pass
 
+    def _new_token_ok(
+        self, lh: LongHeader, datagram: Span[UInt8, _], peer: SocketAddr
+    ) -> Bool:
+        """Whether the Initial carries a NEW_TOKEN token this listener
+        issued to the client's IP address (RFC 9000 sec 8.1.3)."""
+        try:
+            var extras = parse_initial_extras(datagram, lh.payload_offset)
+            return validate_new_token(
+                self._retry_key,
+                extras.token,
+                _ip_bytes(peer),
+                _monotonic_ms(),
+                _NEW_TOKEN_MAX_AGE_MS,
+            )
+        except:
+            return False
+
     def _retry_gate(
         mut self, lh: LongHeader, datagram: Span[UInt8, _], peer: SocketAddr
     ) raises -> Optional[ConnectionId]:
@@ -2182,7 +2224,9 @@ struct QuicListener(Movable):
             extras = parse_initial_extras(datagram, lh.payload_offset)
         except:
             return None  # malformed Initial -> drop
-        if len(extras.token) == 0:
+        # No token, or a NEW_TOKEN one that did not validate: answer with
+        # a Retry (sec 8.1.3).
+        if len(extras.token) == 0 or extras.token[0] == NEW_TOKEN_VERSION:
             try:
                 var token = mint_retry_token(
                     self._retry_key, addr_bytes, lh.dcid, now
@@ -2968,6 +3012,19 @@ struct QuicListener(Movable):
                 )
                 for _ in range(1, Int(want)):
                     self._issue_new_connection_id(slot, plaintext)
+                # A token the client may present next time to skip the
+                # Retry round trip (RFC 9000 sec 8.1.3).
+                if self.config.require_address_validation:
+                    encode_new_token(
+                        NewTokenFrame(
+                            mint_new_token(
+                                self._retry_key,
+                                _ip_bytes(self.peer_addrs[slot]),
+                                _monotonic_ms(),
+                            )
+                        ),
+                        plaintext,
+                    )
                 # RFC 9114 sec 6.2.1: each side MUST initiate its control
                 # stream at the beginning of the connection and send
                 # SETTINGS first. The server's is stream 3, the first

@@ -10,6 +10,7 @@ Properties checked:
 1. ``validate_retry_token`` never panics on arbitrary token bytes; it
    returns either ``None`` or a recovered DCID of length <= 20.
 2. ``verify_retry_integrity`` never panics on arbitrary packet bytes.
+3. ``validate_new_token`` never panics, and accepts no forged token.
 
 Run:
     pixi run --environment fuzz fuzz-quic-retry
@@ -18,7 +19,11 @@ Run:
 from mozz import FuzzConfig, fuzz
 
 from flare.quic.packet import ConnectionId
-from flare.quic.retry import validate_retry_token, verify_retry_integrity
+from flare.quic.retry import (
+    validate_new_token,
+    validate_retry_token,
+    verify_retry_integrity,
+)
 
 
 def _bytes(s: StringLiteral) -> List[UInt8]:
@@ -59,6 +64,11 @@ def target(data: List[UInt8]) raises:
     odcid_bytes.append(UInt8(0xBB))
     var odcid = ConnectionId(bytes=odcid_bytes^)
     var _ok = verify_retry_integrity(data, odcid)
+
+    _assert(
+        not validate_new_token(key, data, addr, UInt64(1000), UInt64(10000)),
+        "a forged NEW_TOKEN token validated",
+    )
 
 
 def main() raises:

@@ -202,6 +202,68 @@ def validate_retry_token(
     return Optional[ConnectionId](odcid^)
 
 
+# ── NEW_TOKEN token (RFC 9000 §8.1.3) ──────────────────────────────────────
+
+comptime NEW_TOKEN_VERSION: UInt8 = 0x02
+"""First byte of a NEW_TOKEN token; a Retry token starts with
+``_RETRY_TOKEN_VERSION``, so the server tells them apart (sec 8.1.3)."""
+
+
+def _new_token_mac_message(
+    client_ip: List[UInt8], issued_ms: UInt64
+) -> List[UInt8]:
+    var msg = List[UInt8]()
+    msg.append(NEW_TOKEN_VERSION)
+    msg.append(UInt8(len(client_ip)))
+    msg.extend(Span[UInt8, _](client_ip))
+    msg.extend(Span[UInt8, _](_u64_be(issued_ms)))
+    return msg^
+
+
+def mint_new_token(
+    server_key: List[UInt8], client_ip: List[UInt8], issued_ms: UInt64
+) raises -> List[UInt8]:
+    """A token for a NEW_TOKEN frame, bound to the client's IP address
+    (not its port, which a later connection may not share):
+    ``version(1) || issued_ms(8) || HMAC-SHA256(key, mac_message)``."""
+    var token = List[UInt8]()
+    token.append(NEW_TOKEN_VERSION)
+    token.extend(Span[UInt8, _](_u64_be(issued_ms)))
+    token.extend(
+        Span[UInt8, _](
+            hmac_sha256(
+                server_key, _new_token_mac_message(client_ip, issued_ms)
+            )
+        )
+    )
+    return token^
+
+
+def validate_new_token(
+    server_key: List[UInt8],
+    token: List[UInt8],
+    client_ip: List[UInt8],
+    now_ms: UInt64,
+    max_age_ms: UInt64,
+) raises -> Bool:
+    """Whether ``token`` is a NEW_TOKEN token this server issued to
+    ``client_ip`` within ``max_age_ms``. A malformed one is just
+    rejected."""
+    if (
+        len(token) != 1 + 8 + _RETRY_TOKEN_MAC_LEN
+        or token[0] != NEW_TOKEN_VERSION
+    ):
+        return False
+    var issued_ms = _read_u64_be(Span[UInt8, _](token), 1)
+    if now_ms < issued_ms or now_ms - issued_ms > max_age_ms:
+        return False
+    return hmac_sha256_verify(
+        server_key,
+        _new_token_mac_message(client_ip, issued_ms),
+        List[UInt8](Span[UInt8, _](token)[9:]),
+    )
+
+
 # ── Retry packet (RFC 9000 §17.2.5 + RFC 9001 §5.8) ─────────────────────────
 
 
