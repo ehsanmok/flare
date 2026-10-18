@@ -48,7 +48,12 @@ from std.os import getenv
 
 from ..net.address import IpAddr, SocketAddr
 from ..udp import UdpSocket
-from ..udp.batch import BatchReceiver, udp_batch_supported
+from ..udp.batch import (
+    BatchReceiver,
+    UdpBatchUnsupported,
+    send_segmented,
+    udp_batch_supported,
+)
 from flare.crypto.hmac import hmac_sha256
 
 from .crypto import QuicAead
@@ -232,6 +237,13 @@ comptime _MAX_ISSUED_CIDS: UInt64 = 4
 and rotation without a routing entry per CID the peer would buffer."""
 comptime _H3_REQUEST_CANCELLED: UInt64 = 0x10C
 """RFC 9114 sec 8.1: the RESET_STREAM code for an abandoned response."""
+comptime _GSO_MIN_DATAGRAMS: Int = 8
+"""Stream bytes a drain must have queued, in datagrams, before it batches
+its egress for GSO (see :attr:`QuicListener._gso_active`)."""
+comptime _GSO_MAX_SEGMENTS: Int = 16
+"""Most datagrams handed to the kernel in one GSO ``sendmsg``: enough to
+cut the per-datagram syscall cost, small enough to keep each burst short
+(quinn-udp sends at most 10 by default; the kernel limit is 64)."""
 comptime _H3_NO_ERROR: UInt64 = 0x100
 """RFC 9114 sec 8.1: the code for a graceful close."""
 
@@ -461,6 +473,22 @@ struct QuicListener(Movable):
     """Reusable ``recvmmsg`` vector that drains a burst of inbound
     datagrams in one syscall (RFC-agnostic kernel optimization).
     Sized to :data:`_RX_BATCH` x ``max_udp_payload_size``."""
+    var _gso_ok: Bool
+    """Latched: UDP GSO (``UDP_SEGMENT``) egress is usable. Flipped off
+    for good the first time the kernel or NIC refuses a segmented send,
+    after which every datagram goes out alone (the quinn-udp fallback).
+    ``FLARE_QUIC_NO_GSO=1`` disables it."""
+    var _gso_active: Bool
+    """GSO batching is on for the drain in progress: set only when the
+    drain has at least :data:`_GSO_MIN_DATAGRAMS` datagrams of stream
+    data to send. Holding a few small responses back until the end of the
+    drain delays the client more than the saved syscalls are worth."""
+    var _gso_buf: List[UInt8]
+    """Datagrams queued for one segmented send: equal-size segments,
+    the last one possibly shorter."""
+    var _gso_seg: Int
+    var _gso_count: Int
+    var _gso_peer: SocketAddr
     var _rx_batch_ok: Bool
     """Latched capability flag: ``True`` while the batched
     ``recvmmsg`` drain is usable. Flipped to ``False`` permanently on
@@ -522,6 +550,14 @@ struct QuicListener(Movable):
         # can force the per-datagram path (e.g. to A/B the syscall-
         # batching win, or work around an exotic kernel) by setting
         # FLARE_QUIC_NO_BATCH=1.
+        self._gso_ok = udp_batch_supported() and (
+            getenv("FLARE_QUIC_NO_GSO", "0") != "1"
+        )
+        self._gso_active = False
+        self._gso_buf = List[UInt8]()
+        self._gso_seg = 0
+        self._gso_count = 0
+        self._gso_peer = addr
         self._rx_batch_ok = udp_batch_supported() and (
             getenv("FLARE_QUIC_NO_BATCH", "0") != "1"
         )
@@ -2760,8 +2796,13 @@ struct QuicListener(Movable):
         # goes out on a later drain, after the peer's ACKs and grants.
         comptime _STREAM_HDR_MAX = 24
         var sids = List[Int]()
+        var queued = 0
         for entry in self.connections[slot].h3_tx.items():
             sids.append(entry.key)
+            queued += entry.value.pending()
+        self._gso_active = (
+            self._gso_ok and queued >= _GSO_MIN_DATAGRAMS * budget
+        )
         var cc_open = True
         # Whether the datagram being filled already passed the
         # congestion-window check; reset on every flush.
@@ -2862,8 +2903,10 @@ struct QuicListener(Movable):
                 slot, plaintext^, ack_eliciting=True
             )
             if len(dg) > 0:
-                _ = self.send_to(Span[UInt8, _](dg), peer)
+                self._queue_datagram(dg, peer)
                 emitted = True
+        self._flush_gso()
+        self._gso_active = False
         return emitted
 
     def _reclaim_http3_stream(mut self, slot: Int, sid: Int) raises:
@@ -2889,11 +2932,65 @@ struct QuicListener(Movable):
             return False
         var frames = plaintext^
         plaintext = List[UInt8](capacity=budget + 64)
+        if self._gso_active:
+            # PADDING to the full budget makes every mid-drain datagram
+            # the same size, which a GSO send requires (RFC 9000 sec
+            # 19.1: PADDING frames are zero bytes).
+            frames.resize(budget, UInt8(0))
         var dg = self._build_1rtt_response(slot, frames^, ack_eliciting=True)
         if len(dg) == 0:
             return False
-        _ = self.send_to(Span[UInt8, _](dg), peer)
+        self._queue_datagram(dg, peer)
         return True
+
+    def _queue_datagram(mut self, dg: List[UInt8], peer: SocketAddr) raises:
+        """Send ``dg`` now, or queue it for one GSO send with the
+        datagrams around it (same peer, equal size, a shorter one only
+        last). :meth:`_flush_gso` sends what is queued."""
+        if not self._gso_active:
+            _ = self.send_to(Span[UInt8, _](dg), peer)
+            return
+        if self._gso_count > 0 and (
+            self._gso_peer != peer
+            or len(dg) > self._gso_seg
+            or len(self._gso_buf) % self._gso_seg != 0
+            or self._gso_count >= _GSO_MAX_SEGMENTS
+        ):
+            self._flush_gso()
+        if self._gso_count == 0:
+            self._gso_seg = len(dg)
+            self._gso_peer = peer
+        self._gso_buf.extend(Span[UInt8, _](dg))
+        self._gso_count += 1
+
+    def _flush_gso(mut self) raises:
+        """Send the queued datagrams: one ``sendmsg`` with a
+        ``UDP_SEGMENT`` size when there are several. If the kernel or NIC
+        refuses (EINVAL / EIO / ENOPROTOOPT), GSO is turned off for good
+        and the batch goes out datagram by datagram."""
+        if self._gso_count == 0:
+            return
+        var peer = self._gso_peer
+        var buf = List[UInt8]()
+        swap(buf, self._gso_buf)
+        if self._gso_count == 1:
+            _ = self.send_to(Span[UInt8, _](buf), peer)
+        else:
+            try:
+                _ = send_segmented(
+                    self._socket.fd(), peer, Span[UInt8, _](buf), self._gso_seg
+                )
+            except:
+                self._gso_ok = False
+                self._gso_active = False
+                var pos = 0
+                while pos < len(buf):
+                    var end = min(pos + self._gso_seg, len(buf))
+                    _ = self.send_to(Span[UInt8, _](buf)[pos:end], peer)
+                    pos = end
+        swap(buf, self._gso_buf)
+        self._gso_buf.clear()
+        self._gso_count = 0
 
     def _take_lh_ack(mut self, slot: Int, space: Int) raises -> List[UInt8]:
         """The ACK frame owed for long-header ``space`` (0 Initial,
