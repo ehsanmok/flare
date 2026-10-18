@@ -102,6 +102,7 @@ from .frame import (
     encode_retire_connection_id,
     encode_stream,
 )
+from ._pmtud import PmtuDiscovery
 from .packet import (
     ConnectionId,
     LongHeader,
@@ -197,6 +198,7 @@ def _encode_client_transport_params(
     max_idle_timeout_ms: UInt64,
     initial_max_data: UInt64,
     max_datagram_frame_size: UInt64 = 0,
+    max_udp_payload_size: Int = 1452,
 ) raises -> List[UInt8]:
     """Encode the client's QUIC transport parameters (RFC 9000
     §18) for the ClientHello ``quic_transport_parameters``
@@ -219,6 +221,7 @@ def _encode_client_transport_params(
     tp.initial_max_streams_bidi = Optional(_CLIENT_MAX_STREAMS)
     tp.initial_max_streams_uni = Optional(_CLIENT_MAX_STREAMS)
     tp.active_connection_id_limit = Optional(UInt64(2))
+    tp.max_udp_payload_size = Optional(UInt64(max_udp_payload_size))
     if max_datagram_frame_size > 0:
         tp.max_datagram_frame_size = Optional(max_datagram_frame_size)
     return encode_transport_parameters(tp)
@@ -373,6 +376,9 @@ struct QuicClientConnection(Movable):
     :meth:`send_stream_early`), retained so :meth:`finish_early_data`
     can replay them at 1-RTT if the server rejects early data. Empty on
     a non-0-RTT connection."""
+    var _pmtu: PmtuDiscovery
+    """Datagram size validated on the path (RFC 9000 sec 14.3); sends
+    fill to it, :attr:`max_udp_payload_size` is the receive size."""
     var _peer_limits: PeerSendLimits
     """The server's send-constraining transport parameters, decoded once
     the handshake completes (see :meth:`_apply_peer_transport_params`).
@@ -465,6 +471,7 @@ struct QuicClientConnection(Movable):
             max_streams_uni=UInt64(0),
         )
         self._peer_limits_known = False
+        self._pmtu = PmtuDiscovery()
         self._conn_send_total = UInt64(0)
         self._idle_local_ms = self.conn.idle_timeout_us // UInt64(1_000)
         self._idle_peer_ms = UInt64(0)
@@ -502,7 +509,11 @@ struct QuicClientConnection(Movable):
         var initial_dcid = _random_cid(8)
         var scid = _random_cid(8)
         var tp = _encode_client_transport_params(
-            scid, max_idle_timeout_ms, initial_max_data, max_datagram_frame_size
+            scid,
+            max_idle_timeout_ms,
+            initial_max_data,
+            max_datagram_frame_size,
+            max_udp_payload_size,
         )
         var session = connector.connect(server_name, tp)
         # Bind an ephemeral local UDP port; the peer address is
@@ -644,9 +655,11 @@ struct QuicClientConnection(Movable):
             _ = self._loss.on_ack_ranges(
                 events.acked_ranges, _monotonic_ms(), self.tx_1rtt_pn
             )
+            self._pmtu.on_acked(events.acked_ranges)
             self._retransmit_lost()
         self._drain_egress()
         self._check_pto()
+        self._probe_pmtu()
         if self.session.is_handshake_complete() and self.have_1rtt_keys:
             self.established = True
             if not self._peer_limits_known:
@@ -689,10 +702,9 @@ struct QuicClientConnection(Movable):
         rustls after the handshake flight) and apply its send-side
         limits, once.
 
-        Clamps :attr:`max_udp_payload_size` down to the peer's advertised
-        receive maximum so we never emit a datagram the server would drop
-        (RFC 9000 §18.2 -- the decoder already enforces the 1200-byte
-        floor). The flow-control limits land in :attr:`_peer_limits` for
+        Caps path-MTU probing at the peer's advertised receive maximum so
+        we never emit a datagram the server would drop (RFC 9000 §18.2 --
+        the decoder already enforces the 1200-byte floor). The flow-control limits land in :attr:`_peer_limits` for
         :meth:`send_stream` to honour. Best-effort: a missing / malformed
         extension (or the NULL-session test path) leaves the generous
         local defaults in place."""
@@ -710,9 +722,12 @@ struct QuicClientConnection(Movable):
             if Bool(tp.max_idle_timeout):
                 self._idle_peer_ms = tp.max_idle_timeout.value()
             self.conn.max_data_send = self._peer_limits.max_data
-            var peer_mtu = Int(self._peer_limits.max_udp_payload_size)
-            if peer_mtu < self.max_udp_payload_size:
-                self.max_udp_payload_size = peer_mtu
+            self._pmtu.set_ceiling(
+                min(
+                    self.max_udp_payload_size,
+                    Int(self._peer_limits.max_udp_payload_size),
+                )
+            )
         except:
             # Malformed peer params: keep defaults rather than fail the
             # established connection (the handshake already succeeded).
@@ -806,6 +821,25 @@ struct QuicClientConnection(Movable):
                 payload,
             )
             self._send_padded_1rtt(payload^)
+
+    def _probe_pmtu(mut self) raises:
+        """Send the next path-MTU probe, if one is due: a PING padded to
+        the size under test, outside loss recovery (RFC 9002 sec 14.4)."""
+        if not self.established or not self._peer_limits_known:
+            return
+        var now = _monotonic_ms()
+        self._pmtu.check_lost(now, self._loss.pto_interval_ms())
+        var size = self._pmtu.want_probe()
+        if size == 0:
+            return
+        var frames = List[UInt8](capacity=size)
+        encode_ping(frames)
+        frames.resize(size - (1 + len(self.dcid.bytes) + 4 + 16), UInt8(0))
+        var pn = self.tx_1rtt_pn
+        var dg = self._build_1rtt(frames^, pn_length=4)
+        if len(dg) > 0:
+            self._pmtu.on_probe_sent(pn, len(dg), now)
+            _ = self.sock.send_to(Span[UInt8, _](dg), self.peer)
 
     def _send_padded_1rtt(
         mut self, var payload: List[UInt8], ack_eliciting: Bool = False
@@ -1524,7 +1558,7 @@ struct QuicClientConnection(Movable):
         leaving room for the short header (1 + dcid + up to a 4-byte
         packet number), the STREAM frame header (type + three
         varints, <= 25 bytes), and the 16-byte AEAD tag."""
-        return self.max_udp_payload_size - len(self.dcid.bytes) - 46
+        return self._pmtu.current - len(self.dcid.bytes) - 46
 
     def send_stream(
         mut self, stream_id: UInt64, data: List[UInt8], fin: Bool

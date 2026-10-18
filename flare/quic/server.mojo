@@ -81,6 +81,7 @@ from .frame import (
     encode_max_streams,
     encode_new_connection_id,
     encode_path_response,
+    encode_ping,
     encode_reset_stream,
     encode_stream_data_blocked,
 )
@@ -1624,6 +1625,12 @@ struct QuicListener(Movable):
             self.http3_connections[slot].peer_quic_datagram = (
                 self.connections[slot].peer_max_datagram > 0
             )
+            self.connections[slot].pmtu.set_ceiling(
+                min(
+                    Int(self.config.max_udp_payload_size),
+                    Int(tp.max_udp_payload_size.or_else(65527)),
+                )
+            )
             var msd = tp.initial_max_stream_data_bidi_local.or_else(UInt64(0))
             c.peer_initial_max_stream_data = msd
             var open_sids = List[UInt64]()
@@ -2880,8 +2887,10 @@ struct QuicListener(Movable):
             return False
         # Plaintext budget: leave headroom for the short header
         # (1 + dcid) + packet number + AEAD tag so the protected
-        # datagram stays within max_udp_payload_size.
-        var budget = Int(self.config.max_udp_payload_size) - 64
+        # datagram stays within the validated path size (RFC 9000
+        # sec 14): it used to fill max_udp_payload_size from the first
+        # packet, which a path with a smaller MTU black-holed.
+        var budget = self.connections[slot].pmtu.current - 64
         if budget < 64:
             budget = 64
         var plaintext = List[UInt8](capacity=budget + 64)
@@ -3146,7 +3155,33 @@ struct QuicListener(Movable):
                 emitted = True
         self._flush_gso()
         self._gso_active = False
+        if self.handshake_done_sent[slot] and self._probe_pmtu(slot, peer):
+            emitted = True
         return emitted
+
+    def _probe_pmtu(mut self, slot: Int, peer: SocketAddr) raises -> Bool:
+        """Send the next path-MTU probe, if one is due (RFC 9000 sec
+        14.3): a PING padded to the size under test, outside loss
+        recovery so its loss is not read as congestion (RFC 9002 sec
+        14.4)."""
+        ref pm = self.connections[slot].pmtu
+        var now = _monotonic_ms()
+        pm.check_lost(now, self.loss[slot].pto_interval_ms())
+        var size = pm.want_probe()
+        if size == 0:
+            return False
+        var frames = List[UInt8](capacity=size)
+        encode_ping(frames)
+        # Short header + 4-byte packet number + AEAD tag.
+        var overhead = 1 + len(self.connections[slot].peer_cid.bytes) + 4 + 16
+        frames.resize(size - overhead, UInt8(0))
+        var pn = self.connections[slot].tx_1rtt_pn
+        var dg = self._build_1rtt_response(slot, frames^, pn_length=4)
+        if len(dg) == 0:
+            return False
+        self.connections[slot].pmtu.on_probe_sent(pn, len(dg), now)
+        _ = self.send_to(Span[UInt8, _](dg), peer)
+        return True
 
     def send_datagram(mut self, slot: Int, payload: Span[UInt8, _]) -> Bool:
         """Queue ``payload`` as an unreliable DATAGRAM (RFC 9221) for the
@@ -3160,7 +3195,7 @@ struct QuicListener(Movable):
         var frame = n + 9  # type + length varint, at most
         if (
             UInt64(frame) > c.peer_max_datagram
-            or frame > Int(self.config.max_udp_payload_size) - 64
+            or frame > c.pmtu.current - 64
             or c.dg_tx_bytes + n > MAX_QUEUED_DATAGRAM_BYTES
         ):
             return False
@@ -4170,6 +4205,7 @@ struct QuicListener(Movable):
         _ = self.loss[slot].on_ack_ranges(
             events.acked_ranges, _monotonic_ms(), next_pn
         )
+        self.connections[slot].pmtu.on_acked(events.acked_ranges)
         self._retransmit_lost(slot)
         self._rearm_pto_timer(slot)
 

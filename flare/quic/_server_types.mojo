@@ -37,6 +37,7 @@ from .protection import (
     unprotect_handshake_packet,
     unprotect_initial_packet,
 )
+from ._pmtud import PmtuDiscovery
 from .state import (
     CONN_STATE_CLOSED,
     Connection,
@@ -516,6 +517,8 @@ struct QuicConnection(Copyable):
     """DATAGRAM payloads queued for the next drain."""
     var dg_rx_bytes: Int
     var dg_tx_bytes: Int
+    var pmtu: PmtuDiscovery
+    """Datagram size validated on this path (RFC 9000 sec 14.3)."""
     var serial: UInt64
     """Distinguishes this connection from others given the same slot."""
     var fc_tunnel_credited: Dict[Int, UInt64]
@@ -549,6 +552,7 @@ struct QuicConnection(Copyable):
         self.dg_rx_bytes = 0
         self.dg_tx_bytes = 0
         self.serial = 0
+        self.pmtu = PmtuDiscovery()
         self.fc_tunnel_credited = Dict[Int, UInt64]()
         self.closing = False
         self.closing_rx = 0
@@ -927,6 +931,7 @@ def _encode_server_transport_params(
     tp.initial_max_streams_bidi = Optional(config.initial_max_streams_bidi)
     tp.initial_max_streams_uni = Optional(config.initial_max_streams_uni)
     tp.active_connection_id_limit = Optional(UInt64(2))
+    tp.max_udp_payload_size = Optional(config.max_udp_payload_size)
     if config.max_datagram_frame_size > 0:
         tp.max_datagram_frame_size = Optional(config.max_datagram_frame_size)
     return encode_transport_parameters(tp)
