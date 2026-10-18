@@ -52,6 +52,62 @@ from .transport_params import (
 from ..tls.rustls_quic import RustlsQuicConfig
 
 
+# -- Per-stream response egress ---------------------------------------
+
+
+struct _StreamTx(Copyable):
+    """Response bytes queued on one request stream, and how far they
+    have gone out.
+
+    ``buf[pos:]`` is queued but not yet framed; its first byte sits at
+    QUIC stream offset ``off``. The 1-RTT drain frames no further than
+    the peer's MAX_STREAM_DATA / MAX_DATA and the congestion window
+    allow, so the rest waits here for credit (RFC 9000 sec 4.1,
+    RFC 9002 sec 7). ``done`` means nothing more will be queued: the
+    FIN goes out with the last byte.
+
+    A streaming response also keeps its chunk source, boxed in a
+    ``Pool[ChunkSourceBox]`` at ``src_addr`` (0 once freed), and its
+    pre-encoded trailers, queued after the last chunk.
+    """
+
+    var buf: List[UInt8]
+    var pos: Int
+    var off: UInt64
+    var done: Bool
+    var src_addr: Int
+    var trailer_bytes: List[UInt8]
+    var blocked_at: UInt64
+    """Stream limit we last sent STREAM_DATA_BLOCKED for, so a stalled
+    stream reports each limit once."""
+
+    def __init__(out self):
+        self.buf = List[UInt8]()
+        self.pos = 0
+        self.off = 0
+        self.done = False
+        self.src_addr = 0
+        self.trailer_bytes = List[UInt8]()
+        self.blocked_at = UInt64.MAX
+
+    def pending(self) -> Int:
+        """Queued bytes not yet framed."""
+        return len(self.buf) - self.pos
+
+    def consume(mut self, n: Int):
+        """Mark ``n`` queued bytes framed. Compacts the buffer once the
+        sent prefix is at least half of it, so a large body is copied
+        O(log n) times rather than once per drain."""
+        self.pos += n
+        self.off += UInt64(n)
+        if self.pos == len(self.buf):
+            self.buf.clear()
+            self.pos = 0
+        elif self.pos * 2 >= len(self.buf):
+            self.buf = List[UInt8](Span[UInt8, _](self.buf)[self.pos :])
+            self.pos = 0
+
+
 # -- Configuration carrier ----------------------------------------------
 
 
@@ -318,6 +374,22 @@ struct QuicConnection(Copyable):
     is granted from this, not from what was received."""
     var fc_closed_bidi: UInt64
     """Client request streams answered and closed."""
+    var fc_tx_sent: UInt64
+    """New stream bytes sent, summed over streams; bounded by the
+    peer's MAX_DATA (``conn.max_data_send``). Retransmits do not count."""
+    var fc_blocked_at: UInt64
+    """MAX_DATA we last sent DATA_BLOCKED for."""
+    var fc_stream_window: UInt64
+    """Receive window granted per stream beyond what has arrived.
+    Doubles, up to the cap, whenever grants come faster than twice the
+    smoothed RTT (receive-window auto-tuning, as quiche does)."""
+    var fc_last_grant_ms: UInt64
+    """Time of the last MAX_STREAM_DATA grant, for the auto-tuning."""
+    var fc_grants: List[Int]
+    """Streams whose receive limit was raised since the last 1-RTT
+    flight; each gets a MAX_STREAM_DATA in the next one."""
+    var h3_tx: Dict[Int, _StreamTx]
+    """Response egress per request stream."""
 
     var rx_largest: List[UInt64]
     """Largest packet number received per packet-number space: [0]
@@ -401,6 +473,16 @@ struct QuicConnection(Copyable):
         self.fc_received = 0
         self.fc_consumed = 0
         self.fc_closed_bidi = 0
+        self.fc_tx_sent = 0
+        self.fc_blocked_at = UInt64.MAX
+        self.fc_stream_window = initial_max_data
+        self.fc_last_grant_ms = 0
+        self.fc_grants = List[Int]()
+        self.h3_tx = Dict[Int, _StreamTx]()
+        # Nothing may be sent until the client's transport parameters
+        # are known; _client_params_ok raises both limits.
+        self.conn.max_data_send = 0
+        self.conn.peer_initial_max_stream_data = 0
         self.rx_largest = List[UInt64](length=3, fill=UInt64(0))
         self.initial_keys_discarded = False
         self.early_guard = EarlyDataReplayGuard()

@@ -8,7 +8,7 @@ pump on :class:`flare.http.HttpServer` materializes the request,
 calls a user :trait:`flare.http.Handler`, encodes the
 :class:`flare.http.Response` back into the slot's H3 outbox, and
 the bytes accumulate in
-:attr:`flare.quic.server.QuicListener.http3_response_egress` for the
+the stream's ``QuicConnection.h3_tx`` record for the
 1-RTT egress wiring to pick up.
 
 The 1-RTT wire path (rustls KeyChange surfacing 1-RTT traffic
@@ -458,12 +458,13 @@ def test_streaming_response_incremental_data() raises:
     var resp = stream_response(src^)
     listener.emit_http3_response(slot, Int(sid), resp^)
 
-    var key = String("0:0")
-    # HEADERS rode the egress immediately; the stream is registered and
-    # not yet done (no DATA pulled).
-    assert_true(key in listener.http3_streams, "stream must be registered")
-    assert_false(listener.http3_streams[key].done)
-    var headers_only = listener.http3_response_egress[key].copy()
+    var key = Int(sid)
+    # HEADERS rode the egress immediately; the stream keeps its source
+    # and is not yet done (no DATA pulled).
+    ref txs = listener.connections[slot].h3_tx
+    assert_true(txs[key].src_addr != 0, "stream must keep its source")
+    assert_false(txs[key].done)
+    var headers_only = txs[key].buf.copy()
     assert_true(len(headers_only) > 0, "HEADERS must be queued on emit")
     assert_equal(
         len(_extract_h3_data_payload(headers_only)),
@@ -475,15 +476,14 @@ def test_streaming_response_incremental_data() raises:
     for _ in range(3):
         var adv = listener.pump_http3_streams(Cancel.never())
         assert_equal(adv, 1)
-        assert_true(key in listener.http3_streams)
-        assert_false(listener.http3_streams[key].done)
+        assert_false(listener.connections[slot].h3_tx[key].done)
 
     # Fourth pump hits end-of-stream: still counts as advanced, marks
     # done, and frees the boxed source.
     var adv_eos = listener.pump_http3_streams(Cancel.never())
     assert_equal(adv_eos, 1)
-    assert_true(listener.http3_streams[key].done, "EOS must set done")
-    assert_equal(listener.http3_streams[key].src_addr, 0, "source freed")
+    assert_true(listener.connections[slot].h3_tx[key].done, "EOS sets done")
+    assert_equal(listener.connections[slot].h3_tx[key].src_addr, 0, "freed")
 
     # A further pump is a no-op (source exhausted).
     var adv_none = listener.pump_http3_streams(Cancel.never())
@@ -491,7 +491,7 @@ def test_streaming_response_incremental_data() raises:
 
     # The accumulated egress (HEADERS + 3 DATA frames) decodes to the
     # concatenated chunk payloads in order.
-    var full = listener.http3_response_egress[key].copy()
+    var full = listener.take_http3_response_egress(slot, key)
     var body = _extract_h3_data_payload(full)
     assert_equal(len(body), 9)  # "aaa" + "bbbb" + "cc"
     var expect = _bytes("aaabbbbcc")
@@ -500,7 +500,7 @@ def test_streaming_response_incremental_data() raises:
 
 
 def test_buffered_response_not_registered_as_stream() raises:
-    """A plain buffered Response never lands in ``http3_streams`` and
+    """A plain buffered Response keeps no chunk source and
     still emits HEADERS+DATA up front -- the byte-identical original
     path, unaffected by the streaming machinery."""
     var listener = _bind_listener()
@@ -515,13 +515,12 @@ def test_buffered_response_not_registered_as_stream() raises:
     var resp = handler.serve(req^)
     listener.emit_http3_response(slot, Int(sid), resp^)
 
-    var key = String("0:0")
-    assert_false(
-        key in listener.http3_streams, "buffered must not register a stream"
-    )
+    ref st = listener.connections[slot].h3_tx[Int(sid)]
+    assert_equal(st.src_addr, 0, "buffered must not keep a source")
+    assert_true(st.done, "buffered is complete on emit")
     # A pump does nothing for buffered responses.
     assert_equal(listener.pump_http3_streams(Cancel.never()), 0)
-    var full = listener.http3_response_egress[key].copy()
+    var full = listener.take_http3_response_egress(slot, Int(sid))
     var body = _extract_h3_data_payload(full)
     assert_equal(len(body), 5)  # "hello" emitted as DATA up front
 

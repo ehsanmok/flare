@@ -315,6 +315,11 @@ struct Connection(Copyable):
     it in ``open_bidi_stream``; the server opens none."""
     var next_local_uni: UInt64
     """The same for unidirectional streams (client 2, 6, ...; server 3, ...)."""
+    var peer_initial_max_stream_data: UInt64
+    """Send limit a peer-initiated stream starts with: the peer's
+    ``initial_max_stream_data_bidi_local`` (RFC 9000 sec 18.2). The
+    server holds it at 0 until it has read the client's transport
+    parameters, then raises it and every open stream's limit."""
 
 
 def new_connection(
@@ -351,6 +356,7 @@ def new_connection(
         check_stream_ids=check_stream_ids,
         next_local_bidi=UInt64(1) if is_server else UInt64(0),
         next_local_uni=UInt64(3) if is_server else UInt64(2),
+        peer_initial_max_stream_data=initial_max_data,
     )
 
 
@@ -462,6 +468,7 @@ def apply_stream(
         s = existing.value()
     else:
         s = new_stream(sid, conn.max_data_recv)
+        s.max_send_data = conn.peer_initial_max_stream_data
         events.new_streams.append(sid)
     var end = sf.offset + UInt64(len(sf.data))
     if end > s.max_recv_data:

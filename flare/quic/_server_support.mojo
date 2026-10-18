@@ -215,31 +215,6 @@ def _encode_h3_stream_frame(
     out.extend(stream_bytes)
 
 
-def _stream_id_from_key(k: String) -> Int:
-    """Parse the QUIC stream id out of an ``http3_response_egress``
-    key of the form ``"<slot>:<stream_id>"`` (ASCII only, so
-    byte-level iteration is safe). Returns -1 if the key has no
-    colon or no digits after it.
-    """
-    var key_bytes = k.as_bytes()
-    var sid = 0
-    var found_colon = False
-    var any_digit = False
-    for j in range(len(key_bytes)):
-        var b = Int(key_bytes[j])
-        if not found_colon:
-            if b == 0x3A:  # ':'
-                found_colon = True
-            continue
-        if b < 0x30 or b > 0x39:
-            continue
-        sid = sid * 10 + (b - 0x30)
-        any_digit = True
-    if not found_colon or not any_digit:
-        return -1
-    return sid
-
-
 def _inbound_level_for_datagram(datagram: Span[UInt8, _]) -> Int:
     """Derive the QUIC encryption level of an inbound datagram
     from its first byte.

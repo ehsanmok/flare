@@ -466,7 +466,12 @@ v0.11 audit fixes; before them the server accepted what follows.
   data.
 - Stream ids, the bidi stream count and connection flow control are
   enforced, and credit is granted as the application consumes data
-  rather than as the peer sends it. A request body is capped at
+  rather than as the peer sends it. Each request stream's receive limit
+  is kept a window ahead of what has arrived, with the window
+  auto-tuned up to 16 MiB, so uploads are not held to the initial
+  limit. Responses are framed only as far as the client's
+  MAX_STREAM_DATA / MAX_DATA and the congestion window allow; the rest
+  waits on the stream, and a STOP_SENDING is answered with RESET_STREAM. A request body is capped at
   10 MiB (`Http3RequestReader.max_body_bytes`); the QPACK encoder stream
   may not set a table capacity beyond what was advertised, and an
   instruction that names a missing or evicted entry (Insert With Name
@@ -918,10 +923,8 @@ of what you might reasonably assume from the surrounding feature.
 
 **QUIC and HTTP/3**
 
-- Send pacing is built but not wired, and the congestion window is not
-  gated on the HTTP/3 DATA pump. Loss recovery, the window itself and
-  the ack-eliciting accounting are live and correct; nothing reads the
-  window on that one path. Both are open together with pacing.
+- Send pacing is not wired: the congestion window bounds what is in
+  flight, but a window's worth leaves in one burst.
 - The QPACK dynamic table is dormant. Both ends work, statically.
 - The h3 client rejects a request body larger than one packet.
 

@@ -55,19 +55,27 @@ from .crypto import QuicAead
 from .frame import (
     ConnectionCloseFrame,
     CryptoFrame,
+    DataBlockedFrame,
     MaxDataFrame,
+    MaxStreamDataFrame,
     MaxStreamsFrame,
     NewConnectionIdFrame,
     PathResponseFrame,
+    ResetStreamFrame,
+    StreamDataBlockedFrame,
     StreamFrame,
     encode_ack,
     encode_connection_close,
     encode_crypto,
+    encode_data_blocked,
     encode_handshake_done,
     encode_max_data,
+    encode_max_stream_data,
     encode_max_streams,
     encode_new_connection_id,
     encode_path_response,
+    encode_reset_stream,
+    encode_stream_data_blocked,
 )
 from .packet import (
     ConnectionId,
@@ -175,13 +183,13 @@ from ._server_support import (
     _monotonic_ms,
     _random_bytes,
     _ready_sentinel,
-    _stream_id_from_key,
 )
 from ._loss_recovery import LossRecovery
 from ._server_types import (
     ConnectionIdTable,
     QuicConnection,
     QuicServerConfig,
+    _StreamTx,
     _encode_server_transport_params,
     cid_to_hex,
 )
@@ -208,6 +216,14 @@ header, AEAD tag."""
 # 30 s h2load run at the documented HTTP/3 rate.
 comptime _MAX_DATA_WINDOW: UInt64 = 64 * 1024 * 1024
 comptime _MAX_STREAMS_BIDI_WINDOW: UInt64 = 4096
+comptime _MAX_STREAM_WINDOW: UInt64 = 16 * 1024 * 1024
+"""Cap on the auto-tuned per-stream receive window."""
+comptime _STREAM_PULL_HIGH_WATER: Int = 64 * 1024
+"""A streaming response's source is not pulled while this many bytes
+are still queued unsent on its stream: flow control or the congestion
+window is holding them, and pulling more would only grow the queue."""
+comptime _H3_REQUEST_CANCELLED: UInt64 = 0x10C
+"""RFC 9114 sec 8.1: the RESET_STREAM code for an abandoned response."""
 
 # Max datagrams drained per reactor tick. Bounds the time spent in one
 # tick so a single hot connection cannot starve the serve loop's H3
@@ -230,49 +246,6 @@ comptime _RX_BATCH: Int = 64
 # net.core.{rmem,wmem}_max, so the effective size may be smaller.
 comptime _DEFAULT_QUIC_RCVBUF: Int = 0
 comptime _DEFAULT_QUIC_SNDBUF: Int = 0
-
-
-# -- Per-stream streaming egress state ----------------------------------
-
-
-struct _H3StreamOut(Copyable):
-    """Per-stream state for an incrementally-streamed HTTP/3 response.
-
-    A streaming :class:`Response` (one carrying a ``body_stream``
-    chunk source) is not buffered whole into ``http3_response_egress``.
-    Instead its HEADERS ride the egress buffer immediately and this
-    record tracks the still-open source so
-    :meth:`QuicListener.pump_http3_streams` can pull one chunk per
-    tick into DATA frames and :meth:`QuicListener._drain_1rtt_coalesced`
-    can frame them at the right QUIC stream offset, deferring the FIN
-    until the source is exhausted.
-
-    ``src_addr`` boxes the move-only :class:`ChunkSourceBox` in a
-    ``Pool[ChunkSourceBox]`` (0 once freed at end-of-stream) so this
-    record stays ``Copyable`` and can live in a ``Dict`` value --
-    mirroring the H2 reactor's ``_stream_out`` boxing.
-    """
-
-    var src_addr: Int
-    """Pooled ``ChunkSourceBox`` address; 0 once the source is drained
-    and freed (``done`` set)."""
-    var send_off: UInt64
-    """Cumulative QUIC stream-data offset already framed onto the wire
-    for this stream (HEADERS + every DATA fragment). The next STREAM
-    frame starts here so incremental chunks don't collide at offset 0."""
-    var trailer_bytes: List[UInt8]
-    """Pre-encoded trailing-HEADERS frame bytes (empty when the
-    response carried no trailers). Appended to the final flush right
-    before the FIN so trailers land after the last DATA frame."""
-    var done: Bool
-    """Set once the source returned end-of-stream: the drain flushes
-    any remaining bytes + trailers with FIN and reclaims the stream."""
-
-    def __init__(out self, src_addr: Int, var trailer_bytes: List[UInt8]):
-        self.src_addr = src_addr
-        self.send_off = UInt64(0)
-        self.trailer_bytes = trailer_bytes^
-        self.done = False
 
 
 # -- Listener -----------------------------------------------------------
@@ -430,24 +403,9 @@ struct QuicListener(Movable):
     :meth:`Http3Connection.feed_stream_chunk` until 1-RTT keys
     install, at which point the peer already negotiated H3 via
     ALPN by definition)."""
-    var http3_response_egress: Dict[String, List[UInt8]]
-    """Per-(slot, stream_id) outbound H3 response bytes,
-    awaiting QUIC STREAM frame egress. Key is
-    ``str(slot) + ":" + str(stream_id)``; value is the byte
-    buffer emitted by
-    :meth:`flare.http3.Http3Connection.take_response_frames` after a
-    handler-produced :class:`Response` is encoded. Drained by
-    the 1-RTT egress path once the per-connection 1-RTT keys
-    are installed."""
-    var http3_streams: Dict[String, _H3StreamOut]
-    """Per-(slot, stream_id) state for responses being streamed
-    incrementally (a :class:`Response` carrying a ``body_stream``).
-    Key present ⟺ the stream is mid-stream: its HEADERS are already in
-    :attr:`http3_response_egress`, its source is pumped one chunk per
-    tick by :meth:`pump_http3_streams`, and the 1-RTT drain frames DATA
-    at :attr:`_H3StreamOut.send_off` with the FIN deferred until
-    ``done``. Buffered (non-streaming) responses never appear here, so
-    their egress path stays byte-for-byte unchanged."""
+    var _open_sources: Int
+    """Streaming responses whose chunk source is still open, across
+    every slot; lets :meth:`pump_http3_streams` return at once when 0."""
     var early_strike: EarlyDataStrikeSet
     """Listener-level cross-connection 0-RTT replay defense (RFC 9001
     sec 9.2). Keyed on each accepted connection's original DCID with a
@@ -520,8 +478,7 @@ struct QuicListener(Movable):
         self.free_slots = List[Int]()
         self.slot_free = List[Bool]()
         self.http3_connections = List[Http3Connection]()
-        self.http3_response_egress = Dict[String, List[UInt8]]()
-        self.http3_streams = Dict[String, _H3StreamOut]()
+        self._open_sources = 0
         self.early_strike = EarlyDataStrikeSet(
             window_ms=config.early_data_strike_window_ms
         )
@@ -567,9 +524,10 @@ struct QuicListener(Movable):
         # Free any HTTP/3 streaming sources still open at teardown (a
         # connection dropped mid-stream). The ChunkSourceBox boxed in
         # the pool owns the concrete source; free it exactly once.
-        for entry in self.http3_streams.items():
-            if entry.value.src_addr != 0:
-                Pool[ChunkSourceBox].free(entry.value.src_addr)
+        for i in range(len(self.connections)):
+            for entry in self.connections[i].h3_tx.items():
+                if entry.value.src_addr != 0:
+                    Pool[ChunkSourceBox].free(entry.value.src_addr)
 
     @staticmethod
     def bind(config: QuicServerConfig) raises -> QuicListener:
@@ -1436,6 +1394,23 @@ struct QuicListener(Movable):
                     slot
                 ].peer_idle_ms = tp.max_idle_timeout.value()
             _ = self.schedule_idle_timeout(slot)
+            # The client's flow-control limits on what we send (RFC 9000
+            # sec 18.2): its connection limit, and the limit of each
+            # stream it opens. Raised, never lowered, in case a 0-RTT
+            # MAX_DATA / MAX_STREAM_DATA already arrived.
+            ref c = self.connections[slot].conn
+            var md = tp.initial_max_data.or_else(UInt64(0))
+            if md > c.max_data_send:
+                c.max_data_send = md
+            var msd = tp.initial_max_stream_data_bidi_local.or_else(UInt64(0))
+            c.peer_initial_max_stream_data = msd
+            var open_sids = List[UInt64]()
+            for entry in c.streams.items():
+                open_sids.append(entry.key)
+            for i in range(len(open_sids)):
+                ref st = c.streams[open_sids[i]]
+                if st.max_send_data < msd:
+                    st.max_send_data = msd
         except:
             pass
         return True
@@ -1522,6 +1497,7 @@ struct QuicListener(Movable):
                     slot, QUIC_FLOW_CONTROL_ERROR, "stream data past MAX_DATA"
                 )
                 return
+            self._grant_stream_credit(slot, sid, end)
         # Pass 2: feed H3 in place. Mutating the slot through a ref
         # avoids deep-copying the whole Http3Connection (its per-stream
         # state Dict) on every inbound datagram -- the dominant
@@ -1557,6 +1533,44 @@ struct QuicListener(Movable):
         if h3_code != 0:
             self._close_for(slot, h3_code, h3_reason)
 
+    def _grant_stream_credit(mut self, slot: Int, sid: Int, end: UInt64):
+        """Keep a client stream's receive limit a window ahead of what
+        has arrived (RFC 9000 sec 4.2): once less than half the window
+        is left, raise the limit to ``end + window`` and queue a
+        MAX_STREAM_DATA. Without it an upload larger than the initial
+        window stalled. Memory stays bounded by MAX_DATA, which is
+        granted only as requests are answered. The window doubles, up to
+        :data:`_MAX_STREAM_WINDOW`, when grants come faster than twice
+        the smoothed RTT, so a fast path is not held to one window per
+        round trip."""
+        ref qc = self.connections[slot]
+        var usid = UInt64(sid)
+        if usid not in qc.conn.streams:
+            return
+        try:
+            ref st = qc.conn.streams[usid]
+            if st.fin_received:
+                return
+            var window = qc.fc_stream_window
+            if st.max_recv_data - end >= window // 2:
+                return
+            var now = _monotonic_ms()
+            var srtt = self.loss[slot].smoothed_rtt if slot < len(
+                self.loss
+            ) else UInt64(0)
+            if (
+                qc.fc_last_grant_ms != 0
+                and now - qc.fc_last_grant_ms < 2 * max(srtt, UInt64(1))
+                and window < _MAX_STREAM_WINDOW
+            ):
+                window = min(window * 2, _MAX_STREAM_WINDOW)
+                qc.fc_stream_window = window
+            qc.fc_last_grant_ms = now
+            st.max_recv_data = end + window
+            qc.fc_grants.append(sid)
+        except:
+            pass
+
     def take_http3_completed_streams(self, slot: Int) raises -> List[Int]:
         """Return the stream ids ready for handler dispatch on
         ``slot``. Delegates to
@@ -1587,43 +1601,34 @@ struct QuicListener(Movable):
         return h3.take_request(stream_id)
 
     def _append_http3_egress(
-        mut self, key: String, var frames: List[UInt8]
+        mut self, slot: Int, stream_id: Int, frames: List[UInt8]
     ) raises:
-        """Append ``frames`` to the ``key``'d H3 egress buffer,
-        allocating it on first use. Shared by the buffered emit path
-        and the streaming DATA pump."""
-        if key in self.http3_response_egress:
-            var existing = self.http3_response_egress[key].copy()
-            for i in range(len(frames)):
-                existing.append(frames[i])
-            self.http3_response_egress[key] = existing^
-        else:
-            self.http3_response_egress[key] = frames^
+        """Queue ``frames`` on ``stream_id``'s response egress, creating
+        the record on first use. Shared by the buffered emit path and the
+        streaming DATA pump."""
+        ref txs = self.connections[slot].h3_tx
+        if stream_id not in txs:
+            txs[stream_id] = _StreamTx()
+        txs[stream_id].buf.extend(Span[UInt8, _](frames))
 
     def emit_http3_response(
         mut self, slot: Int, stream_id: Int, var response: Response
     ) raises:
-        """Encode ``response`` into the slot's H3 outbox + drain
-        the resulting frame bytes into
-        :attr:`http3_response_egress` keyed by ``slot:stream_id``.
-
-        The byte buffer feeds the 1-RTT STREAM-frame egress pass
-        in :meth:`_drain_1rtt_coalesced`, which emits on the
-        wire once the slot's 1-RTT keys are installed.
+        """Encode ``response`` and queue it on the stream's egress for
+        the 1-RTT drain (:meth:`_drain_1rtt_coalesced`), which frames it
+        as far as flow control and the congestion window allow once the
+        slot's 1-RTT keys are installed.
 
         A streaming response (one carrying a ``body_stream`` chunk
         source) is handled incrementally: its HEADERS (and any inline
-        ``body`` prefix) ride the egress buffer now, the source is
-        boxed into :attr:`http3_streams`, and
-        :meth:`pump_http3_streams` pulls its body one chunk per tick.
-        The FIN is deferred to the drain until the source is exhausted.
-        Buffered responses take the byte-identical original path.
+        ``body`` prefix) are queued now, the source is boxed on the
+        stream's record, and :meth:`pump_http3_streams` pulls its body
+        one chunk per tick. The FIN waits until the source is exhausted.
         """
         if slot < 0 or slot >= len(self.http3_connections):
             raise Error(
                 "emit_http3_response: slot " + String(slot) + " out of range"
             )
-        var key = String(slot) + ":" + String(stream_id)
         # Detect streaming before the response is moved into the driver.
         if response.body_stream:
             # Take the source out; pre-encode trailers (emitted after the
@@ -1645,80 +1650,86 @@ struct QuicListener(Movable):
             ref h3 = self.http3_connections[slot]
             h3.emit_response(stream_id, response^)
             var frames = h3.take_response_frames(stream_id)
-            self._append_http3_egress(key, frames^)
-            var addr = Pool[ChunkSourceBox].alloc_move(src^)
-            self.http3_streams[key] = _H3StreamOut(addr, trailer_bytes^)
+            self._append_http3_egress(slot, stream_id, frames)
+            ref st = self.connections[slot].h3_tx[stream_id]
+            st.src_addr = Pool[ChunkSourceBox].alloc_move(src^)
+            st.trailer_bytes = trailer_bytes^
+            self._open_sources += 1
             return
         ref h3 = self.http3_connections[slot]
         h3.emit_response(stream_id, response^)
         var frames = h3.take_response_frames(stream_id)
-        self._append_http3_egress(key, frames^)
+        self._append_http3_egress(slot, stream_id, frames)
+        self.connections[slot].h3_tx[stream_id].done = True
 
     def take_http3_response_egress(
         mut self, slot: Int, stream_id: Int
     ) raises -> List[UInt8]:
-        """Drain the per-stream response buffer accumulated by
-        :meth:`emit_http3_response`. Returns an empty list when no
-        bytes are queued. Caller (the QUIC STREAM egress path)
-        wraps the bytes in STREAM frames + protects them with
-        :func:`protect_1rtt_packet` -- the wiring lands once
-        1-RTT keys flow through the rustls bridge."""
-        var key = String(slot) + ":" + String(stream_id)
-        if key not in self.http3_response_egress:
+        """Take the response bytes queued on ``stream_id`` and not yet
+        framed, bypassing the 1-RTT drain. Returns an empty list when
+        nothing is queued. A finished buffered response's record is
+        dropped; a streaming one keeps its source."""
+        if slot < 0 or slot >= len(self.connections):
             return List[UInt8]()
-        var out = self.http3_response_egress.pop(key)
+        ref txs = self.connections[slot].h3_tx
+        if stream_id not in txs:
+            return List[UInt8]()
+        ref st = txs[stream_id]
+        var out = List[UInt8](Span[UInt8, _](st.buf)[st.pos :])
+        st.consume(st.pending())
+        if st.done and st.src_addr == 0:
+            _ = txs.pop(stream_id)
         return out^
 
     def pump_http3_streams(mut self, cancel: Cancel) raises -> Int:
         """Advance every active HTTP/3 streaming response by one chunk.
 
-        For each stream registered in :attr:`http3_streams` whose
-        source is not yet exhausted, pulls a single chunk (mirroring
-        the H1/H2 one-chunk-per-edge yield), frames it as a DATA frame
-        into the stream's egress buffer, and on end-of-stream frees the
-        source + marks the record ``done`` so the next drain flushes any
-        trailers with the FIN. Returns the number of streams advanced
-        (produced a chunk or reached EOS) this pass; zero when no stream
-        is active, so the serve loop can treat it as a cheap no-op.
+        For each stream whose source is still open, pulls a single chunk
+        (mirroring the H1/H2 one-chunk-per-edge yield) and queues it as a
+        DATA frame on the stream's egress. On end-of-stream the source is
+        freed, the trailers are queued, and the record is marked ``done``
+        so the drain sends the FIN after the last byte. Returns the
+        number of streams advanced (produced a chunk or reached EOS).
 
-        Backpressure / flow control: chunks are pulled one-per-tick and
-        the drain fragments them under the path-MTU budget, so a fast
-        source cannot outrun a single datagram. NOTE: this does not yet
-        gate on QUIC per-stream ``MAX_STREAM_DATA`` or a congestion /
-        pacing budget -- server-side 1-RTT loss recovery + congestion
-        control is not wired on the egress path (see
-        :meth:`_on_pto_expired`). When that lands, gate the pull here on
-        the available stream + connection send window and the CC budget.
+        Backpressure: a stream with :data:`_STREAM_PULL_HIGH_WATER` bytes
+        still unsent is skipped. The drain only frames what the peer's
+        MAX_STREAM_DATA / MAX_DATA and the congestion window allow, so a
+        fast source cannot outrun a slow reader.
         """
-        if len(self.http3_streams) == 0:
+        if self._open_sources == 0:
             return 0
-        var keys = List[String]()
-        for entry in self.http3_streams.items():
-            keys.append(entry.key)
         var advanced = 0
-        for i in range(len(keys)):
-            var key = keys[i]
-            # Read scalars by copy so no Dict ref is held across the
-            # source pull / egress append (which touch other Dicts).
-            var src_addr = self.http3_streams[key].src_addr
-            var is_done = self.http3_streams[key].done
-            if is_done or src_addr == 0:
+        for slot in range(len(self.connections)):
+            if len(self.connections[slot].h3_tx) == 0:
                 continue
-            var chunk = Pool[ChunkSourceBox].get_ptr(src_addr)[].next(cancel)
-            if chunk:
-                var payload = chunk.value().copy()
-                if len(payload) > 0:
-                    var buf = List[UInt8]()
-                    encode_response_data(Span[UInt8, _](payload), buf)
-                    self._append_http3_egress(key, buf^)
-                advanced += 1
-            else:
-                # End-of-stream: free the boxed source exactly once and
-                # flag the record so the drain FINs + reclaims it.
-                Pool[ChunkSourceBox].free(src_addr)
-                ref st = self.http3_streams[key]
-                st.src_addr = 0
-                st.done = True
+            var sids = List[Int]()
+            for entry in self.connections[slot].h3_tx.items():
+                if (
+                    entry.value.src_addr != 0
+                    and entry.value.pending() < _STREAM_PULL_HIGH_WATER
+                ):
+                    sids.append(entry.key)
+            for i in range(len(sids)):
+                var sid = sids[i]
+                var src_addr = self.connections[slot].h3_tx[sid].src_addr
+                var chunk = (
+                    Pool[ChunkSourceBox].get_ptr(src_addr)[].next(cancel)
+                )
+                ref st = self.connections[slot].h3_tx[sid]
+                if chunk:
+                    if len(chunk.value()) > 0:
+                        encode_response_data(
+                            Span[UInt8, _](chunk.value()), st.buf
+                        )
+                else:
+                    # End-of-stream: free the boxed source exactly once;
+                    # the trailers ride right before the FIN.
+                    Pool[ChunkSourceBox].free(src_addr)
+                    st.src_addr = 0
+                    st.buf.extend(Span[UInt8, _](st.trailer_bytes))
+                    st.trailer_bytes = List[UInt8]()
+                    st.done = True
+                    self._open_sources -= 1
                 advanced += 1
         return advanced
 
@@ -2116,7 +2127,7 @@ struct QuicListener(Movable):
           (rustls post-handshake messages like
           NewSessionTicket).
           Encrypted via :meth:`_build_1rtt_handshake_crypto`.
-        * ``http3_response_egress`` -- 1-RTT STREAM frames carrying
+        * ``QuicConnection.h3_tx`` -- 1-RTT STREAM frames carrying
           H3 response bytes (the live H3 reactor's actual
           payload). Encrypted via the coalescing 1-RTT drain
           (:meth:`_drain_1rtt_coalesced`).
@@ -2491,153 +2502,128 @@ struct QuicListener(Movable):
         # :meth:`_drain_and_send`. This drain only ever targets the
         # validated egress address.
 
-        # Collect this slot's ready responses.
-        var slot_prefix = String(slot) + ":"
-        var keys_to_drain = List[String]()
-        for entry in self.http3_response_egress.items():
-            if entry.key.startswith(slot_prefix):
-                keys_to_drain.append(entry.key)
+        # Receive credit raised since the last flight (RFC 9000 sec 4.2).
+        if len(self.connections[slot].fc_grants) > 0:
+            var grants = List[Int]()
+            swap(grants, self.connections[slot].fc_grants)
+            for i in range(len(grants)):
+                var s_opt = self.connections[slot].conn.streams.get(
+                    UInt64(grants[i])
+                )
+                if not s_opt:
+                    continue
+                if budget - len(plaintext) < 24:
+                    if self._flush_1rtt(slot, plaintext, peer, budget):
+                        emitted = True
+                encode_max_stream_data(
+                    MaxStreamDataFrame(
+                        UInt64(grants[i]), s_opt.value().max_recv_data
+                    ),
+                    plaintext,
+                )
 
-        for i in range(len(keys_to_drain)):
-            var k = keys_to_drain[i]
-            # Streaming responses are drained by the dedicated pass
-            # below (persistent offset + deferred FIN), never here.
-            if k in self.http3_streams:
+        # Response bytes, as far as the peer's MAX_STREAM_DATA and
+        # MAX_DATA (RFC 9000 sec 4.1) and the congestion window (RFC 9002
+        # sec 7) allow. What does not fit stays queued on the stream and
+        # goes out on a later drain, after the peer's ACKs and grants.
+        comptime _STREAM_HDR_MAX = 24
+        var sids = List[Int]()
+        for entry in self.connections[slot].h3_tx.items():
+            sids.append(entry.key)
+        var cc_open = True
+        # Whether the datagram being filled already passed the
+        # congestion-window check; reset on every flush.
+        var dg_admitted = False
+        for i in range(len(sids)):
+            var sid = sids[i]
+            var st = self.connections[slot].h3_tx.pop(sid)
+            var s_opt = self.connections[slot].conn.streams.get(UInt64(sid))
+            if not s_opt or s_opt.value().send_reset:
+                # The peer sent STOP_SENDING (or the stream is gone): the
+                # response is abandoned, and STOP_SENDING is answered with
+                # RESET_STREAM (RFC 9000 sec 3.5).
+                if s_opt:
+                    if budget - len(plaintext) < 32:
+                        if self._flush_1rtt(slot, plaintext, peer, budget):
+                            emitted = True
+                        dg_admitted = False
+                    encode_reset_stream(
+                        ResetStreamFrame(
+                            UInt64(sid), _H3_REQUEST_CANCELLED, st.off
+                        ),
+                        plaintext,
+                    )
+                if st.src_addr != 0:
+                    Pool[ChunkSourceBox].free(st.src_addr)
+                    self._open_sources -= 1
+                self._reclaim_http3_stream(slot, sid)
                 continue
-            var bytes = self.http3_response_egress.pop(k)
-            if len(bytes) == 0:
-                continue
-            var sid = _stream_id_from_key(k)
-            if sid < 0:
-                continue
-            # Fragment the response across as many 1-RTT datagrams as
-            # the MTU budget needs. A STREAM frame header is <= ~24
-            # bytes (type + sid/offset/length varints); reserve that
-            # so each frame body fits the remaining budget. Only the
-            # final fragment carries FIN. Without this split a
-            # response larger than the path MTU was encoded as one
-            # oversized datagram the peer drops (RFC 9000 sec 14.1
-            # -- a QUIC packet must fit a single UDP datagram).
-            comptime _STREAM_HDR_MAX = 24
-            var n = len(bytes)
-            var off = 0
-            while off < n:
+            var stream_limit = s_opt.value().max_send_data
+            var conn_limit = self.connections[slot].conn.max_data_send
+            var conn_sent = self.connections[slot].fc_tx_sent
+            var stream_room = (
+                Int(stream_limit - st.off) if stream_limit > st.off else 0
+            )
+            var conn_room = (
+                Int(conn_limit - conn_sent) if conn_limit > conn_sent else 0
+            )
+            var avail = min(st.pending(), min(stream_room, conn_room))
+            var fin_now = st.done and avail == st.pending()
+            var sent = 0
+            var fin_sent = False
+            while cc_open and (sent < avail or (fin_now and not fin_sent)):
                 var room = budget - len(plaintext) - _STREAM_HDR_MAX
                 if room <= 0:
-                    var dg = self._build_1rtt_response(
-                        slot, plaintext^, ack_eliciting=True
-                    )
-                    if len(dg) > 0:
-                        _ = self.send_to(Span[UInt8, _](dg), peer)
+                    if self._flush_1rtt(slot, plaintext, peer, budget):
                         emitted = True
-                    plaintext = List[UInt8](capacity=budget + 64)
+                    dg_admitted = False
                     room = budget - _STREAM_HDR_MAX
-                var take = room
-                if take > n - off:
-                    take = n - off
-                var is_last = (off + take) == n
+                if not dg_admitted:
+                    if not self.loss[slot].can_send(UInt64(budget)):
+                        cc_open = False
+                        break
+                    dg_admitted = True
+                var take = min(room, avail - sent)
+                var fin = fin_now and sent + take == avail
                 _encode_h3_stream_frame(
                     plaintext,
                     UInt64(sid),
-                    UInt64(off),
-                    Span[UInt8, _](bytes)[off : off + take],
-                    fin=is_last,
-                )
-                off += take
-            # The response is complete (fin emitted on the last
-            # fragment), so reclaim the per-stream carriers now.
-            # Without this, completed streams pile up in both the H3
-            # driver's stream Dict and the QUIC connection's stream
-            # Dict, and the per-tick `take_completed_streams` scan
-            # degrades to O(streams-ever-opened) -- quadratic over a
-            # long run.
-            self.http3_connections[slot].close_request_stream(sid)
-            self._note_stream_consumed(slot, sid)
-            if UInt64(sid) in self.connections[slot].conn.streams:
-                _ = self.connections[slot].conn.streams.pop(UInt64(sid))
-
-        # Streaming H3 responses: frame whatever the pump produced this
-        # tick at the stream's persistent QUIC offset, coalescing into
-        # the same datagrams as the buffered responses + the ACK. The
-        # FIN is deferred until the source is exhausted (``done``); an
-        # exhausted stream with no residual bytes still emits an empty
-        # FIN-bearing STREAM frame to close the response side.
-        comptime _STREAM_HDR_MAX_S = 24
-        var stream_keys = List[String]()
-        for entry in self.http3_streams.items():
-            if entry.key.startswith(slot_prefix):
-                stream_keys.append(entry.key)
-        for i in range(len(stream_keys)):
-            var k = stream_keys[i]
-            var sid = _stream_id_from_key(k)
-            if sid < 0:
-                continue
-            var start_off = Int(self.http3_streams[k].send_off)
-            var is_done = self.http3_streams[k].done
-            var bytes = List[UInt8]()
-            if k in self.http3_response_egress:
-                bytes = self.http3_response_egress.pop(k)
-            if is_done:
-                # Trailers ride the final flush, right before the FIN.
-                var tb = self.http3_streams[k].trailer_bytes.copy()
-                for j in range(len(tb)):
-                    bytes.append(tb[j])
-            var n = len(bytes)
-            if n == 0 and not is_done:
-                # Nothing produced this tick; retry on a later drain.
-                continue
-            if n == 0 and is_done:
-                var room = budget - len(plaintext) - _STREAM_HDR_MAX_S
-                if room <= 0:
-                    var dg = self._build_1rtt_response(
-                        slot, plaintext^, ack_eliciting=True
-                    )
-                    if len(dg) > 0:
-                        _ = self.send_to(Span[UInt8, _](dg), peer)
-                        emitted = True
-                    plaintext = List[UInt8](capacity=budget + 64)
-                var empty = List[UInt8]()
-                _encode_h3_stream_frame(
-                    plaintext,
-                    UInt64(sid),
-                    UInt64(start_off),
-                    Span[UInt8, _](empty),
-                    fin=True,
-                )
-                # The FIN frame sits in ``plaintext``; the trailing
-                # flush below emits it and sets ``emitted``.
-                self._reclaim_http3_stream(slot, sid, k)
-                continue
-            var off = 0
-            while off < n:
-                var room = budget - len(plaintext) - _STREAM_HDR_MAX_S
-                if room <= 0:
-                    var dg = self._build_1rtt_response(
-                        slot, plaintext^, ack_eliciting=True
-                    )
-                    if len(dg) > 0:
-                        _ = self.send_to(Span[UInt8, _](dg), peer)
-                        emitted = True
-                    plaintext = List[UInt8](capacity=budget + 64)
-                    room = budget - _STREAM_HDR_MAX_S
-                var take = room
-                if take > n - off:
-                    take = n - off
-                var is_last_frag = (off + take) == n
-                var fin = is_last_frag and is_done
-                _encode_h3_stream_frame(
-                    plaintext,
-                    UInt64(sid),
-                    UInt64(start_off + off),
-                    Span[UInt8, _](bytes)[off : off + take],
+                    st.off + UInt64(sent),
+                    Span[UInt8, _](st.buf)[
+                        st.pos + sent : st.pos + sent + take
+                    ],
                     fin=fin,
                 )
-                off += take
-            if is_done:
-                self._reclaim_http3_stream(slot, sid, k)
-            else:
-                ref st = self.http3_streams[k]
-                st.send_off = UInt64(start_off + n)
+                sent += take
+                fin_sent = fin
+            st.consume(sent)
+            self.connections[slot].fc_tx_sent += UInt64(sent)
+            if fin_sent:
+                # The response is complete: reclaim the per-stream
+                # carriers now, or completed streams pile up in the H3
+                # driver's and the QUIC connection's stream Dicts.
+                self._reclaim_http3_stream(slot, sid)
+                continue
+            if cc_open and st.pending() > 0:
+                # Held by flow control: tell the peer, once per limit
+                # (RFC 9000 sec 4.1, sec 19.12-19.13).
+                if budget - len(plaintext) < 24:
+                    if self._flush_1rtt(slot, plaintext, peer, budget):
+                        emitted = True
+                    dg_admitted = False
+                if stream_room <= avail and st.blocked_at != stream_limit:
+                    encode_stream_data_blocked(
+                        StreamDataBlockedFrame(UInt64(sid), stream_limit),
+                        plaintext,
+                    )
+                    st.blocked_at = stream_limit
+                elif (
+                    conn_room <= avail
+                    and self.connections[slot].fc_blocked_at != conn_limit
+                ):
+                    encode_data_blocked(DataBlockedFrame(conn_limit), plaintext)
+                    self.connections[slot].fc_blocked_at = conn_limit
+            self.connections[slot].h3_tx[sid] = st^
 
         if len(plaintext) > 0:
             var dg = self._build_1rtt_response(
@@ -2648,23 +2634,34 @@ struct QuicListener(Movable):
                 emitted = True
         return emitted
 
-    def _reclaim_http3_stream(
-        mut self, slot: Int, sid: Int, key: String
-    ) raises:
-        """Drop every per-stream carrier for a finished streaming
-        response: free the boxed source if still open (defensive -- the
-        pump frees it at EOS), remove the :attr:`http3_streams` record,
-        close the H3 driver's stream state, and evict the QUIC stream so
-        the completed-stream scan stays linear."""
-        if key in self.http3_streams:
-            var addr = self.http3_streams[key].src_addr
-            if addr != 0:
-                Pool[ChunkSourceBox].free(addr)
-            _ = self.http3_streams.pop(key)
+    def _reclaim_http3_stream(mut self, slot: Int, sid: Int) raises:
+        """Drop the H3 driver's and the QUIC connection's state for a
+        finished or abandoned response stream (its egress record is
+        already gone), so the completed-stream scan stays linear."""
         self.http3_connections[slot].close_request_stream(sid)
         self._note_stream_consumed(slot, sid)
         if UInt64(sid) in self.connections[slot].conn.streams:
             _ = self.connections[slot].conn.streams.pop(UInt64(sid))
+
+    def _flush_1rtt(
+        mut self,
+        slot: Int,
+        mut plaintext: List[UInt8],
+        peer: SocketAddr,
+        budget: Int,
+    ) raises -> Bool:
+        """Send ``plaintext`` as one ack-eliciting 1-RTT datagram and
+        leave it empty for the next. Returns whether a datagram went out.
+        """
+        if len(plaintext) == 0:
+            return False
+        var frames = plaintext^
+        plaintext = List[UInt8](capacity=budget + 64)
+        var dg = self._build_1rtt_response(slot, frames^, ack_eliciting=True)
+        if len(dg) == 0:
+            return False
+        _ = self.send_to(Span[UInt8, _](dg), peer)
+        return True
 
     def _build_initial_response(
         mut self, slot: Int, pn_length: Int = 2, max_bytes: Int = 0
@@ -3345,22 +3342,13 @@ struct QuicListener(Movable):
             if h != 0:
                 self.tls_acceptor.free_session(h)
                 self.tls_sessions[slot] = _SessionSlot(handle=0)
-        var prefix = String(slot) + ":"
-        var dead_keys = List[String]()
-        for entry in self.http3_streams.items():
-            if entry.key.startswith(prefix):
-                dead_keys.append(entry.key)
-        for i in range(len(dead_keys)):
-            var addr = self.http3_streams[dead_keys[i]].src_addr
-            if addr != 0:
-                Pool[ChunkSourceBox].free(addr)
-            _ = self.http3_streams.pop(dead_keys[i])
-        var dead_egress = List[String]()
-        for entry in self.http3_response_egress.items():
-            if entry.key.startswith(prefix):
-                dead_egress.append(entry.key)
-        for i in range(len(dead_egress)):
-            _ = self.http3_response_egress.pop(dead_egress[i])
+        # Free streaming sources exactly once; the connection record
+        # itself is replaced when the slot is reused.
+        for entry in self.connections[slot].h3_tx.items():
+            if entry.value.src_addr != 0:
+                Pool[ChunkSourceBox].free(entry.value.src_addr)
+                self._open_sources -= 1
+        self.connections[slot].h3_tx = Dict[Int, _StreamTx]()
         if slot < len(self.slot_free):
             self.slot_free[slot] = True
         self.free_slots.append(slot)
