@@ -109,6 +109,7 @@ from ._reactor.lifecycle import (
     _accept_loop,
     _accept_loop_fd,
     _adopt_handed_off_h1,
+    ListenerGate,
 )
 
 
@@ -164,6 +165,8 @@ def _run_handler_loop_impl[
     else:
         reactor.register(c_int(listener_fd), LISTENER_TOKEN, INTEREST_READ)
 
+    var gate = ListenerGate(exclusive=is_shared)
+    gate.add(Int(listener_fd), LISTENER_TOKEN)
     var events = List[Event]()
     var exit_status = WORKER_STATUS_CLEAN
     var stopping_addr = Int(Pointer[Bool, _](to=stopping))
@@ -263,6 +266,7 @@ def _run_handler_loop_impl[
         var expired = _expired_idle_conns(fired_fds, fired_ids, conns, timers)
         for i in range(len(expired)):
             _cleanup_conn(expired[i], conns, timers, reactor, wheel)
+        gate.sync(reactor, len(conns), config.max_connections)
 
     store_worker_stat(stats_addr, WORKER_STAT_STATUS, exit_status)
 
@@ -363,6 +367,8 @@ def _run_static_loop_impl[
     else:
         reactor.register(c_int(listener_fd), LISTENER_TOKEN, INTEREST_READ)
 
+    var gate = ListenerGate(exclusive=is_shared)
+    gate.add(Int(listener_fd), LISTENER_TOKEN)
     var events = List[Event]()
     var exit_status = WORKER_STATUS_CLEAN
     var stopping_addr = Int(Pointer[Bool, _](to=stopping))
@@ -477,6 +483,7 @@ def _run_static_loop_impl[
         var expired = _expired_idle_conns(fired_fds, fired_ids, conns, timers)
         for i in range(len(expired)):
             _cleanup_conn(expired[i], conns, timers, reactor, wheel)
+        gate.sync(reactor, len(conns), config.max_connections)
 
     store_worker_stat(stats_addr, WORKER_STAT_STATUS, exit_status)
     # Stop taking hand-offs, then close what peers queued before that
@@ -614,6 +621,8 @@ def run_reactor_loop_cancel[
 
     reactor.register(listener_fd, LISTENER_TOKEN, INTEREST_READ)
 
+    var gate = ListenerGate()
+    gate.add(Int(listener_fd), LISTENER_TOKEN)
     var events = List[Event]()
     var exit_status = WORKER_STATUS_CLEAN
     var stopping_addr = Int(Pointer[Bool, _](to=stopping))
@@ -708,6 +717,7 @@ def run_reactor_loop_cancel[
         var expired = _expired_idle_conns(fired_fds, fired_ids, conns, timers)
         for i in range(len(expired)):
             _cleanup_conn(expired[i], conns, timers, reactor, wheel)
+        gate.sync(reactor, len(conns), config.max_connections)
 
     store_worker_stat(stats_addr, WORKER_STAT_STATUS, exit_status)
 
@@ -764,6 +774,8 @@ def run_reactor_loop_view[
 
     reactor.register(listener_fd, LISTENER_TOKEN, INTEREST_READ)
 
+    var gate = ListenerGate()
+    gate.add(Int(listener_fd), LISTENER_TOKEN)
     var events = List[Event]()
     var exit_status = WORKER_STATUS_CLEAN
     var stopping_addr = Int(Pointer[Bool, _](to=stopping))
@@ -858,6 +870,7 @@ def run_reactor_loop_view[
         var expired = _expired_idle_conns(fired_fds, fired_ids, conns, timers)
         for i in range(len(expired)):
             _cleanup_conn(expired[i], conns, timers, reactor, wheel)
+        gate.sync(reactor, len(conns), config.max_connections)
 
     store_worker_stat(stats_addr, WORKER_STAT_STATUS, exit_status)
 

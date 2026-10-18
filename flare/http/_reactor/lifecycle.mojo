@@ -430,3 +430,77 @@ def _adopt_handed_off_h1(
             continue
         _arm_accept_timer(client_fd, wheel, timers, idle_timeout_ms)
     bal.publish(len(conns))
+
+
+struct ListenerGate(Movable):
+    """Stop polling the listener(s) while a worker is at its connection cap.
+
+    A listener with a connection waiting stays readable, so a loop that
+    declines to accept at ``max_connections`` but leaves the listener
+    registered wakes on every ``poll`` and spins. The gate takes the
+    listener(s) out of the reactor when the live table reaches the cap and
+    puts them back as soon as a slot frees; the kernel queues the waiting
+    clients meanwhile, and the level-triggered listener reports them again
+    on resume. ``sync`` runs once per loop turn, after the turn's
+    connections have closed.
+
+    A listener registered with ``EPOLLEXCLUSIVE`` cannot be re-armed in
+    place, so pausing is a delete and resuming a fresh add.
+    """
+
+    var fds: List[Int]
+    var tokens: List[UInt64]
+    var armed: List[Bool]
+    var exclusive: Bool
+    var paused: Bool
+
+    def __init__(out self, exclusive: Bool = False):
+        self.fds = List[Int]()
+        self.tokens = List[UInt64]()
+        self.armed = List[Bool]()
+        self.exclusive = exclusive
+        self.paused = False
+
+    def add(mut self, fd: Int, token: UInt64):
+        """Track a listener that is already registered under ``token``."""
+        self.fds.append(fd)
+        self.tokens.append(token)
+        self.armed.append(True)
+
+    def sync(mut self, mut reactor: Reactor, live: Int, cap: Int):
+        """Pause at ``live >= cap`` (``cap > 0``), resume once below it."""
+        if cap <= 0:
+            return
+        if not self.paused:
+            if live < cap:
+                return
+            for i in range(len(self.fds)):
+                if not self.armed[i]:
+                    continue
+                try:
+                    reactor.unregister(c_int(self.fds[i]))
+                    self.armed[i] = False
+                except:
+                    pass
+            self.paused = True
+            return
+        if live >= cap:
+            return
+        var all_armed = True
+        for i in range(len(self.fds)):
+            if self.armed[i]:
+                continue
+            try:
+                if self.exclusive:
+                    reactor.register_exclusive(
+                        c_int(self.fds[i]), self.tokens[i], INTEREST_READ
+                    )
+                else:
+                    reactor.register(
+                        c_int(self.fds[i]), self.tokens[i], INTEREST_READ
+                    )
+                self.armed[i] = True
+            except:
+                all_armed = False
+        # A listener that failed to re-arm is retried on the next turn.
+        self.paused = not all_armed

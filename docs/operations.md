@@ -141,7 +141,7 @@ auditing the buffering chain.
 | `max_body_bytes` | 10 MiB | You're accepting file uploads. Use multipart streaming, not in-memory. |
 | `max_uri_bytes` | 8 KiB | Almost never. URLs longer than 8 KiB are usually a bug. |
 | `keep_alive_idle_ms` | 60 s | Keep-alive-heavy clients (browsers) -- consider 120 s; CDN -- 300 s; never above 600 s. |
-| `max_connections` | 0 (unlimited) | Per-worker accept-path cap. Set it to bound the file-descriptor / connection-flood surface; at the cap the worker stops accepting (surplus waits in the listen backlog) until a slot frees. |
+| `max_connections` | 0 (unlimited) | Per-worker accept-path cap. Set it to bound the file-descriptor / connection-flood surface; at the cap the worker takes its listener out of the reactor, so it sleeps instead of spinning, and the surplus waits in the listen backlog until a slot frees and the listener is put back. With per-worker `SO_REUSEPORT` listeners the kernel assigns each connection to a worker, so one worker can be at its cap while another has room. |
 
 The corresponding HTTP/2 limits live on `Http2ServerConfig`:
 

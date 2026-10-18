@@ -105,6 +105,7 @@ from ._reactor.lifecycle import (
     _collect_fired_timers,
     _expired_idle_conns,
     _hand_off_stream,
+    ListenerGate,
 )
 from ._server_reactor_impl import (
     ConnHandle,
@@ -1163,10 +1164,13 @@ def _run_unified_loop_for_fd[
     else:
         reactor.register(c_int(listener_fd), LISTENER_TOKEN, INTEREST_READ)
 
+    var gate = ListenerGate(exclusive=is_shared)
+    gate.add(listener_fd, LISTENER_TOKEN)
     var listener_fds = Dict[Int, Bool]()
     for i in range(len(extra_fds)):
         var xf = c_int(extra_fds[i])
         listener_fds[Int(xf)] = True
+        gate.add(Int(xf), UInt64(Int(xf)))
         comptime if is_shared:
             reactor.register_exclusive(xf, UInt64(Int(xf)), INTEREST_READ)
         else:
@@ -1260,6 +1264,7 @@ def _run_unified_loop_for_fd[
         var expired = _expired_idle_conns(fired_fds, fired_ids, conns, timers)
         for i in range(len(expired)):
             _cleanup_conn_unified(expired[i], conns, timers, reactor, wheel)
+        gate.sync(reactor, len(conns), config.max_connections)
 
     store_worker_stat(stats_addr, WORKER_STAT_STATUS, exit_status)
     # Stop taking hand-offs, then close what peers queued before that
@@ -1389,10 +1394,13 @@ def run_unified_reactor_loop_multi[
     var listener_fds = Dict[Int, Bool]()
     listener_fds[Int(primary_fd)] = True
     reactor.register(primary_fd, UInt64(Int(primary_fd)), INTEREST_READ)
+    var gate = ListenerGate()
+    gate.add(Int(primary_fd), UInt64(Int(primary_fd)))
     for i in range(len(extra_fds)):
         var f = c_int(extra_fds[i])
         listener_fds[Int(f)] = True
         reactor.register(f, UInt64(Int(f)), INTEREST_READ)
+        gate.add(Int(f), UInt64(Int(f)))
 
     var events = List[Event]()
     var stopping_addr = Int(Pointer[Bool, _](to=stopping))
@@ -1448,6 +1456,7 @@ def run_unified_reactor_loop_multi[
         var expired = _expired_idle_conns(fired_fds, fired_ids, conns, timers)
         for i in range(len(expired)):
             _cleanup_conn_unified(expired[i], conns, timers, reactor, wheel)
+        gate.sync(reactor, len(conns), config.max_connections)
 
     # Graceful shutdown: flip Cancel.SHUTDOWN, then close all live
     # conns. Listener fds are closed by ``HttpServer.__deinit__`` -- the
