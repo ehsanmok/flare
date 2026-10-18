@@ -97,6 +97,8 @@ def main() raises:
     # warmup + 5 measurement runs (10s + 5x30s = 160s) never
     # tickle the idle reaper.
     udp_cfg.max_idle_timeout_ms = UInt64(300_000)
+    # FLARE_BENCH_WORKERS=N serves on N SO_REUSEPORT workers.
+    udp_cfg.num_workers = Int(getenv("FLARE_BENCH_WORKERS", "1"))
 
     # bind_with_http3 also opens a TCP listener on tcp_addr for
     # h1 / h2c / h2; we point it at an ephemeral kernel-picked
