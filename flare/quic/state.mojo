@@ -55,6 +55,7 @@ from ._state_helpers import (
     frame_allowed_before_1rtt,
 )
 from .frame import (
+    EcnCounts,
     AckFrame,
     AckRange,
     ConnectionCloseFrame,
@@ -240,6 +241,9 @@ struct ConnectionEvents(Copyable):
     was not yet reset. RFC 9000 §3.5: the endpoint MUST answer each with a
     RESET_STREAM (the driver knows the final size); a stream already in
     ``Reset Sent`` is not listed, so the reply goes out once."""
+    var ack_ecn: List[EcnCounts]
+    """ECN counts (sec 19.3.2) of the ACK_ECN frames received this tick,
+    in order; an ACK without counts adds nothing."""
 
 
 def empty_events() -> ConnectionEvents:
@@ -259,6 +263,7 @@ def empty_events() -> ConnectionEvents:
         acked_ranges=List[UInt64](),
         datagrams=List[List[UInt8]](),
         stop_sending_resets=List[StopSendingFrame](),
+        ack_ecn=List[EcnCounts](),
     )
 
 
@@ -781,6 +786,8 @@ struct _ConnFrameHandler(FrameHandler):
         _arrive(self._conn()[], self.now_us, ack_eliciting=False)
         apply_ack(self._conn()[], ack)
         append_ack_ranges(ack, self._events()[].acked_ranges)
+        if len(ack.ecn) > 0:
+            self._events()[].ack_ecn.append(ack.ecn[0])
 
     def on_reset_stream(mut self, rs: ResetStreamFrame) raises:
         if self._conn()[].check_stream_ids:

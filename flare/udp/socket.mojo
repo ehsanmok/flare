@@ -13,6 +13,7 @@ Platform notes:
 
 from std.ffi import c_int, c_uint, c_size_t, c_ssize_t, get_errno, ErrNo
 from std.memory import stack_allocation
+from std.sys.info import CompilationTarget
 
 from std.format import Writable, Writer
 from ..net import (
@@ -401,6 +402,24 @@ struct UdpSocket(Movable):
             NetworkError: If ``setsockopt(2)`` fails.
         """
         self._socket.set_send_buffer(bytes)
+
+    def set_ecn(self, codepoint: Int) raises:
+        """Mark outgoing datagrams with the ECN ``codepoint`` (0 none,
+        2 ECT(0), 1 ECT(1), 3 CE; RFC 3168) and deliver received
+        datagrams' codepoints to :meth:`flare.udp.BatchReceiver.ecn`.
+        Linux only; a no-op elsewhere.
+
+        Raises:
+            NetworkError: If ``setsockopt(2)`` fails.
+        """
+        if not CompilationTarget.is_linux():
+            return
+        if self._local.ip.is_v6():
+            self._socket._set_int_opt(41, 66, 1)  # IPV6_RECVTCLASS
+            self._socket._set_int_opt(41, 67, codepoint)  # IPV6_TCLASS
+        else:
+            self._socket._set_int_opt(0, 13, 1)  # IP_RECVTOS
+            self._socket._set_int_opt(0, 1, codepoint)  # IP_TOS
 
     def set_broadcast(self, enabled: Bool) raises:
         """Enable or disable sending to broadcast addresses.

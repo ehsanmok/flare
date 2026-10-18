@@ -70,6 +70,7 @@ from .frame import (
     StreamDataBlockedFrame,
     StreamFrame,
     DatagramFrame,
+    EcnCounts,
     encode_ack,
     encode_datagram,
     encode_connection_close,
@@ -509,6 +510,11 @@ struct QuicListener(Movable):
     ``recvmmsg`` drain is usable. Flipped to ``False`` permanently on
     the first ``ENOSYS`` (kernel without the syscall) so the reactor
     falls back to the per-datagram ``try_recv_from`` loop."""
+    var _rx_ecn: Int
+    """ECN codepoint of the datagram being dispatched (0 when unknown)."""
+    var _ecn_marking: Bool
+    """Sent datagrams are marked ECT(0) (``config.ecn``, until a
+    connection fails ECN validation)."""
 
     def __init__(
         out self,
@@ -578,6 +584,8 @@ struct QuicListener(Movable):
         self._fwd_data = List[UInt8]()
         self._fwd_lens = List[Int]()
         self._fwd_peers = List[SocketAddr]()
+        self._rx_ecn = 0
+        self._ecn_marking = config.ecn and udp_batch_supported()
         self._rx_batch_ok = udp_batch_supported() and (
             getenv("FLARE_QUIC_NO_BATCH", "0") != "1"
         )
@@ -654,6 +662,8 @@ struct QuicListener(Movable):
             except:
                 pass
         var actual = sock.local_addr()
+        # Read clients' ECN marks; mark ours ECT(0) when asked.
+        sock.set_ecn(2 if config.ecn else 0)
         var acceptor = RustlsQuicAcceptor(config.rustls_config.copy())
         var cfg = config.copy()
         if cfg.num_workers > 1 and len(cfg.cid_route_key) == 0:
@@ -946,6 +956,7 @@ struct QuicListener(Movable):
                     # the egress ACK reflects exactly what arrived,
                     # gaps and all (RFC 9000 sec 13.2 / 21.4).
                     _ack_record(self.rx_1rtt_ranges[slot], dec[1])
+                    self._count_ecn(slot)
                     # Only owe an ACK for ack-eliciting packets (a
                     # request's STREAM/CRYPTO frames). Acking the
                     # peer's pure-ACK packets would, since our ACK
@@ -991,6 +1002,7 @@ struct QuicListener(Movable):
                         events = self.connections[slot].dispatch_plaintext(
                             Span[UInt8, _](dec[0]), now_us, dec[1]
                         )
+                        self._count_ecn(slot)
                     else:
                         ok = False
                 except:
@@ -1038,6 +1050,14 @@ struct QuicListener(Movable):
                 self.peer_addrs[slot] = self.migration_probe[slot].candidate
             self.migration_probe[slot].on_validated()
         return True
+
+    def _count_ecn(mut self, slot: Int):
+        """Count the codepoint of the application-space packet just
+        processed (RFC 9000 sec 13.4.1): ECT(0) = 2, ECT(1) = 1, CE = 3."""
+        if self._rx_ecn == 0:
+            return
+        ref e = self.connections[slot].ecn_rx
+        e[0 if self._rx_ecn == 2 else (1 if self._rx_ecn == 1 else 2)] += 1
 
     def _begin_path_validation(
         mut self, slot: Int, peer: SocketAddr, datagram_len: Int
@@ -2381,13 +2401,14 @@ struct QuicListener(Movable):
 
         Reactor I/O loop step:
 
-        1. One blocking ``recv_from`` (``SO_RCVTIMEO``) wakes the
-           tick when a datagram arrives or times out cleanly.
-        2. Then ``try_recv_from`` (``MSG_DONTWAIT``) drains the
-           rest of the socket queue, up to :data:`_RX_BATCH`
-           datagrams, so the per-tick H3 pump / timer / egress
-           bookkeeping in the serve loop is amortized over the
-           whole burst instead of paid per datagram.
+        1. One ``recvmmsg`` blocks (``SO_RCVTIMEO``) until a datagram
+           arrives or the wait times out cleanly, and takes the rest of
+           the burst, up to :data:`_RX_BATCH` datagrams, with each
+           one's ECN codepoint. Without ``recvmmsg``, a blocking
+           ``recv_from`` wakes the tick and ``try_recv_from`` drains
+           the rest. Either way the per-tick H3 pump / timer / egress
+           bookkeeping in the serve loop is amortized over the whole
+           burst instead of paid per datagram.
         3. Each datagram routes through :meth:`dispatch_datagram`
            by DCID; the matched slot's :meth:`_drain_and_send`
            flushes its ACK / response.
@@ -2399,6 +2420,39 @@ struct QuicListener(Movable):
             # One setsockopt per change, not one per loop turn.
             self._socket.set_recv_timeout(timeout_ms)
             self._rcv_timeout_ms = timeout_ms
+        # Drain each touched slot once, after the whole burst: draining
+        # after every datagram sent one ACK packet per packet received
+        # (RFC 9000 sec 13.2.1 asks for one per two ack-eliciting).
+        var dirty = List[Int]()
+        if self._rx_batch_ok:
+            # One recvmmsg waits (up to SO_RCVTIMEO) for the first
+            # datagram and takes the rest of the burst, with each one's
+            # ECN codepoint; the blocking recv_from below saw neither.
+            try:
+                var n = self._rx_batch.recv(self._socket.fd(), wait=True)
+                for i in range(n):
+                    self._rx_ecn = self._rx_batch.ecn(i)
+                    var nslot = self.dispatch_datagram(
+                        self._rx_batch.message(i), self._rx_batch.sender(i)
+                    )
+                    if nslot >= 0 and nslot not in dirty:
+                        dirty.append(nslot)
+                self._rx_ecn = 0
+                self._take_forwarded(dirty)
+                if n == 0:
+                    _ = self.drain_all_egress()
+                    return False
+                self._drain_slots(dirty)
+                return True
+            except e:
+                self._rx_ecn = 0
+                # ENOSYS: latch off and fall through to the per-datagram
+                # path for the rest of the process lifetime.
+                if String(e).startswith("UdpBatchUnsupported"):
+                    self._rx_batch_ok = False
+                else:
+                    self._drain_slots(dirty)
+                    raise e^
         var buf = List[UInt8]()
         buf.resize(Int(self.config.max_udp_payload_size), 0)
         var sender: SocketAddr
@@ -2425,39 +2479,12 @@ struct QuicListener(Movable):
             self._take_forwarded(fwd)
             _ = self.drain_all_egress()
             return False
-        # Drain each touched slot once, after the whole burst: draining
-        # after every datagram sent one ACK packet per packet received
-        # (RFC 9000 sec 13.2.1 asks for one per two ack-eliciting).
-        var dirty = List[Int]()
         var slot = self.dispatch_datagram(Span[UInt8, _](buf[:got]), sender)
         if slot >= 0:
             dirty.append(slot)
         # Drain the rest of the socket queue without blocking so a
-        # high-rate sender's burst is handled in one tick. On Linux a
-        # single ``recvmmsg`` pulls the whole burst across the
-        # user/kernel boundary in one syscall; everywhere else (or on a
-        # kernel without the syscall) fall back to the per-datagram
-        # ``try_recv_from`` loop with identical dispatch semantics.
-        if self._rx_batch_ok:
-            try:
-                var n = self._rx_batch.recv(self._socket.fd())
-                for i in range(n):
-                    var nslot = self.dispatch_datagram(
-                        self._rx_batch.message(i), self._rx_batch.sender(i)
-                    )
-                    if nslot >= 0 and nslot not in dirty:
-                        dirty.append(nslot)
-                self._take_forwarded(dirty)
-                self._drain_slots(dirty)
-                return True
-            except e:
-                # ENOSYS: latch off and fall through to the per-datagram
-                # path for the rest of the process lifetime.
-                if String(e).startswith("UdpBatchUnsupported"):
-                    self._rx_batch_ok = False
-                else:
-                    self._drain_slots(dirty)
-                    raise e^
+        # high-rate sender's burst is handled in one tick (the path
+        # without recvmmsg).
         for _ in range(_RX_BATCH - 1):
             var nb_got: Int
             var nb_sender: SocketAddr
@@ -2909,6 +2936,9 @@ struct QuicListener(Movable):
         if owe_ack or first_flight:
             if owe_ack:
                 var ack = _ack_from_ranges(self.rx_1rtt_ranges[slot], UInt64(0))
+                ref e = self.connections[slot].ecn_rx
+                if e[0] + e[1] + e[2] > 0:
+                    ack.ecn.append(EcnCounts(ect0=e[0], ect1=e[1], ce=e[2]))
                 encode_ack(ack, plaintext)
             if not self.handshake_done_sent[slot]:
                 encode_handshake_done(plaintext)
@@ -4202,10 +4232,28 @@ struct QuicListener(Movable):
                 "ACK for a packet that was never sent",
             )
             return
-        _ = self.loss[slot].on_ack_ranges(
-            events.acked_ranges, _monotonic_ms(), next_pn
-        )
+        var prev_largest = self.loss[slot].largest_acked
+        var had_largest = self.loss[slot].has_largest_acked
+        var now = _monotonic_ms()
+        _ = self.loss[slot].on_ack_ranges(events.acked_ranges, now, next_pn)
         self.connections[slot].pmtu.on_acked(events.acked_ranges)
+        if self._ecn_marking:
+            # Only an ACK that moves the largest acknowledged is checked
+            # (RFC 9000 sec 13.4.2.1): reordered ones carry older counts.
+            var advanced = (
+                not had_largest or self.loss[slot].largest_acked > prev_largest
+            )
+            ref lr = self.loss[slot]
+            if self.connections[slot].ecn_tx.on_ack(
+                lr.last_newly_acked if advanced else 0, events.ack_ecn
+            ):
+                lr.cc.on_congestion_event(lr.last_acked_sent_ms, now)
+            if not self.connections[slot].ecn_tx.ok:
+                self._ecn_marking = False
+                try:
+                    self._socket.set_ecn(0)
+                except:
+                    pass
         self._retransmit_lost(slot)
         self._rearm_pto_timer(slot)
 

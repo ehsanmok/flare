@@ -37,6 +37,7 @@ from .protection import (
     unprotect_handshake_packet,
     unprotect_initial_packet,
 )
+from ._ecn import EcnValidator
 from ._pmtud import PmtuDiscovery
 from .state import (
     CONN_STATE_CLOSED,
@@ -232,6 +233,12 @@ struct QuicServerConfig(Copyable, Defaultable):
     """1-RTT packets sent under one key before the server starts a key
     update (RFC 9001 sec 6). Default 2^23, the AES-GCM confidentiality
     limit of RFC 9001 sec 6.6, which also covers ChaCha20-Poly1305."""
+    var ecn: Bool
+    """Mark sent datagrams ECT(0) and treat the client's CE reports as
+    congestion (RFC 9000 sec 13.4, RFC 9002 sec 7.1). Off by default:
+    marking is socket-wide, so the first connection whose ECN counts
+    fail validation (sec 13.4.2) turns it off for the listener. Counts
+    of what clients mark are reported either way."""
     var max_datagram_frame_size: UInt64
     """``max_datagram_frame_size`` to advertise (RFC 9221 sec 3); 0, the
     default, leaves DATAGRAM frames off and a peer that sends one is
@@ -265,6 +272,7 @@ struct QuicServerConfig(Copyable, Defaultable):
         self.retry_token_max_age_ms = UInt64(10_000)
         self.max_pto_count = 10
         self.max_datagram_frame_size = UInt64(0)
+        self.ecn = False
         self.key_update_interval = UInt64(1) << 23
         self.http3 = Http3Config()
         self.num_workers = 1
@@ -517,6 +525,10 @@ struct QuicConnection(Copyable):
     """DATAGRAM payloads queued for the next drain."""
     var dg_rx_bytes: Int
     var dg_tx_bytes: Int
+    var ecn_rx: List[UInt64]
+    """ECT(0), ECT(1) and CE counts of 1-RTT packets received, reported
+    in ACK_ECN frames (RFC 9000 sec 13.4.1)."""
+    var ecn_tx: EcnValidator
     var pmtu: PmtuDiscovery
     """Datagram size validated on this path (RFC 9000 sec 14.3)."""
     var serial: UInt64
@@ -553,6 +565,8 @@ struct QuicConnection(Copyable):
         self.dg_tx_bytes = 0
         self.serial = 0
         self.pmtu = PmtuDiscovery()
+        self.ecn_rx = List[UInt64](length=3, fill=0)
+        self.ecn_tx = EcnValidator()
         self.fc_tunnel_credited = Dict[Int, UInt64]()
         self.closing = False
         self.closing_rx = 0

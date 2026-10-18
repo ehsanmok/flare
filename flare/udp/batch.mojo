@@ -80,6 +80,10 @@ comptime _OFF_CONTROLLEN: Int = 40
 comptime _OFF_FLAGS: Int = 48
 # mmsghdr.msg_len offset (after the embedded msghdr)
 comptime _OFF_MSGLEN: Int = 56
+comptime _CTRL: Int = 64
+"""Control buffer per message: room for the one IP_TOS / IPV6_TCLASS
+cmsg (``CMSG_SPACE(4)`` = 24) the receive path asks for."""
+comptime _MSG_WAITFORONE: c_int = 0x10000
 
 # ── GSO control message (SOL_UDP / UDP_SEGMENT) ──────────────────────────────
 comptime SOL_UDP: c_int = IPPROTO_UDP  # 17
@@ -169,6 +173,7 @@ struct BatchReceiver(Movable):
     var _iov: Pointer[UInt8, MutUntrackedOrigin]
     var _names: Pointer[UInt8, MutUntrackedOrigin]
     var _data: Pointer[UInt8, MutUntrackedOrigin]
+    var _ctrl: Pointer[UInt8, MutUntrackedOrigin]
     var _capacity: Int
     var _max_payload: Int
     var _count: Int
@@ -205,6 +210,7 @@ struct BatchReceiver(Movable):
         self._iov = _alloc_zeroed(capacity * _IOVEC)
         self._names = _alloc_zeroed(capacity * _NAME)
         self._data = _alloc_zeroed(capacity * max_payload)
+        self._ctrl = _alloc_zeroed(capacity * _CTRL)
         # Wire the static pointers once: each msghdr points at its own
         # name slot + a one-cell iovec into its data slot.
         for i in range(capacity):
@@ -216,6 +222,7 @@ struct BatchReceiver(Movable):
             _poke_u32(hdr, _OFF_NAMELEN, UInt32(_NAME))
             _poke_u64(hdr, _OFF_IOV, UInt64(Int(self._iov) + i * _IOVEC))
             _poke_u64(hdr, _OFF_IOVLEN, UInt64(1))
+            _poke_u64(hdr, _OFF_CONTROL, UInt64(Int(self._ctrl) + i * _CTRL))
 
     def __deinit__(deinit self):
         if Int(self._mmsg) != 0:
@@ -226,10 +233,13 @@ struct BatchReceiver(Movable):
             self._names.unsafe_free()
         if Int(self._data) != 0:
             self._data.unsafe_free()
+        if Int(self._ctrl) != 0:
+            self._ctrl.unsafe_free()
 
-    def recv(mut self, fd: Int) raises -> Int:
+    def recv(mut self, fd: Int, wait: Bool = False) raises -> Int:
         """Drain up to ``capacity`` datagrams with one non-blocking
-        ``recvmmsg``.
+        ``recvmmsg``; with ``wait``, block (up to the socket's
+        ``SO_RCVTIMEO``) for the first, then take what else is queued.
 
         Returns the number of datagrams received (0 when the socket
         queue is empty -- ``EAGAIN`` / ``EWOULDBLOCK``).
@@ -238,22 +248,19 @@ struct BatchReceiver(Movable):
             UdpBatchUnsupported: kernel lacks ``recvmmsg`` (``ENOSYS``).
             NetworkError: any other libc errno.
         """
-        # Re-arm the kernel-mutated input field (msg_namelen) for every
-        # cell; iov_len is read-only to the kernel so it stays put.
+        # Re-arm the kernel-mutated input fields (msg_namelen,
+        # msg_controllen) for every cell; iov_len is read-only to the
+        # kernel so it stays put.
         for i in range(self._capacity):
-            _poke_u32(
-                self._mmsg.unsafe_offset(i * _MMSGHDR).unsafe_offset(
-                    _OFF_NAMELEN
-                ),
-                0,
-                UInt32(_NAME),
-            )
+            var hdr = self._mmsg.unsafe_offset(i * _MMSGHDR)
+            _poke_u32(hdr, _OFF_NAMELEN, UInt32(_NAME))
+            _poke_u64(hdr, _OFF_CONTROLLEN, UInt64(_CTRL))
         var ret = _recvmmsg(
             c_int(fd),
             self._mmsg,
             c_uint(self._capacity),
-            MSG_DONTWAIT,
-            0,  # NULL timeout: MSG_DONTWAIT keeps it non-blocking
+            _MSG_WAITFORONE if wait else MSG_DONTWAIT,
+            0,  # NULL timeout: the flag alone sets the blocking mode
         )
         if ret < 0:
             var e = get_errno()
@@ -294,6 +301,25 @@ struct BatchReceiver(Movable):
         return Span[UInt8, MutUntrackedOrigin](
             unsafe_ptr=self._data.unsafe_offset(i * self._max_payload), length=n
         )
+
+    def ecn(self, i: Int) -> Int:
+        """The ECN codepoint (low two bits of the IPv4 TOS / IPv6 traffic
+        class) the ``i``-th datagram arrived with; 0 unless the socket
+        asked for it (:meth:`flare.udp.UdpSocket.set_ecn`)."""
+        var hdr = self._mmsg.unsafe_offset(i * _MMSGHDR)
+        var clen = min(Int(_peek_u32(hdr, _OFF_CONTROLLEN)), _CTRL)
+        var c = self._ctrl.unsafe_offset(i * _CTRL)
+        var off = 0
+        while off + _CMSG_HDR < clen:
+            var n = Int(_peek_u32(c, off))
+            var level = _peek_u32(c, off + 8)
+            var kind = _peek_u32(c, off + 12)
+            if n <= _CMSG_HDR or off + n > clen:
+                break
+            if (level == 0 and kind == 1) or (level == 41 and kind == 67):
+                return Int(c.unsafe_offset(off + _CMSG_DATA_OFF)[]) & 3
+            off += (n + 7) & ~7
+        return 0
 
     def sender(self, i: Int) raises -> SocketAddr:
         """Decode the ``i``-th datagram's source address."""

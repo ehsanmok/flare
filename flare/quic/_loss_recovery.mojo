@@ -132,6 +132,11 @@ struct LossRecovery(Movable):
     # Loss detection.
     var largest_acked: UInt64
     var has_largest_acked: Bool
+    var last_newly_acked: Int
+    """Packets the last :meth:`on_ack_ranges` retired."""
+    var last_acked_sent_ms: UInt64
+    """Send time of the newest of them, for a congestion event an ECN-CE
+    report raises (RFC 9002 sec 7.1)."""
     # Congestion control.
     var bytes_in_flight: UInt64
     var cc: CubicController
@@ -154,6 +159,8 @@ struct LossRecovery(Movable):
         self.max_ack_delay_ms = _DEFAULT_MAX_ACK_DELAY_MS
         self.largest_acked = 0
         self.has_largest_acked = False
+        self.last_newly_acked = 0
+        self.last_acked_sent_ms = 0
         self.bytes_in_flight = 0
         self.cc = CubicController()
         self.pace_tokens = _PACING_BURST
@@ -320,6 +327,7 @@ struct LossRecovery(Movable):
         and is ignored here. It used to raise ``largest_acked``, and an
         ACK claiming 2^60 then declared every packet in flight lost:
         a retransmission storm on demand."""
+        self.last_newly_acked = 0
         if len(ranges) < 2 or self.live_count == 0:
             return False
         var top = ranges[1]
@@ -351,9 +359,11 @@ struct LossRecovery(Movable):
                     newest_acked_pn = pn
                     newest_acked_time = self.sent[i].time_ms
                     have_newest = True
+                self.last_newly_acked += 1
                 self._retire(i)
             i += 1
         self._compact()
+        self.last_acked_sent_ms = newest_acked_time
         # RTT sample from the largest newly-acked packet (RFC 9002
         # section 5.1: only the largest-acked drives the sample).
         if have_newest and now_ms > newest_acked_time:
