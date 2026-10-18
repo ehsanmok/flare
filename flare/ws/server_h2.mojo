@@ -48,7 +48,9 @@ def pull_client_frame(
     var got = dr^.take_frame()
     if not got.masked:
         raise Error("ws: unmasked client frame")
-    buf = List[UInt8](Span[UInt8, _](buf)[consumed:])
+    var rest = List[UInt8](capacity=len(buf) - consumed)
+    rest.extend(Span[UInt8, _](buf)[consumed:])
+    buf = rest^
     return got^
 
 

@@ -52,4 +52,6 @@ def parse_capsule(
     var end = start + Int(n.value)
     if end > len(buf):
         return None
-    return (Capsule(t.value, List[UInt8](buf[start:end])), end)
+    var value = List[UInt8](capacity=end - start)
+    value.extend(buf[start:end])
+    return (Capsule(t.value, value^), end)

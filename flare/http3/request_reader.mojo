@@ -334,7 +334,8 @@ def feed_into[
             return total
         # One copy of the payload; a byte-at-a-time append loop here
         # was the top cost of an h3 upload.
-        var data = List[UInt8](buf[header_size:total])
+        var data = List[UInt8](capacity=Int(flen))
+        data.extend(buf[header_size:total])
         reader.body_bytes += flen
         handler.on_data(data^)
         return total

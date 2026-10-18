@@ -484,7 +484,8 @@ struct Http3ClientConnection(Movable, PoolableConn):
                 _ = self.poll_responses(100)
                 continue
             var count = min(cap, len(wire) - pos)
-            var part = List[UInt8](Span(wire)[pos : pos + count])
+            var part = List[UInt8](capacity=count)
+            part.extend(Span(wire)[pos : pos + count])
             self.quic.send_stream(sid, part, False)
             pos += count
             start = _monotonic_ms()
@@ -798,7 +799,9 @@ struct Http3ClientConnection(Movable, PoolableConn):
                     self.goaway_id = id.value
             pos += start + flen
         if pos > 0:
-            self._ctrl = List[UInt8](Span[UInt8, _](self._ctrl)[pos:])
+            var rest = List[UInt8](capacity=len(self._ctrl) - pos)
+            rest.extend(Span[UInt8, _](self._ctrl)[pos:])
+            self._ctrl = rest^
 
     def close(mut self):
         self.quic.close()

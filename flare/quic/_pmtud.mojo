@@ -242,7 +242,9 @@ def split_frames(
                 if last:
                     break
         else:
-            pieces.append(List[UInt8](frames[pos : pos + n]))
+            var whole = List[UInt8](capacity=n)
+            whole.extend(frames[pos : pos + n])
+            pieces.append(whole^)
         for i in range(len(pieces)):
             if len(cur) > 0 and len(cur) + len(pieces[i]) > budget:
                 out.append(cur^)

@@ -1760,7 +1760,9 @@ struct QuicClientConnection(Movable):
         ):
             return False
         var frames = List[UInt8](capacity=frame)
-        encode_datagram(DatagramFrame(List[UInt8](payload), True), frames)
+        var data = List[UInt8](capacity=len(payload))
+        data.extend(payload)
+        encode_datagram(DatagramFrame(data^, True), frames)
         while len(frames) < 16:
             frames.append(UInt8(0))  # header-protection sample floor
         var dg = self._build_1rtt(

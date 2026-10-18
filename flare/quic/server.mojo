@@ -1982,7 +1982,7 @@ struct QuicListener(Movable):
         if stream_id not in txs:
             return List[UInt8]()
         ref st = txs[stream_id]
-        var out = List[UInt8](Span[UInt8, _](st.buf)[st.pos :])
+        var out = _copy(Span[UInt8, _](st.buf)[st.pos :])
         st.consume(st.pending())
         if st.done and st.src_addr == 0:
             _ = txs.pop(stream_id)
@@ -2205,7 +2205,7 @@ struct QuicListener(Movable):
         if slen > MAX_CID_LENGTH or 7 + dlen + slen > len(datagram):
             return
         var dcid = ConnectionId(
-            bytes=List[UInt8](Span[UInt8, _](datagram)[6 : 6 + dlen])
+            bytes=_copy(Span[UInt8, _](datagram)[6 : 6 + dlen])
         )
         var scid = ConnectionId(
             bytes=List[UInt8](
@@ -3450,7 +3450,7 @@ struct QuicListener(Movable):
                 var q = decode_varint(Span[UInt8, _](d))
                 if Int(q.value) * 4 == t.stream_id:
                     qd.dg_rx_bytes -= len(d)
-                    out.append(List[UInt8](Span[UInt8, _](d)[q.consumed :]))
+                    out.append(_copy(Span[UInt8, _](d)[q.consumed :]))
                     continue
             except:
                 pass
@@ -3675,7 +3675,7 @@ struct QuicListener(Movable):
         if len(payload) == 0:
             return List[UInt8]()
         var eliciting = len(payload) > ack_len
-        var tracked = List[UInt8](Span[UInt8, _](payload)[ack_len:])
+        var tracked = _copy(Span[UInt8, _](payload)[ack_len:])
         # RFC 9000 sec 14.1: a datagram carrying an ack-eliciting Initial
         # is at least 1200 bytes. PADDING frames (zero bytes) fill the
         # packet to ``pad_to``. Beyond the payload a server Initial has
@@ -3827,7 +3827,7 @@ struct QuicListener(Movable):
                 )
         if len(payload) == 0:
             return List[UInt8]()
-        var tracked = List[UInt8](Span[UInt8, _](payload)[ack_len:])
+        var tracked = _copy(Span[UInt8, _](payload)[ack_len:])
         # 2. Build the long-header prefix (no token varint at
         # Handshake level per RFC 9000 §17.2.4).
         var first_bits = (pn_length - 1) & 0x3
@@ -4604,18 +4604,24 @@ struct QuicListener(Movable):
         self._socket.close()
 
 
+def _copy(s: Span[UInt8, _]) -> List[UInt8]:
+    var out = List[UInt8](capacity=len(s))
+    out.extend(s)
+    return out^
+
+
 def _queue_prefix(q: List[UInt8], max_bytes: Int) -> List[UInt8]:
     """The first ``max_bytes`` of ``q`` (all of it when ``max_bytes`` is
     0 or larger than ``q``)."""
     var n = len(q) if max_bytes <= 0 or max_bytes > len(q) else max_bytes
-    return List[UInt8](Span[UInt8, _](q)[:n])
+    return _copy(Span[UInt8, _](q)[:n])
 
 
 def _queue_rest(q: List[UInt8], sent: Int) -> List[UInt8]:
     """``q`` without its first ``sent`` bytes."""
     if sent >= len(q):
         return List[UInt8]()
-    return List[UInt8](Span[UInt8, _](q)[sent:])
+    return _copy(Span[UInt8, _](q)[sent:])
 
 
 def _is_quic_v1(datagram: Span[UInt8, _]) -> Bool:

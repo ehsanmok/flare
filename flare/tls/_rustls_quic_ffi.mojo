@@ -301,7 +301,8 @@ def _do_take_crypto(
     # If the buffer was fully consumed, the next chunk may still be
     # waiting (rustls splits at our cap). Loop until the FFI reports
     # written < cap, meaning nothing further is pending at this level.
-    var collected = List[UInt8](Span[UInt8, _](out)[:written])
+    var collected = List[UInt8](capacity=written)
+    collected.extend(Span[UInt8, _](out)[:written])
     while written == cap:
         written = 0
         rc = _take_crypto_call(lib, session, level, out, cap, Int(written_ptr))
