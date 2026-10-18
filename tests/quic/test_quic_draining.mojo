@@ -193,7 +193,37 @@ def test_client_sends_nothing_after_the_peers_connection_close() raises:
     server.close()
 
 
+def test_server_sends_no_long_header_packet_while_draining() raises:
+    """A CONNECTION_CLOSE that arrives mid-handshake used to leave the
+    Initial and Handshake retransmits (PTO, ACK-driven) still sending."""
+    var server = _bind()
+    var connector = RustlsQuicConnector(
+        Path(_FIXDIR + "ca.pem").read_text(), _alpn()
+    )
+    var client = QuicClientConnection.start(
+        server.local_addr(), connector, String("localhost")
+    )
+    for _ in range(10):
+        _ = server.tick(timeout_ms=20)
+        if _live_slot(server) >= 0:
+            break
+    var slot = _live_slot(server)
+    assert_true(slot >= 0)
+    var ping = List[UInt8](length=32, fill=UInt8(0))  # PING + PADDING
+    ping[0] = 0x01
+    var control = server._build_initial_response(slot, frames=ping.copy())
+    assert_true(len(control) > 0, "control: an Initial is built")
+    server.connections[slot].conn.state = CONN_STATE_DRAINING
+    var init = server._build_initial_response(slot, frames=ping.copy())
+    var hs = server._build_handshake_response(slot, frames=ping.copy())
+    server.close()
+    client.close()
+    assert_equal(len(init), 0, "an Initial was built while DRAINING")
+    assert_equal(len(hs), 0, "a Handshake packet was built while DRAINING")
+
+
 def main() raises:
     test_server_sends_nothing_after_the_peers_connection_close()
     test_client_sends_nothing_after_the_peers_connection_close()
-    print("test_quic_draining: 2 passed")
+    test_server_sends_no_long_header_packet_while_draining()
+    print("test_quic_draining: 3 passed")

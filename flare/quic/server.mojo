@@ -3697,6 +3697,11 @@ struct QuicListener(Movable):
         once long-running connections cross the 2-byte pn
         window.
         """
+        if (
+            slot < len(self.connections)
+            and self.connections[slot].conn.state == CONN_STATE_DRAINING
+        ):
+            return List[UInt8]()  # RFC 9000 sec 10.2.2
         # ``frames`` re-sends CRYPTO from a lost packet; otherwise take
         # the next ``max_bytes`` of the queue. An ACK for the Initial
         # space leads when one is owed (RFC 9000 sec 13.1).
@@ -3824,6 +3829,8 @@ struct QuicListener(Movable):
         """
         if slot < 0 or slot >= len(self.connections):
             return List[UInt8]()
+        if self.connections[slot].conn.state == CONN_STATE_DRAINING:
+            return List[UInt8]()  # RFC 9000 sec 10.2.2
         if slot >= len(self.tls_handshake_egress_queues):
             return List[UInt8]()
         if (
