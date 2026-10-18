@@ -635,6 +635,12 @@ from test_quic_pmtud import (
     test_search_tries_the_ceiling_then_bisects as test_quic_pmtud__test_search_tries_the_ceiling_then_bisects,
 )
 from test_quic_pmtud import (
+    test_a_black_hole_falls_back_and_retries_later as test_quic_pmtud__test_a_black_hole_falls_back_and_retries_later,
+)
+from test_quic_pmtud import (
+    test_lost_frames_are_split_to_the_smaller_size as test_quic_pmtud__test_lost_frames_are_split_to_the_smaller_size,
+)
+from test_quic_pmtud import (
     test_both_ends_validate_up_to_the_smaller_limit as test_quic_pmtud__test_both_ends_validate_up_to_the_smaller_limit,
 )
 from test_quic_post_initial_decrypt import (
@@ -1500,6 +1506,12 @@ def main() raises:
     suite.test[test_quic_new_token__test_a_returning_client_skips_the_retry]()
     # tests/quic/test_quic_pmtud.mojo
     suite.test[test_quic_pmtud__test_search_tries_the_ceiling_then_bisects]()
+    suite.test[
+        test_quic_pmtud__test_a_black_hole_falls_back_and_retries_later
+    ]()
+    suite.test[
+        test_quic_pmtud__test_lost_frames_are_split_to_the_smaller_size
+    ]()
     suite.test[
         test_quic_pmtud__test_both_ends_validate_up_to_the_smaller_limit
     ]()

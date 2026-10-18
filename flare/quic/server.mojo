@@ -172,6 +172,7 @@ from ..tls._rustls_quic_ffi import (
     _do_session_free,
     _do_take_crypto,
 )
+from ._pmtud import split_frames
 from .packet import encode_short_header, packet_number_length
 from .retry import (
     NEW_TOKEN_VERSION,
@@ -1200,10 +1201,7 @@ struct QuicListener(Movable):
             var key = self.connections[slot].issued_cids.get(seq)
             if key:
                 _ = self.connections[slot].issued_cids.pop(seq, key.value())
-                try:
-                    self.cid_table.retire(key.value())
-                except:
-                    pass
+                self.cid_table.retire(key.value())
                 self.connections[slot].cid_replenish += 1
 
     def _new_local_cid(self) raises -> ConnectionId:
@@ -3315,7 +3313,7 @@ struct QuicListener(Movable):
         ref pm = self.connections[slot].pmtu
         var now = _monotonic_ms()
         pm.check_lost(now, self.loss[slot].pto_interval_ms())
-        var size = pm.want_probe()
+        var size = pm.want_probe(now)
         if size == 0:
             return False
         var frames = List[UInt8](capacity=size)
@@ -4288,16 +4286,14 @@ struct QuicListener(Movable):
         var peer = self.peer_addrs[slot]
         # The loss-time timer (RFC 9002 sec 6.1.2) shares this one: a
         # packet past the time threshold is lost, not a probe's business.
+        # A second PTO in a row above the base path size is a black hole
+        # (RFC 8899 sec 4.3): fall back so the re-sends get through.
+        if self.loss[slot].pto_count >= 1:
+            self.connections[slot].pmtu.on_black_hole(_monotonic_ms())
         var lost = self.loss[slot].detect_lost(_monotonic_ms())
         if len(lost) > 0:
             for i in range(len(lost)):
-                if len(lost[i]) == 0:
-                    continue
-                var dg = self._build_1rtt_response(
-                    slot, lost[i].copy(), ack_eliciting=True
-                )
-                if len(dg) > 0:
-                    _ = self.send_to(Span[UInt8, _](dg), peer)
+                self._resend(slot, lost[i], peer)
             self._rearm_pto_timer(slot)
             return
         # A handshake still in flight probes its earliest space first
@@ -4316,11 +4312,7 @@ struct QuicListener(Movable):
                 return
         var frames = self.loss[slot].fire_pto()
         if len(frames) > 0:
-            var dg = self._build_1rtt_response(
-                slot, frames^, ack_eliciting=True
-            )
-            if len(dg) > 0:
-                _ = self.send_to(Span[UInt8, _](dg), peer)
+            self._resend(slot, frames, peer)
         else:
             # Nothing tracked to probe with: fall back to re-flushing
             # whatever 1-RTT egress is still pending, which is what this
@@ -4449,11 +4441,21 @@ struct QuicListener(Movable):
         var peer = self.peer_addrs[slot]
         var lost = self.loss[slot].detect_lost(_monotonic_ms())
         for i in range(len(lost)):
-            var frames = lost[i].copy()
-            if len(frames) == 0:
-                continue
+            self._resend(slot, lost[i], peer)
+
+    def _resend(
+        mut self, slot: Int, frames: List[UInt8], peer: SocketAddr
+    ) raises:
+        """Re-send a lost packet's frames under fresh packet numbers,
+        split to the current path size."""
+        if len(frames) == 0:
+            return
+        var parts = split_frames(
+            Span[UInt8, _](frames), self.connections[slot].pmtu.current - 64
+        )
+        for i in range(len(parts)):
             var dg = self._build_1rtt_response(
-                slot, frames^, ack_eliciting=True
+                slot, parts[i].copy(), ack_eliciting=True
             )
             if len(dg) > 0:
                 _ = self.send_to(Span[UInt8, _](dg), peer)

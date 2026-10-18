@@ -102,7 +102,7 @@ from .frame import (
     encode_retire_connection_id,
     encode_stream,
 )
-from ._pmtud import PmtuDiscovery
+from ._pmtud import PmtuDiscovery, split_frames
 from .packet import (
     ConnectionId,
     LongHeader,
@@ -776,12 +776,7 @@ struct QuicClientConnection(Movable):
             return
         var lost = self._loss.detect_lost(_monotonic_ms())
         for i in range(len(lost)):
-            var frames = lost[i].copy()
-            if len(frames) == 0:
-                continue
-            var dg = self._build_1rtt(frames^, ack_eliciting=True)
-            if len(dg) > 0:
-                _ = self.sock.send_to(Span[UInt8, _](dg), self.peer)
+            self._resend(lost[i])
 
     def _check_pto(mut self) raises:
         """Fire the PTO if the probe timer has elapsed with
@@ -796,12 +791,25 @@ struct QuicClientConnection(Movable):
         var deadline = self._loss.pto_deadline()
         if deadline == UInt64(0) or _monotonic_ms() < deadline:
             return
-        var frames = self._loss.fire_pto()
+        # A second PTO in a row above the base path size is a black hole
+        # (RFC 8899 sec 4.3): fall back so the re-sends get through.
+        if self._loss.pto_count >= 1:
+            self._pmtu.on_black_hole(_monotonic_ms())
+        self._resend(self._loss.fire_pto())
+
+    def _resend(mut self, frames: List[UInt8]) raises:
+        """Re-send a lost packet's frames in fresh packets, split to the
+        current path size."""
         if len(frames) == 0:
             return
-        var dg = self._build_1rtt(frames^, ack_eliciting=True)
-        if len(dg) > 0:
-            _ = self.sock.send_to(Span[UInt8, _](dg), self.peer)
+        var parts = split_frames(
+            Span[UInt8, _](frames),
+            self._pmtu.current - len(self.dcid.bytes) - 21,
+        )
+        for i in range(len(parts)):
+            var dg = self._build_1rtt(parts[i].copy(), ack_eliciting=True)
+            if len(dg) > 0:
+                _ = self.sock.send_to(Span[UInt8, _](dg), self.peer)
 
     def _flush_migration(mut self, events: ConnectionEvents) raises:
         """Send the migration frames surfaced this poll: a
@@ -835,7 +843,7 @@ struct QuicClientConnection(Movable):
             return
         var now = _monotonic_ms()
         self._pmtu.check_lost(now, self._loss.pto_interval_ms())
-        var size = self._pmtu.want_probe()
+        var size = self._pmtu.want_probe(now)
         if size == 0:
             return
         var frames = List[UInt8](capacity=size)
