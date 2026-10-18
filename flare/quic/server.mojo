@@ -1219,18 +1219,15 @@ struct QuicListener(Movable):
         )
         # AAD is the unprotected header: first byte + bytes up to
         # the pn field + the pn_length real pn bytes.
-        var header = List[UInt8]()
+        var header = List[UInt8](capacity=pn_offset + pn_length)
         header.append(first_local)
-        for i in range(1, pn_offset):
-            header.append(datagram[i])
-        for i in range(pn_length):
-            header.append(pn_local[i])
+        header.extend(datagram[1:pn_offset])
+        header.extend(Span[UInt8, _](pn_local)[:pn_length])
         var ciphertext_start = pn_offset + pn_length
         if ciphertext_start > packet_end:
             raise Error("_decrypt_post_initial: pn length exceeds packet end")
-        var payload = List[UInt8]()
-        for i in range(ciphertext_start, packet_end):
-            payload.append(datagram[i])
+        var payload = List[UInt8](capacity=packet_end - ciphertext_start)
+        payload.extend(datagram[ciphertext_start:packet_end])
         # decrypt_in_place verifies + strips the 16-byte AEAD tag,
         # writing plaintext over the ciphertext prefix of ``payload``.
         # The FFI also reports the plaintext length, but the QUIC
@@ -1271,10 +1268,8 @@ struct QuicListener(Movable):
         var plaintext_len = len(payload) - QUIC_AEAD_TAG_LEN
         if plaintext_len < 0:
             raise Error("_decrypt_post_initial: payload shorter than AEAD tag")
-        var plaintext = List[UInt8]()
-        for i in range(plaintext_len):
-            plaintext.append(payload[i])
-        return (plaintext^, packet_number)
+        payload.resize(plaintext_len, 0)
+        return (payload^, packet_number)
 
     def _dispatch_crypto_frames(
         mut self, slot: Int, events: ConnectionEvents, inbound_lvl: Int
@@ -1700,14 +1695,17 @@ struct QuicListener(Movable):
         return h3.take_request(stream_id)
 
     def _append_http3_egress(
-        mut self, slot: Int, stream_id: Int, frames: List[UInt8]
+        mut self, slot: Int, stream_id: Int, var frames: List[UInt8]
     ) raises:
         """Queue ``frames`` on ``stream_id``'s response egress, creating
-        the record on first use. Shared by the buffered emit path and the
-        streaming DATA pump."""
+        the record on first use (the bytes are moved in, not copied).
+        Shared by the buffered emit path and the streaming DATA pump."""
         ref txs = self.connections[slot].h3_tx
         if stream_id not in txs:
-            txs[stream_id] = _StreamTx()
+            var st = _StreamTx()
+            st.buf = frames^
+            txs[stream_id] = st^
+            return
         txs[stream_id].buf.extend(Span[UInt8, _](frames))
 
     def emit_http3_response(
@@ -1749,7 +1747,7 @@ struct QuicListener(Movable):
             ref h3 = self.http3_connections[slot]
             h3.emit_response(stream_id, response^)
             var frames = h3.take_response_frames(stream_id)
-            self._append_http3_egress(slot, stream_id, frames)
+            self._append_http3_egress(slot, stream_id, frames^)
             ref st = self.connections[slot].h3_tx[stream_id]
             st.src_addr = Pool[ChunkSourceBox].alloc_move(src^)
             st.trailer_bytes = trailer_bytes^
@@ -1758,7 +1756,7 @@ struct QuicListener(Movable):
         ref h3 = self.http3_connections[slot]
         h3.emit_response(stream_id, response^)
         var frames = h3.take_response_frames(stream_id)
-        self._append_http3_egress(slot, stream_id, frames)
+        self._append_http3_egress(slot, stream_id, frames^)
         self.connections[slot].h3_tx[stream_id].done = True
 
     def take_http3_response_egress(
@@ -3298,10 +3296,8 @@ struct QuicListener(Movable):
         var header_len = len(unprotected_header)
         var protected = unprotected_header^
         protected.reserve(header_len + len(encrypted_payload) + len(tag))
-        for i in range(len(encrypted_payload)):
-            protected.append(encrypted_payload[i])
-        for i in range(len(tag)):
-            protected.append(tag[i])
+        protected.extend(Span[UInt8, _](encrypted_payload))
+        protected.extend(Span[UInt8, _](tag))
         # 5. Apply header protection via rustls at level 3.
         var pn_offset = header_len - pn_length
         var sample_offset = pn_offset + 4

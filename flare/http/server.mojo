@@ -627,8 +627,7 @@ struct HttpServer(Movable):
                     if listener.drain_step():
                         break
                 _ = listener.tick(timeout_ms=100)
-                var h_copy = handler.copy()
-                _ = self._pump_listener_h3[H](listener, h_copy^)
+                _ = self._pump_listener_h3[H](listener, handler)
                 # Advance any in-flight streaming responses by one chunk
                 # each so their DATA frames ride this loop turn's drain.
                 # A streaming stream stays registered across turns until
@@ -648,7 +647,7 @@ struct HttpServer(Movable):
     @staticmethod
     def _pump_listener_h3[
         H: Handler & Copyable
-    ](mut listener: QuicListener, var handler: H) raises -> Int:
+    ](mut listener: QuicListener, mut handler: H) raises -> Int:
         """Internal helper: drain every connection's H3
         dispatcher once on a borrowed listener. Mirrors
         :meth:`pump_http3_handler_once` but operates on a borrowed

@@ -97,16 +97,19 @@ struct _StreamTx(Copyable):
         return len(self.buf) - self.pos
 
     def consume(mut self, n: Int):
-        """Mark ``n`` queued bytes framed. Compacts the buffer once the
-        sent prefix is at least half of it, so a large body is copied
-        O(log n) times rather than once per drain."""
+        """Mark ``n`` queued bytes framed. A buffer whose sent prefix is
+        at least 64 KiB and half of it is compacted, so a long streaming
+        response does not keep everything it ever sent, while a buffered
+        body is not copied at all."""
         self.pos += n
         self.off += UInt64(n)
         if self.pos == len(self.buf):
-            self.buf.clear()
+            self.buf = List[UInt8]()
             self.pos = 0
-        elif self.pos * 2 >= len(self.buf):
-            self.buf = List[UInt8](Span[UInt8, _](self.buf)[self.pos :])
+        elif self.pos >= 65536 and self.pos * 2 >= len(self.buf):
+            var rest = List[UInt8](capacity=len(self.buf) - self.pos)
+            rest.extend(Span[UInt8, _](self.buf)[self.pos :])
+            self.buf = rest^
             self.pos = 0
 
 
