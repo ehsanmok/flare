@@ -459,6 +459,9 @@ from test_quic_draining import (
 from test_quic_draining import (
     test_client_sends_nothing_after_the_peers_connection_close as test_quic_draining__test_client_sends_nothing_after_the_peers_connection_close,
 )
+from test_quic_draining import (
+    test_server_sends_no_long_header_packet_while_draining as test_quic_draining__test_server_sends_no_long_header_packet_while_draining,
+)
 from test_quic_ecn import (
     test_batch_receiver_reads_the_codepoint as test_quic_ecn__test_batch_receiver_reads_the_codepoint,
 )
@@ -1359,6 +1362,9 @@ def main() raises:
     ]()
     suite.test[
         test_quic_draining__test_client_sends_nothing_after_the_peers_connection_close
+    ]()
+    suite.test[
+        test_quic_draining__test_server_sends_no_long_header_packet_while_draining
     ]()
     # tests/quic/test_quic_ecn.mojo
     suite.test[test_quic_ecn__test_batch_receiver_reads_the_codepoint]()
