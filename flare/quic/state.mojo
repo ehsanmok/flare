@@ -213,6 +213,10 @@ struct ConnectionEvents(Copyable):
     """Peer-CID sequence numbers the driver must RETIRE_CONNECTION_ID
     (§19.16), queued when a NEW_CONNECTION_ID's ``retire_prior_to``
     obsoletes a stored CID."""
+    var retired_local_cids: List[UInt64]
+    """Sequence numbers of connection IDs we issued that the peer
+    retired with RETIRE_CONNECTION_ID (§19.16); the driver stops routing
+    them and issues replacements."""
     var path_validated: Bool
     """Set when an inbound PATH_RESPONSE matched our outstanding
     PATH_CHALLENGE: the new path is confirmed reachable (§8.2)."""
@@ -243,6 +247,7 @@ def empty_events() -> ConnectionEvents:
         next_deadline_us=UInt64(0),
         path_responses=List[List[UInt8]](),
         retire_connection_ids=List[UInt64](),
+        retired_local_cids=List[UInt64](),
         path_validated=False,
         acked_packets=List[UInt64](),
         datagrams=List[List[UInt8]](),
@@ -666,15 +671,16 @@ def apply_new_connection_id(
 
 
 def apply_retire_connection_id(
-    mut conn: Connection, rcid: RetireConnectionIdFrame
+    mut conn: Connection,
+    rcid: RetireConnectionIdFrame,
+    mut events: ConnectionEvents,
 ):
-    """Apply a RETIRE_CONNECTION_ID frame (RFC 9000 §19.16): the
-    peer is retiring one of the CIDs WE issued. The state-machine
-    layer has no local-CID table to prune (the driver owns SCID
-    issuance), so this is bookkeeping-only: activity + ack-pending
-    are recorded by the caller. Kept as a named helper for symmetry
-    and so the driver can hook CID-pool accounting later."""
-    pass
+    """Apply a RETIRE_CONNECTION_ID frame (RFC 9000 §19.16): the peer
+    is retiring one of the CIDs WE issued. The driver owns SCID
+    issuance, so the sequence number is surfaced in
+    :attr:`ConnectionEvents.retired_local_cids` for it to unroute,
+    validate against what it issued, and replace."""
+    events.retired_local_cids.append(rcid.sequence_number)
 
 
 def apply_path_challenge(
@@ -839,7 +845,7 @@ struct _ConnFrameHandler(FrameHandler):
 
     def on_retire_connection_id(mut self, rcid: RetireConnectionIdFrame) raises:
         _arrive(self._conn()[], self.now_us, ack_eliciting=True)
-        apply_retire_connection_id(self._conn()[], rcid)
+        apply_retire_connection_id(self._conn()[], rcid, self._events()[])
 
     def on_path_challenge(mut self, pc: PathChallengeFrame) raises:
         _arrive(self._conn()[], self.now_us, ack_eliciting=True)

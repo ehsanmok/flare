@@ -351,6 +351,16 @@ struct QuicConnection(Copyable):
     var tx_1rtt_pn: UInt64
     """Next packet number to use on the outbound 1-RTT path."""
 
+    var issued_cids: Dict[UInt64, String]
+    """Connection IDs we issued that are still routable, as table keys
+    by sequence number (0 is the handshake CID). All are unrouted when
+    the slot is reclaimed; one used to stay mapped to the reused slot."""
+    var peer_cid_limit: UInt64
+    """The peer's ``active_connection_id_limit`` (RFC 9000 sec 18.2)."""
+    var cid_replenish: Int
+    """Connection IDs to issue in the next 1-RTT flight, replacing ones
+    the peer retired."""
+
     var key_phase: Bool
     """1-RTT key phase bit we send (RFC 9001 sec 6): flips on every key
     update, ours or the peer's."""
@@ -485,6 +495,9 @@ struct QuicConnection(Copyable):
         self.tx_handshake_pn = UInt64(0)
         self.tx_handshake_offset = UInt64(0)
         self.tx_1rtt_pn = UInt64(0)
+        self.issued_cids = Dict[UInt64, String]()
+        self.peer_cid_limit = UInt64(2)
+        self.cid_replenish = 0
         self.key_phase = False
         self.phase_first_pn = UInt64(0)
         self.amp_rx = 0

@@ -225,6 +225,10 @@ comptime _STREAM_PULL_HIGH_WATER: Int = 64 * 1024
 """A streaming response's source is not pulled while this many bytes
 are still queued unsent on its stream: flow control or the congestion
 window is holding them, and pulling more would only grow the queue."""
+comptime _MAX_ISSUED_CIDS: UInt64 = 4
+"""Connection IDs the server keeps issued at once, whatever larger
+``active_connection_id_limit`` the peer allows: enough for migration
+and rotation without a routing entry per CID the peer would buffer."""
 comptime _H3_REQUEST_CANCELLED: UInt64 = 0x10C
 """RFC 9114 sec 8.1: the RESET_STREAM code for an abandoned response."""
 
@@ -931,6 +935,7 @@ struct QuicListener(Movable):
         # acknowledging 1-RTT packets with those numbers.
         if inbound_lvl == QuicEncryptionLevel.APPLICATION:
             self._consume_acks(slot, events)
+            self._retire_local_cids(slot, events)
         elif inbound_lvl == QuicEncryptionLevel.INITIAL or (
             inbound_lvl == QuicEncryptionLevel.HANDSHAKE
         ):
@@ -1041,8 +1046,32 @@ struct QuicListener(Movable):
             ),
             plaintext,
         )
-        self.cid_table.register(cid_to_hex(new_cid), slot)
+        var key = cid_to_hex(new_cid)
+        self.cid_table.register(key, slot)
+        self.connections[slot].issued_cids[seq] = key^
         self.next_local_cid_seq[slot] = seq + UInt64(1)
+
+    def _retire_local_cids(mut self, slot: Int, events: ConnectionEvents):
+        """Unroute the CIDs the peer retired and queue replacements
+        (RFC 9000 sec 5.1.2). Retiring a sequence number never issued is
+        a PROTOCOL_VIOLATION (sec 19.16)."""
+        for i in range(len(events.retired_local_cids)):
+            var seq = events.retired_local_cids[i]
+            if seq >= self.next_local_cid_seq[slot]:
+                self._close_for(
+                    slot,
+                    QUIC_PROTOCOL_VIOLATION,
+                    "RETIRE_CONNECTION_ID for a CID never issued",
+                )
+                return
+            var key = self.connections[slot].issued_cids.get(seq)
+            if key:
+                _ = self.connections[slot].issued_cids.pop(seq, String(""))
+                try:
+                    self.cid_table.retire(key.value())
+                except:
+                    pass
+                self.connections[slot].cid_replenish += 1
 
     def _stateless_reset_token(self, cid: ConnectionId) raises -> List[UInt8]:
         """Derive the 16-byte stateless-reset token for ``cid``
@@ -1462,6 +1491,9 @@ struct QuicListener(Movable):
             var md = tp.initial_max_data.or_else(UInt64(0))
             if md > c.max_data_send:
                 c.max_data_send = md
+            self.connections[
+                slot
+            ].peer_cid_limit = tp.active_connection_id_limit.or_else(UInt64(2))
             var msd = tp.initial_max_stream_data_bidi_local.or_else(UInt64(0))
             c.peer_initial_max_stream_data = msd
             var open_sids = List[UInt64]()
@@ -2013,6 +2045,7 @@ struct QuicListener(Movable):
             self.loss_init.append(LossRecovery())
             self.loss_hs.append(LossRecovery())
         self.cid_table.register(cid_to_hex(local_cid), slot)
+        self.connections[slot].issued_cids[UInt64(0)] = cid_to_hex(local_cid)
         self.cid_table.register(cid_to_hex(lh.dcid), slot)
         _ = self.schedule_idle_timeout(slot)
         return slot
@@ -2562,7 +2595,13 @@ struct QuicListener(Movable):
             )
             encode_max_streams(max_streams, plaintext)
             if not self.handshake_done_sent[slot]:
-                self._issue_new_connection_id(slot, plaintext)
+                # Spare CIDs up to the peer's limit (RFC 9000 sec 5.1.1),
+                # so it can migrate or rotate (sec 9.5).
+                var want = min(
+                    self.connections[slot].peer_cid_limit, _MAX_ISSUED_CIDS
+                )
+                for _ in range(1, Int(want)):
+                    self._issue_new_connection_id(slot, plaintext)
                 # RFC 9114 sec 6.2.1: each side MUST initiate its control
                 # stream at the beginning of the connection and send
                 # SETTINGS first. The server's is stream 3, the first
@@ -2597,6 +2636,17 @@ struct QuicListener(Movable):
         # :meth:`_drain_migration_probe`, which runs separately in
         # :meth:`_drain_and_send`. This drain only ever targets the
         # validated egress address.
+
+        # Replacements for CIDs the peer retired (RFC 9000 sec 5.1.2).
+        while (
+            self.connections[slot].cid_replenish > 0
+            and self.handshake_done_sent[slot]
+        ):
+            if budget - len(plaintext) < 48:
+                if self._flush_1rtt(slot, plaintext, peer, budget):
+                    emitted = True
+            self._issue_new_connection_id(slot, plaintext)
+            self.connections[slot].cid_replenish -= 1
 
         # Receive credit raised since the last flight (RFC 9000 sec 4.2).
         if len(self.connections[slot].fc_grants) > 0:
@@ -3630,8 +3680,9 @@ struct QuicListener(Movable):
         late retransmits don't route to a dead slot."""
         if slot < 0 or slot >= len(self.connections):
             return
-        var cid_hex = cid_to_hex(self.connections[slot].local_cid)
-        self.cid_table.retire(cid_hex)
+        for entry in self.connections[slot].issued_cids.items():
+            self.cid_table.retire(entry.value)
+        self.cid_table.retire(cid_to_hex(self.connections[slot].local_cid))
         self.cid_table.retire(cid_to_hex(self.connections[slot].initial_dcid))
 
     def close(mut self):
