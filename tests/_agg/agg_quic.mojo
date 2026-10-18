@@ -218,6 +218,12 @@ from test_loss_recovery import (
 from test_loss_recovery import (
     test_loss_deadline_is_the_time_threshold as test_loss_recovery__test_loss_deadline_is_the_time_threshold,
 )
+from test_loss_recovery import (
+    test_one_ack_range_retires_a_large_window as test_loss_recovery__test_one_ack_range_retires_a_large_window,
+)
+from test_loss_recovery import (
+    test_ack_ranges_with_a_gap_leave_only_the_gap as test_loss_recovery__test_ack_ranges_with_a_gap_leave_only_the_gap,
+)
 from test_openssl_quic_crypto import (
     test_derive_packet_keys_rfc9001_a5_chacha20 as test_openssl_quic_crypto__test_derive_packet_keys_rfc9001_a5_chacha20,
 )
@@ -1137,6 +1143,10 @@ def main() raises:
         test_loss_recovery__test_ack_of_an_unsent_packet_declares_nothing_lost
     ]()
     suite.test[test_loss_recovery__test_loss_deadline_is_the_time_threshold]()
+    suite.test[test_loss_recovery__test_one_ack_range_retires_a_large_window]()
+    suite.test[
+        test_loss_recovery__test_ack_ranges_with_a_gap_leave_only_the_gap
+    ]()
     # tests/quic/test_openssl_quic_crypto.mojo
     suite.test[
         test_openssl_quic_crypto__test_derive_packet_keys_rfc9001_a5_chacha20

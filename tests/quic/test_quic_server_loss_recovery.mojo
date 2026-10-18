@@ -2,7 +2,7 @@
 
 Before this, the QUIC server never read an inbound ACK frame. The
 decoder had always produced them -- ``flare.quic.state.handle_frame_buf``
-fills ``ConnectionEvents.acked_packets`` for both peers -- but the
+fills ``ConnectionEvents.acked_ranges`` for both peers -- but the
 server dropped the field on the floor. On a lossless loopback that is
 invisible; on a real path a dropped response was never retransmitted and
 the connection stalled until the RFC 9000 sec 10.1 idle timeout, 30 s by
@@ -143,7 +143,8 @@ def test_ack_for_a_packet_never_sent_closes_the_connection() raises:
     )
     listener.connections[slot].tx_1rtt_pn = UInt64(5)
     var events = empty_events()
-    events.acked_packets.append(UInt64(1_000_000))
+    events.acked_ranges.append(UInt64(1_000_000))
+    events.acked_ranges.append(UInt64(1_000_000))
     listener._consume_acks(slot, events)
     assert_false(listener.connections[slot].alive)
     assert_equal(listener.connections[slot].conn.state, CONN_STATE_CLOSING)

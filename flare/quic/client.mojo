@@ -626,9 +626,9 @@ struct QuicClientConnection(Movable):
                 break
             self._process_datagram(Span[UInt8, _](buf[:nb_got]), events)
         self._flush_migration(events)
-        if len(events.acked_packets) > 0:
-            _ = self._loss.on_ack(
-                events.acked_packets, _monotonic_ms(), self.tx_1rtt_pn
+        if len(events.acked_ranges) > 0:
+            _ = self._loss.on_ack_ranges(
+                events.acked_ranges, _monotonic_ms(), self.tx_1rtt_pn
             )
             self._retransmit_lost()
         self._drain_egress()

@@ -61,6 +61,30 @@ def expand_ack_ranges(ack: AckFrame) -> List[UInt64]:
     return out^
 
 
+def append_ack_ranges(ack: AckFrame, mut out: List[UInt64]):
+    """Append an ACK frame's ranges (RFC 9000 §19.3.1) to ``out`` as
+    flat ``[lo, hi]`` pairs, newest first. The work is the frame's range
+    count, whatever the ranges span. A range that would reach below
+    packet number 0 ends the list (the frame parser rejects such a frame
+    as FRAME_ENCODING_ERROR before this runs)."""
+    var hi = ack.largest_acknowledged
+    if ack.first_ack_range > hi:
+        return
+    var lo = hi - ack.first_ack_range
+    out.append(lo)
+    out.append(hi)
+    for i in range(len(ack.ranges)):
+        var step = ack.ranges[i].gap + UInt64(2)
+        if lo < step:
+            return
+        hi = lo - step
+        if ack.ranges[i].length > hi:
+            return
+        lo = hi - ack.ranges[i].length
+        out.append(lo)
+        out.append(hi)
+
+
 def frame_allowed_before_1rtt(buf: Span[UInt8, _]) -> Bool:
     """Whether the frame at the start of ``buf`` may appear in an
     Initial or Handshake packet (RFC 9000 sec 12.4, table 3).

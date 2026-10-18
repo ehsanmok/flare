@@ -215,6 +215,40 @@ def test_loss_deadline_is_the_time_threshold() raises:
     assert_equal(lr.loss_deadline(), UInt64(0))
 
 
+def test_one_ack_range_retires_a_large_window() raises:
+    """An ACK range covering 1000 in-flight packets retires all of them;
+    the ranges used to be expanded into at most 256 numbers, so the rest
+    stayed in flight and were later declared lost and re-sent."""
+    var lr = LossRecovery()
+    for pn in range(1000):
+        lr.on_sent(UInt64(pn), _frames(0xB0), UInt64(pn // 100))
+    var ranges = List[UInt64]()
+    ranges.append(UInt64(0))
+    ranges.append(UInt64(999))
+    assert_true(lr.on_ack_ranges(ranges, UInt64(20), UInt64(1000)))
+    assert_equal(lr.outstanding(), 0)
+    assert_equal(lr.bytes_in_flight, UInt64(0))
+    assert_equal(len(lr.detect_lost(UInt64(1000))), 0)
+
+
+def test_ack_ranges_with_a_gap_leave_only_the_gap() raises:
+    var lr = LossRecovery()
+    for pn in range(10):
+        lr.on_sent(UInt64(pn), _frames(UInt8(pn)), UInt64(0))
+    var ranges = List[UInt64]()  # [6, 9] then [0, 3]: 4 and 5 missing
+    ranges.append(UInt64(6))
+    ranges.append(UInt64(9))
+    ranges.append(UInt64(0))
+    ranges.append(UInt64(3))
+    _ = lr.on_ack_ranges(ranges, UInt64(5), UInt64(10))
+    assert_equal(lr.outstanding(), 2)
+    var lost = lr.detect_lost(UInt64(5))  # 9 - 4 and 9 - 5 >= 3
+    assert_equal(len(lost), 2)
+    assert_equal(Int(lost[0][0]), 4)
+    assert_equal(Int(lost[1][0]), 5)
+    assert_equal(lr.outstanding(), 0)
+
+
 def main() raises:
     test_ack_retires_and_resets_backoff()
     test_ack_gap_leaves_lost_packet_outstanding()
@@ -227,4 +261,6 @@ def main() raises:
     test_cc_reduces_window_on_loss()
     test_ack_of_an_unsent_packet_declares_nothing_lost()
     test_loss_deadline_is_the_time_threshold()
-    print("test_loss_recovery: 11 passed")
+    test_one_ack_range_retires_a_large_window()
+    test_ack_ranges_with_a_gap_leave_only_the_gap()
+    print("test_loss_recovery: 13 passed")

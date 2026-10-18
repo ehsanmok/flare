@@ -49,7 +49,11 @@ References:
 from std.collections import List, Optional, Dict
 from std.memory import Pointer
 from std.collections.span import Span
-from ._state_helpers import expand_ack_ranges, frame_allowed_before_1rtt
+from ._state_helpers import (
+    append_ack_ranges,
+    expand_ack_ranges,
+    frame_allowed_before_1rtt,
+)
 from .frame import (
     AckFrame,
     AckRange,
@@ -220,10 +224,13 @@ struct ConnectionEvents(Copyable):
     var path_validated: Bool
     """Set when an inbound PATH_RESPONSE matched our outstanding
     PATH_CHALLENGE: the new path is confirmed reachable (§8.2)."""
-    var acked_packets: List[UInt64]
-    """Packet numbers an inbound ACK frame acknowledged this tick
-    (§19.3, expanded from the ACK ranges). The client loss-recovery
-    path retires its in-flight sent packets against this list."""
+    var acked_ranges: List[UInt64]
+    """Packet-number ranges inbound ACK frames acknowledged this tick
+    (§19.3.1), as flat ``[lo, hi]`` pairs in descending order. Loss
+    recovery retires its in-flight packets against them. It used to get
+    the ranges expanded into at most 256 packet numbers, so with more
+    than that in flight older acknowledged packets were later declared
+    lost and re-sent."""
     var datagrams: List[List[UInt8]]
     """RFC 9221 DATAGRAM payloads received this tick. The reactor /
     application drains these after :func:`handle_frame_buf` returns;
@@ -249,7 +256,7 @@ def empty_events() -> ConnectionEvents:
         retire_connection_ids=List[UInt64](),
         retired_local_cids=List[UInt64](),
         path_validated=False,
-        acked_packets=List[UInt64](),
+        acked_ranges=List[UInt64](),
         datagrams=List[List[UInt8]](),
         stop_sending_resets=List[StopSendingFrame](),
     )
@@ -762,9 +769,7 @@ struct _ConnFrameHandler(FrameHandler):
     def on_ack(mut self, ack: AckFrame) raises:
         _arrive(self._conn()[], self.now_us, ack_eliciting=False)
         apply_ack(self._conn()[], ack)
-        var acked = expand_ack_ranges(ack)
-        for i in range(len(acked)):
-            self._events()[].acked_packets.append(acked[i])
+        append_ack_ranges(ack, self._events()[].acked_ranges)
 
     def on_reset_stream(mut self, rs: ResetStreamFrame) raises:
         if self._conn()[].check_stream_ids:

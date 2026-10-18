@@ -77,6 +77,25 @@ struct SentPacket(Copyable):
     var frames: List[UInt8]
     var time_ms: UInt64
     var size: UInt64
+    var live: Bool
+    """False once acknowledged, declared lost or probed: a tombstone
+    until :meth:`LossRecovery._compact` drops it."""
+
+
+def _in_ranges(ranges: List[UInt64], pn: UInt64) -> Bool:
+    """Whether ``pn`` lies in one of the flat ``[lo, hi]`` ranges, which
+    are sorted by descending ``hi`` (the ACK-frame order)."""
+    var lo_i = 0
+    var hi_i = len(ranges) // 2
+    while lo_i < hi_i:
+        var mid = (lo_i + hi_i) // 2
+        if ranges[2 * mid] > pn:
+            lo_i = mid + 1
+        elif ranges[2 * mid + 1] < pn:
+            hi_i = mid
+        else:
+            return True
+    return False
 
 
 struct LossRecovery(Movable):
@@ -88,6 +107,11 @@ struct LossRecovery(Movable):
     """
 
     var sent: List[SentPacket]
+    """In-flight packets in send order, which is packet-number order.
+    Entries before :attr:`head` and entries with ``live`` False are
+    gone; retiring one costs a flag write, not a list rebuild."""
+    var head: Int
+    var live_count: Int
     var pto_count: Int
     var base_pto_ms: UInt64
     # RTT estimator (RFC 9002 section 5).
@@ -106,6 +130,8 @@ struct LossRecovery(Movable):
 
     def __init__(out self, base_pto_ms: UInt64 = _DEFAULT_INITIAL_RTT_MS):
         self.sent = List[SentPacket]()
+        self.head = 0
+        self.live_count = 0
         self.pto_count = 0
         self.base_pto_ms = base_pto_ms
         self.has_rtt = False
@@ -130,11 +156,55 @@ struct LossRecovery(Movable):
         defaults to the frame byte length when not given."""
         var sz = size if size > 0 else UInt64(len(frames))
         self.bytes_in_flight += sz
-        self.sent.append(SentPacket(pn, frames^, now_ms, sz))
+        self.live_count += 1
+        self.sent.append(SentPacket(pn, frames^, now_ms, sz, True))
 
     def outstanding(self) -> Int:
         """Count of in-flight (unacked) ack-eliciting packets."""
-        return len(self.sent)
+        return self.live_count
+
+    def _retire(mut self, i: Int):
+        """Take entry ``i`` out of flight (it stays as a tombstone)."""
+        self.sent[i].live = False
+        self.sent[i].frames = List[UInt8]()
+        self.bytes_in_flight -= self.sent[i].size
+        self.live_count -= 1
+
+    def _compact(mut self):
+        """Skip the dead prefix; drop it once it is half the list, so
+        retirement stays amortized O(1) per packet."""
+        while self.head < len(self.sent) and not self.sent[self.head].live:
+            self.head += 1
+        if self.head > 0 and self.head * 2 >= len(self.sent):
+            var keep = List[SentPacket](capacity=len(self.sent) - self.head)
+            for i in range(self.head, len(self.sent)):
+                if self.sent[i].live:
+                    var frames = List[UInt8]()
+                    swap(frames, self.sent[i].frames)
+                    keep.append(
+                        SentPacket(
+                            self.sent[i].pn,
+                            frames^,
+                            self.sent[i].time_ms,
+                            self.sent[i].size,
+                            True,
+                        )
+                    )
+            self.sent = keep^
+            self.head = 0
+
+    def _first_at_or_above(self, pn: UInt64) -> Int:
+        """Index of the first entry at or after :attr:`head` whose packet
+        number is >= ``pn`` (binary search; the list is pn-ordered)."""
+        var lo = self.head
+        var hi = len(self.sent)
+        while lo < hi:
+            var mid = (lo + hi) // 2
+            if self.sent[mid].pn < pn:
+                lo = mid + 1
+            else:
+                hi = mid
+        return lo
 
     # ── Congestion-window gate ──────────────────────────────────────
 
@@ -179,40 +249,59 @@ struct LossRecovery(Movable):
         next_pn: UInt64 = UInt64.MAX,
     ) -> Bool:
         """Retire every in-flight packet whose number appears in
-        ``acked``. Samples the RTT from the largest newly-acked packet,
-        feeds the congestion controller, resets the PTO backoff on
-        forward progress (RFC 9002 section 6.2). Returns whether
-        anything was retired.
+        ``acked``; see :meth:`on_ack_ranges`."""
+        var sorted = acked.copy()
+        sort(sorted)
+        var ranges = List[UInt64](capacity=2 * len(sorted))
+        var i = len(sorted) - 1
+        while i >= 0:
+            ranges.append(sorted[i])
+            ranges.append(sorted[i])
+            i -= 1
+        return self.on_ack_ranges(ranges, now_ms, next_pn)
+
+    def on_ack_ranges(
+        mut self,
+        ranges: List[UInt64],
+        now_ms: UInt64 = 0,
+        next_pn: UInt64 = UInt64.MAX,
+    ) -> Bool:
+        """Retire every in-flight packet inside the acknowledged ranges
+        (flat ``[lo, hi]`` pairs, descending, as an ACK frame carries
+        them; RFC 9000 sec 19.3.1). Samples the RTT from the largest
+        newly-acked packet, feeds the congestion controller, resets the
+        PTO backoff on forward progress (RFC 9002 section 6.2). Returns
+        whether anything was retired. The work is the packets the ranges
+        cover, not every packet in flight, and nothing is copied: a large
+        window used to cost a full copy of every in-flight frame per ACK.
 
         ``next_pn`` is the next packet number the sender will use. An
         acknowledged number at or past it names a packet never sent,
         and is ignored here. It used to raise ``largest_acked``, and an
         ACK claiming 2^60 then declared every packet in flight lost:
         a retransmission storm on demand."""
-        if len(acked) == 0 or len(self.sent) == 0:
+        if len(ranges) < 2 or self.live_count == 0:
             return False
-        # Track the largest acked packet number seen.
-        for j in range(len(acked)):
-            if acked[j] >= next_pn:
-                continue
-            if not self.has_largest_acked or acked[j] > self.largest_acked:
-                self.largest_acked = acked[j]
-                self.has_largest_acked = True
-        var keep = List[SentPacket]()
+        var top = ranges[1]
+        if top >= next_pn:
+            if next_pn == 0:
+                return False
+            top = next_pn - 1
+        if top < ranges[0]:
+            return False
+        if not self.has_largest_acked or top > self.largest_acked:
+            self.largest_acked = top
+            self.has_largest_acked = True
+        var bottom = ranges[len(ranges) - 2]
         var retired = False
         var newest_acked_time: UInt64 = 0
         var newest_acked_pn: UInt64 = 0
         var have_newest = False
-        for i in range(len(self.sent)):
-            var pn = self.sent[i].pn
-            var hit = False
-            for j in range(len(acked)):
-                if acked[j] == pn:
-                    hit = True
-                    break
-            if hit:
+        var i = self._first_at_or_above(bottom)
+        while i < len(self.sent) and self.sent[i].pn <= top:
+            if self.sent[i].live and _in_ranges(ranges, self.sent[i].pn):
+                var pn = self.sent[i].pn
                 retired = True
-                self.bytes_in_flight -= self.sent[i].size
                 self.cc.on_packet_acked(
                     self.sent[i].size,
                     self.smoothed_rtt if self.has_rtt else self.latest_rtt,
@@ -222,9 +311,9 @@ struct LossRecovery(Movable):
                     newest_acked_pn = pn
                     newest_acked_time = self.sent[i].time_ms
                     have_newest = True
-            else:
-                keep.append(self.sent[i].copy())
-        self.sent = keep^
+                self._retire(i)
+            i += 1
+        self._compact()
         # RTT sample from the largest newly-acked packet (RFC 9002
         # section 5.1: only the largest-acked drives the sample).
         if have_newest and now_ms > newest_acked_time:
@@ -244,34 +333,38 @@ struct LossRecovery(Movable):
         event (the controller's own in-recovery guard dedupes within a
         round)."""
         var lost = List[List[UInt8]]()
-        if not self.has_largest_acked or len(self.sent) == 0:
+        if not self.has_largest_acked or self.live_count == 0:
             return lost^
-        var rtt = self.smoothed_rtt
-        if self.latest_rtt > rtt:
-            rtt = self.latest_rtt
+        var time_thresh = self._time_threshold()
+        # Only packets below the largest acknowledged can be lost; the
+        # list is pn-ordered, so the scan stops there.
+        var i = self.head
+        while i < len(self.sent) and self.sent[i].pn < self.largest_acked:
+            if self.sent[i].live:
+                var sent_time = self.sent[i].time_ms
+                if (
+                    self.largest_acked - self.sent[i].pn >= _K_PACKET_THRESHOLD
+                    or now_ms >= sent_time + time_thresh
+                ):
+                    self.cc.on_congestion_event(sent_time, now_ms)
+                    var frames = List[UInt8]()
+                    swap(frames, self.sent[i].frames)
+                    lost.append(frames^)
+                    self._retire(i)
+            i += 1
+        self._compact()
+        return lost^
+
+    def _time_threshold(self) -> UInt64:
+        """RFC 9002 kTimeThreshold applied: 9/8 of max(smoothed_rtt,
+        latest_rtt), at least kGranularity."""
+        var rtt = max(self.smoothed_rtt, self.latest_rtt)
         if rtt == 0:
             rtt = self.base_pto_ms
-        var time_thresh = rtt * _K_TIME_THRESHOLD_NUM // _K_TIME_THRESHOLD_DEN
-        if time_thresh < _K_GRANULARITY_MS:
-            time_thresh = _K_GRANULARITY_MS
-        var keep = List[SentPacket]()
-        for i in range(len(self.sent)):
-            var pn = self.sent[i].pn
-            var sent_time = self.sent[i].time_ms
-            var is_lost = False
-            if pn < self.largest_acked:
-                if self.largest_acked - pn >= _K_PACKET_THRESHOLD:
-                    is_lost = True
-                elif now_ms >= sent_time + time_thresh:
-                    is_lost = True
-            if is_lost:
-                self.bytes_in_flight -= self.sent[i].size
-                self.cc.on_congestion_event(sent_time, now_ms)
-                lost.append(self.sent[i].frames.copy())
-            else:
-                keep.append(self.sent[i].copy())
-        self.sent = keep^
-        return lost^
+        return max(
+            rtt * _K_TIME_THRESHOLD_NUM // _K_TIME_THRESHOLD_DEN,
+            _K_GRANULARITY_MS,
+        )
 
     def loss_deadline(self) -> UInt64:
         """When the earliest in-flight packet sent before the largest
@@ -281,32 +374,25 @@ struct LossRecovery(Movable):
         turns into one PTO per lost packet."""
         if not self.has_largest_acked:
             return UInt64(0)
-        var rtt = max(self.smoothed_rtt, self.latest_rtt)
-        if rtt == 0:
-            rtt = self.base_pto_ms
-        var thresh = max(
-            rtt * _K_TIME_THRESHOLD_NUM // _K_TIME_THRESHOLD_DEN,
-            _K_GRANULARITY_MS,
-        )
-        var earliest = UInt64(0)
-        for i in range(len(self.sent)):
-            if self.sent[i].pn >= self.largest_acked:
-                continue
-            var t = self.sent[i].time_ms + thresh
-            if earliest == 0 or t < earliest:
-                earliest = t
-        return earliest
+        # Send order is time order: the first live packet below the
+        # largest acknowledged is the earliest to cross the threshold.
+        var i = self.head
+        while i < len(self.sent) and self.sent[i].pn < self.largest_acked:
+            if self.sent[i].live:
+                return self.sent[i].time_ms + self._time_threshold()
+            i += 1
+        return UInt64(0)
 
     def _oldest_index(self) -> Int:
         """Index of the in-flight packet with the smallest send time
-        (the one a PTO would probe first). -1 if none."""
-        if len(self.sent) == 0:
-            return -1
-        var best = 0
-        for i in range(1, len(self.sent)):
-            if self.sent[i].time_ms < self.sent[best].time_ms:
-                best = i
-        return best
+        (the one a PTO would probe first): the first live one, since
+        send order is time order. -1 if none."""
+        var i = self.head
+        while i < len(self.sent):
+            if self.sent[i].live:
+                return i
+            i += 1
+        return -1
 
     def _pto_base(self) -> UInt64:
         """The RFC 9002 section 6.2 PTO interval (before backoff):
@@ -350,12 +436,9 @@ struct LossRecovery(Movable):
         var idx = self._oldest_index()
         if idx < 0:
             return List[UInt8]()
-        var frames = self.sent[idx].frames.copy()
-        self.bytes_in_flight -= self.sent[idx].size
-        var keep = List[SentPacket]()
-        for i in range(len(self.sent)):
-            if i != idx:
-                keep.append(self.sent[i].copy())
-        self.sent = keep^
+        var frames = List[UInt8]()
+        swap(frames, self.sent[idx].frames)
+        self._retire(idx)
+        self._compact()
         self.pto_count += 1
         return frames^

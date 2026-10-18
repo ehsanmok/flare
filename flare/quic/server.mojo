@@ -3639,7 +3639,7 @@ struct QuicListener(Movable):
         """Feed inbound ACK ranges to this slot's loss recovery.
 
         ``flare.quic.state.handle_frame_buf`` already decodes ACK frames
-        into ``events.acked_packets`` for both peers; the server simply
+        into ``events.acked_ranges`` for both peers; the server simply
         never read the field, so a dropped response sat unretransmitted
         until the idle timeout killed the connection. Mirrors the
         client's per-poll order: ack, then detect-and-resend, then
@@ -3647,21 +3647,20 @@ struct QuicListener(Movable):
         """
         if slot < 0 or slot >= len(self.loss):
             return
-        if len(events.acked_packets) == 0:
+        if len(events.acked_ranges) == 0:
             return
         # RFC 9000 sec 13.1: acknowledging a packet never sent is a
-        # PROTOCOL_VIOLATION.
+        # PROTOCOL_VIOLATION. Ranges are newest first, so [1] is the top.
         var next_pn = self.connections[slot].tx_1rtt_pn
-        for i in range(len(events.acked_packets)):
-            if events.acked_packets[i] >= next_pn:
-                self._close_for(
-                    slot,
-                    QUIC_PROTOCOL_VIOLATION,
-                    "ACK for a packet that was never sent",
-                )
-                return
-        _ = self.loss[slot].on_ack(
-            events.acked_packets, _monotonic_ms(), next_pn
+        if events.acked_ranges[1] >= next_pn:
+            self._close_for(
+                slot,
+                QUIC_PROTOCOL_VIOLATION,
+                "ACK for a packet that was never sent",
+            )
+            return
+        _ = self.loss[slot].on_ack_ranges(
+            events.acked_ranges, _monotonic_ms(), next_pn
         )
         self._retransmit_lost(slot)
         self._rearm_pto_timer(slot)
@@ -3673,29 +3672,28 @@ struct QuicListener(Movable):
         recovery and re-send the CRYPTO of any packet now lost (RFC 9002
         sec 6.1). An ACK naming a packet never sent in the space is a
         PROTOCOL_VIOLATION (RFC 9000 sec 13.1)."""
-        if len(events.acked_packets) == 0 or slot >= len(self.loss_hs):
+        if len(events.acked_ranges) == 0 or slot >= len(self.loss_hs):
             return
         var is_init = level == QuicEncryptionLevel.INITIAL
         var next_pn = self.connections[slot].tx_initial_pn if is_init else (
             self.connections[slot].tx_handshake_pn
         )
-        for i in range(len(events.acked_packets)):
-            if events.acked_packets[i] >= next_pn:
-                self._close_for(
-                    slot,
-                    QUIC_PROTOCOL_VIOLATION,
-                    "ACK for a packet that was never sent",
-                )
-                return
+        if events.acked_ranges[1] >= next_pn:
+            self._close_for(
+                slot,
+                QUIC_PROTOCOL_VIOLATION,
+                "ACK for a packet that was never sent",
+            )
+            return
         var lost: List[List[UInt8]]
         if is_init:
-            _ = self.loss_init[slot].on_ack(
-                events.acked_packets, _monotonic_ms(), next_pn
+            _ = self.loss_init[slot].on_ack_ranges(
+                events.acked_ranges, _monotonic_ms(), next_pn
             )
             lost = self.loss_init[slot].detect_lost(_monotonic_ms())
         else:
-            _ = self.loss_hs[slot].on_ack(
-                events.acked_packets, _monotonic_ms(), next_pn
+            _ = self.loss_hs[slot].on_ack_ranges(
+                events.acked_ranges, _monotonic_ms(), next_pn
             )
             lost = self.loss_hs[slot].detect_lost(_monotonic_ms())
         for i in range(len(lost)):
