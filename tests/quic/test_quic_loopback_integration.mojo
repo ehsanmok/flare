@@ -336,6 +336,9 @@ def test_egress_build_initial_response_decrypts_at_client() raises:
     for i in range(48):
         injected.append(UInt8(0xA0 + (i % 16)))
     listener.tls_egress_queues[0] = injected.copy()
+    # The synthetic Initial was ack-eliciting; its ACK would lead the
+    # payload. This test reads the CRYPTO frame alone.
+    listener.connections[0].lh_ack_pending[0] = False
     var datagram = listener._build_initial_response(0)
     assert_true(
         len(datagram) > 0,
@@ -424,27 +427,20 @@ def test_egress_drain_clears_queue_and_advances_counters() raises:
 
 
 def test_egress_no_op_when_queue_empty() raises:
-    """``_drain_and_send`` is a clean no-op when nothing is
-    pending: returns False without raising and without
-    incrementing pn / offset."""
+    """With no CRYPTO queued, the first drain sends only the ACK owed
+    for the client's Initial (RFC 9000 sec 13.1): one packet number,
+    no CRYPTO offset. The next drain is a clean no-op."""
     var listener = _bind_listener()
     var dcid = _make_cid(UInt8(0xEE), 8)
     var scid = _make_cid(UInt8(0xFF), 8)
     var first = _build_synth_initial(dcid, scid, UInt64(0))
     var peer = SocketAddr(IpAddr.localhost(), UInt16(54321))
     _ = listener.dispatch_datagram(Span[UInt8, _](first), peer)
-    var emitted = listener._drain_and_send(0)
-    assert_false(emitted, "no-op drain returns False")
-    assert_equal(
-        listener.connections[0].tx_initial_pn,
-        UInt64(0),
-        "no-op drain must not advance pn",
-    )
-    assert_equal(
-        listener.connections[0].tx_initial_offset,
-        UInt64(0),
-        "no-op drain must not advance offset",
-    )
+    assert_true(listener._drain_and_send(0), "the owed ACK goes out")
+    assert_equal(listener.connections[0].tx_initial_pn, UInt64(1))
+    assert_equal(listener.connections[0].tx_initial_offset, UInt64(0))
+    assert_false(listener._drain_and_send(0), "then nothing is pending")
+    assert_equal(listener.connections[0].tx_initial_pn, UInt64(1))
     listener.shutdown()
     listener.close()
 

@@ -23,6 +23,7 @@ from std.collections import Dict, List, Optional
 from std.collections.span import Span
 
 from ._server_0rtt import EarlyDataReplayGuard
+from ._server_support import _ack_record
 from .crypto import QuicAead
 from .packet import (
     ConnectionId,
@@ -398,6 +399,14 @@ struct QuicConnection(Copyable):
     their own space's largest. There was one counter for all three, so
     a space's numbers were decoded against another space's largest."""
 
+    var rx_lh_ranges: List[List[UInt64]]
+    """Received packet numbers in the Initial [0] and Handshake [1]
+    spaces, as ACK ranges, so each level is acknowledged in its own
+    packets (RFC 9000 sec 13.1, 17.2)."""
+    var lh_ack_pending: List[Bool]
+    """Per long-header space: an ack-eliciting packet arrived there and
+    has not been acknowledged yet."""
+
     var initial_keys_discarded: Bool
     """Set once a Handshake packet has decrypted: from then on the
     server drops Initial packets (RFC 9001 sec 4.9.1). Initial keys
@@ -484,6 +493,8 @@ struct QuicConnection(Copyable):
         self.conn.max_data_send = 0
         self.conn.peer_initial_max_stream_data = 0
         self.rx_largest = List[UInt64](length=3, fill=UInt64(0))
+        self.rx_lh_ranges = List[List[UInt64]](length=2, fill=List[UInt64]())
+        self.lh_ack_pending = List[Bool](length=2, fill=False)
         self.initial_keys_discarded = False
         self.early_guard = EarlyDataReplayGuard()
 
@@ -664,8 +675,11 @@ struct QuicConnection(Copyable):
 
     def _note_received(mut self, space: Int, pn: UInt64):
         """Record ``pn`` as received in ``space`` (see
-        :attr:`rx_largest`); ``conn.largest_received_packet`` stays
-        the largest across all spaces."""
+        :attr:`rx_largest`, and the long-header ACK ranges);
+        ``conn.largest_received_packet`` stays the largest across all
+        spaces."""
+        if space < 2:
+            _ack_record(self.rx_lh_ranges[space], pn)
         if pn > self.rx_largest[space]:
             self.rx_largest[space] = pn
         if pn > self.conn.largest_received_packet:

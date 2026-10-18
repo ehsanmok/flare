@@ -345,6 +345,13 @@ struct QuicListener(Movable):
     others. ``LossRecovery`` is Movable but not Copyable, so this slab
     is read through ``self.loss[slot].method()`` or a ``ref`` binding --
     never the ``.copy()`` idiom the Copyable slabs use."""
+    var loss_init: List[LossRecovery]
+    """Per-slot loss recovery for the CRYPTO packets sent in the
+    Initial space (RFC 9002 sec 6, separate packet-number space). A
+    lost server flight used to be recovered only by the idle timeout;
+    these and :attr:`loss_hs` re-send it on loss or PTO."""
+    var loss_hs: List[LossRecovery]
+    """The same for the Handshake space."""
     var rx_1rtt_ranges: List[List[UInt64]]
     """Per-slot received 1-RTT packet numbers, stored as disjoint
     ranges (flat [low, high] pairs, descending by high). The ACK
@@ -468,6 +475,8 @@ struct QuicListener(Movable):
         self.peer_addrs = List[SocketAddr]()
         self.migration_probe = List[MigrationProbe]()
         self.loss = List[LossRecovery]()
+        self.loss_init = List[LossRecovery]()
+        self.loss_hs = List[LossRecovery]()
         self.rx_1rtt_ranges = List[List[UInt64]]()
         self.rx_1rtt_ack_pending = List[Bool]()
         self.handshake_done_sent = List[Bool]()
@@ -799,9 +808,12 @@ struct QuicListener(Movable):
                 ok = False  # RFC 9001 sec 4.9.1
             else:
                 try:
+                    self.connections[slot].conn.ack_pending = False
                     events = self.connections[slot].handle_packet(
                         packet, now_us
                     )
+                    if self.connections[slot].conn.ack_pending:
+                        self.connections[slot].lh_ack_pending[0] = True
                 except:
                     ok = False
                     self._close_after_state_error(slot)
@@ -813,9 +825,17 @@ struct QuicListener(Movable):
                     var dec = self._decrypt_post_initial(
                         slot, packet, inbound_lvl, local_cid_len
                     )
+                    self.connections[slot].conn.ack_pending = False
                     events = self.connections[slot].dispatch_plaintext(
                         Span[UInt8, _](dec[0]), now_us, dec[1], True, 1
                     )
+                    if self.connections[slot].conn.ack_pending:
+                        self.connections[slot].lh_ack_pending[1] = True
+                    # The first Handshake packet ends the Initial space
+                    # (RFC 9001 sec 4.9.1): stop tracking its packets.
+                    if not self.connections[slot].initial_keys_discarded:
+                        self.loss_init[slot] = LossRecovery()
+                        self.connections[slot].lh_ack_pending[0] = False
                     self.connections[slot].initial_keys_discarded = True
                     # A Handshake packet proves the peer holds the
                     # address (RFC 9000 sec 8.1).
@@ -908,6 +928,10 @@ struct QuicListener(Movable):
         # acknowledging 1-RTT packets with those numbers.
         if inbound_lvl == QuicEncryptionLevel.APPLICATION:
             self._consume_acks(slot, events)
+        elif inbound_lvl == QuicEncryptionLevel.INITIAL or (
+            inbound_lvl == QuicEncryptionLevel.HANDSHAKE
+        ):
+            self._consume_lh_acks(slot, events, inbound_lvl)
         # Requests only from 1-RTT, or 0-RTT the early guard admitted.
         # Dispatch used to happen at every level, so a request in an
         # Initial reached the handler before any handshake.
@@ -1931,6 +1955,8 @@ struct QuicListener(Movable):
             self.rx_bidi_stream_count[slot] = UInt64(0)
             self.http3_connections[slot] = Http3Connection()
             self.loss[slot] = LossRecovery()
+            self.loss_init[slot] = LossRecovery()
+            self.loss_hs[slot] = LossRecovery()
         else:
             self.tls_sessions.append(session^)
             self.tls_egress_queues.append(List[UInt8]())
@@ -1948,6 +1974,8 @@ struct QuicListener(Movable):
             self.rx_bidi_stream_count.append(UInt64(0))
             self.http3_connections.append(Http3Connection())
             self.loss.append(LossRecovery())
+            self.loss_init.append(LossRecovery())
+            self.loss_hs.append(LossRecovery())
         self.cid_table.register(cid_to_hex(local_cid), slot)
         self.cid_table.register(cid_to_hex(lh.dcid), slot)
         _ = self.schedule_idle_timeout(slot)
@@ -2160,43 +2188,64 @@ struct QuicListener(Movable):
         # address is validated, only as far as 3x the bytes received
         # from it (RFC 9000 sec 8.1). What does not fit stays queued
         # for the next drain, after the peer sends more.
-        # Initial-level (legacy OpenSSL path).
-        while (
-            slot < len(self.tls_egress_queues)
-            and len(self.tls_egress_queues[slot]) > 0
-        ):
-            var take = min(len(self.tls_egress_queues[slot]), _HANDSHAKE_CHUNK)
-            if not self._amplification_allows(slot, take):
-                break
-            var initial_dg = self._build_initial_response(slot, max_bytes=take)
-            if len(initial_dg) == 0:
-                break
-            _ = self.send_to(Span[UInt8, _](initial_dg), peer)
-            self.connections[slot].amp_tx += len(initial_dg)
-            self.tls_egress_queues[slot] = _queue_rest(
-                self.tls_egress_queues[slot], take
+        # Initial and Handshake CRYPTO, with the ACKs owed at those
+        # levels, coalesced into one datagram (RFC 9000 sec 12.2): the
+        # Handshake packet is built first so the Initial ahead of it can
+        # be padded to make an ack-eliciting Initial datagram 1200 bytes
+        # (sec 14.1).
+        while True:
+            ref qc = self.connections[slot]
+            var init_q = len(self.tls_egress_queues[slot])
+            var hs_ready = len(qc.tx_handshake_secret) > 0
+            var hs_q = len(self.tls_handshake_egress_queues[slot])
+            if not hs_ready:
+                hs_q = 0
+            # Nothing more is sent at a level once its keys are
+            # discarded (RFC 9001 sec 4.9).
+            var want_init = not qc.initial_keys_discarded and (
+                init_q > 0 or qc.lh_ack_pending[0]
             )
+            var want_hs = (
+                hs_ready
+                and not self.handshake_done_sent[slot]
+                and (hs_q > 0 or qc.lh_ack_pending[1])
+            )
+            if not want_init and not want_hs:
+                break
+            var take_i = min(init_q, _HANDSHAKE_CHUNK) if want_init else 0
+            var take_h = min(hs_q, _HANDSHAKE_CHUNK - take_i)
+            var est = take_i + take_h + 2 * _LONG_PACKET_OVERHEAD
+            if take_i > 0 and est < _MIN_INITIAL_DATAGRAM:
+                est = _MIN_INITIAL_DATAGRAM
+            if not self._amplification_allows(slot, est):
+                break
+            var hs_dg = List[UInt8]()
+            if want_hs:
+                hs_dg = self._build_handshake_response(
+                    slot, max_bytes=take_h if take_h > 0 else -1
+                )
+                if len(hs_dg) > 0:
+                    self.tls_handshake_egress_queues[slot] = _queue_rest(
+                        self.tls_handshake_egress_queues[slot], take_h
+                    )
+            var datagram = List[UInt8]()
+            if want_init:
+                datagram = self._build_initial_response(
+                    slot,
+                    max_bytes=take_i if take_i > 0 else -1,
+                    pad_to=_MIN_INITIAL_DATAGRAM - len(hs_dg),
+                )
+                if len(datagram) > 0:
+                    self.tls_egress_queues[slot] = _queue_rest(
+                        self.tls_egress_queues[slot], take_i
+                    )
+            datagram.extend(Span[UInt8, _](hs_dg))
+            if len(datagram) == 0:
+                break
+            _ = self.send_to(Span[UInt8, _](datagram), peer)
+            self.connections[slot].amp_tx += len(datagram)
             emitted = True
-        # Handshake-level (rustls path; gated on the readiness
-        # sentinel via _build_handshake_response).
-        while (
-            slot < len(self.tls_handshake_egress_queues)
-            and len(self.tls_handshake_egress_queues[slot]) > 0
-        ):
-            var take = min(
-                len(self.tls_handshake_egress_queues[slot]), _HANDSHAKE_CHUNK
-            )
-            if not self._amplification_allows(slot, take):
-                break
-            var hs_dg = self._build_handshake_response(slot, max_bytes=take)
-            if len(hs_dg) == 0:
-                break
-            _ = self.send_to(Span[UInt8, _](hs_dg), peer)
-            self.connections[slot].amp_tx += len(hs_dg)
-            self.tls_handshake_egress_queues[slot] = _queue_rest(
-                self.tls_handshake_egress_queues[slot], take
-            )
-            emitted = True
+            self._rearm_pto_timer(slot)
         # 1-RTT-level CRYPTO (rustls post-handshake; gated on
         # the 1-RTT readiness sentinel).
         if (
@@ -2493,6 +2542,11 @@ struct QuicListener(Movable):
                         UInt64(H3_SERVER_CONTROL_STREAM_ID),
                     )
             self.rx_1rtt_ack_pending[slot] = False
+            if not self.handshake_done_sent[slot] and slot < len(self.loss_hs):
+                # Handshake confirmed: the Handshake space is done
+                # (RFC 9001 sec 4.9.2).
+                self.loss_hs[slot] = LossRecovery()
+                self.connections[slot].lh_ack_pending[1] = False
             self.handshake_done_sent[slot] = True
 
         # Migration path-validation frames (PATH_CHALLENGE /
@@ -2663,8 +2717,23 @@ struct QuicListener(Movable):
         _ = self.send_to(Span[UInt8, _](dg), peer)
         return True
 
+    def _take_lh_ack(mut self, slot: Int, space: Int) raises -> List[UInt8]:
+        """The ACK frame owed for long-header ``space`` (0 Initial,
+        1 Handshake), or nothing; clears the debt."""
+        var out = List[UInt8]()
+        ref c = self.connections[slot]
+        if c.lh_ack_pending[space] and len(c.rx_lh_ranges[space]) >= 2:
+            encode_ack(_ack_from_ranges(c.rx_lh_ranges[space], 0), out)
+        c.lh_ack_pending[space] = False
+        return out^
+
     def _build_initial_response(
-        mut self, slot: Int, pn_length: Int = 2, max_bytes: Int = 0
+        mut self,
+        slot: Int,
+        pn_length: Int = 2,
+        max_bytes: Int = 0,
+        frames: List[UInt8] = List[UInt8](),
+        pad_to: Int = 0,
     ) raises -> List[UInt8]:
         """Materialize a server-side Initial packet that carries
         the slot's pending egress CRYPTO bytes.
@@ -2681,19 +2750,50 @@ struct QuicListener(Movable):
         once long-running connections cross the 2-byte pn
         window.
         """
-        var qbytes = _queue_prefix(self.tls_egress_queues[slot], max_bytes)
+        # ``frames`` re-sends CRYPTO from a lost packet; otherwise take
+        # the next ``max_bytes`` of the queue. An ACK for the Initial
+        # space leads when one is owed (RFC 9000 sec 13.1).
+        var qbytes = List[UInt8]()
+        var payload = self._take_lh_ack(slot, 0)
+        var ack_len = len(payload)
+        if len(frames) > 0:
+            payload.extend(Span[UInt8, _](frames))
+        elif max_bytes >= 0:
+            qbytes = _queue_prefix(self.tls_egress_queues[slot], max_bytes)
+            if len(qbytes) > 0:
+                encode_crypto(
+                    CryptoFrame(
+                        offset=self.connections[slot].tx_initial_offset,
+                        data=qbytes.copy(),
+                    ),
+                    payload,
+                )
+        if len(payload) == 0:
+            return List[UInt8]()
+        var eliciting = len(payload) > ack_len
+        var tracked = List[UInt8](Span[UInt8, _](payload)[ack_len:])
+        # RFC 9000 sec 14.1: a datagram carrying an ack-eliciting Initial
+        # is at least 1200 bytes. PADDING frames (zero bytes) fill the
+        # packet to ``pad_to``. Beyond the payload a server Initial has
+        # first byte, version, two CID lengths, an empty token, a 2-byte
+        # Length (the payload is >= 64 bytes once padded), the packet
+        # number and the 16-byte tag.
+        if eliciting and pad_to > 0:
+            var size = (
+                len(payload)
+                + 1
+                + 4
+                + 2
+                + self.connections[slot].peer_cid.length()
+                + self.connections[slot].local_cid.length()
+                + 1
+                + 2
+                + pn_length
+                + 16
+            )
+            if size < pad_to:
+                payload.resize(len(payload) + pad_to - size, UInt8(0))
         var conn = self.connections[slot].copy()
-        var crypto = CryptoFrame(
-            offset=conn.tx_initial_offset, data=qbytes.copy()
-        )
-        var payload = List[UInt8]()
-        encode_crypto(crypto, payload)
-        # Build the long-header prefix: server DCID = peer's
-        # client-chosen SCID; server SCID = local_cid (same the
-        # peer sent in its first Initial's DCID). RFC 9000
-        # §17.2.2: the Initial Source Connection ID is the
-        # server's chosen CID -- here we echo local_cid so the
-        # client's CID->slot routing stays stable.
         var first_bits = (pn_length - 1) & 0x3
         var prefix = encode_long_header(
             PACKET_TYPE_INITIAL,
@@ -2728,12 +2828,20 @@ struct QuicListener(Movable):
         conn.tx_initial_pn = pn + UInt64(1)
         conn.tx_initial_offset = conn.tx_initial_offset + UInt64(len(qbytes))
         self.connections[slot] = conn^
+        if eliciting and slot < len(self.loss_init):
+            self.loss_init[slot].on_sent(
+                pn, tracked^, _monotonic_ms(), size=UInt64(len(datagram))
+            )
         return datagram^
 
     # -- Handshake + 1-RTT egress via rustls --------------------------------
 
     def _build_handshake_response(
-        mut self, slot: Int, pn_length: Int = 2, max_bytes: Int = 0
+        mut self,
+        slot: Int,
+        pn_length: Int = 2,
+        max_bytes: Int = 0,
+        frames: List[UInt8] = List[UInt8](),
     ) raises -> List[UInt8]:
         """Wrap the slot's pending Handshake-level CRYPTO bytes
         into a long-header Handshake packet, AEAD-protected via
@@ -2771,7 +2879,11 @@ struct QuicListener(Movable):
             return List[UInt8]()
         if slot >= len(self.tls_handshake_egress_queues):
             return List[UInt8]()
-        if len(self.tls_handshake_egress_queues[slot]) == 0:
+        if (
+            len(self.tls_handshake_egress_queues[slot]) == 0
+            and len(frames) == 0
+            and not self.connections[slot].lh_ack_pending[1]
+        ):
             return List[UInt8]()
         var conn = self.connections[slot].copy()
         # Per-direction sentinel gates the egress: if rustls
@@ -2790,16 +2902,28 @@ struct QuicListener(Movable):
                 "_build_handshake_response: pn_length out of [1, 4]: "
                 + String(pn_length)
             )
-        # 1. Encode the CRYPTO frame body that wraps the
+        # 1. The ACK owed for the Handshake space, then CRYPTO: re-sent
+        # ``frames`` from a lost packet, or the next ``max_bytes`` of the
         # rustls take_crypto output at Handshake level.
-        var qbytes = _queue_prefix(
-            self.tls_handshake_egress_queues[slot], max_bytes
-        )
-        var crypto = CryptoFrame(
-            offset=conn.tx_handshake_offset, data=qbytes.copy()
-        )
-        var payload = List[UInt8]()
-        encode_crypto(crypto, payload)
+        var qbytes = List[UInt8]()
+        var payload = self._take_lh_ack(slot, 1)
+        var ack_len = len(payload)
+        if len(frames) > 0:
+            payload.extend(Span[UInt8, _](frames))
+        elif max_bytes >= 0:
+            qbytes = _queue_prefix(
+                self.tls_handshake_egress_queues[slot], max_bytes
+            )
+            if len(qbytes) > 0:
+                encode_crypto(
+                    CryptoFrame(
+                        offset=conn.tx_handshake_offset, data=qbytes.copy()
+                    ),
+                    payload,
+                )
+        if len(payload) == 0:
+            return List[UInt8]()
+        var tracked = List[UInt8](Span[UInt8, _](payload)[ack_len:])
         # 2. Build the long-header prefix (no token varint at
         # Handshake level per RFC 9000 §17.2.4).
         var first_bits = (pn_length - 1) & 0x3
@@ -2880,7 +3004,13 @@ struct QuicListener(Movable):
         conn.tx_handshake_offset = conn.tx_handshake_offset + UInt64(
             len(qbytes)
         )
+        # ``conn`` was copied before the owed ACK was taken above.
+        conn.lh_ack_pending[1] = False
         self.connections[slot] = conn^
+        if len(tracked) > 0 and slot < len(self.loss_hs):
+            self.loss_hs[slot].on_sent(
+                pn, tracked^, _monotonic_ms(), size=UInt64(len(protected))
+            )
         return protected^
 
     def _build_1rtt_response(
@@ -3211,11 +3341,33 @@ struct QuicListener(Movable):
         # forever: LossRecovery caps the backoff at 64x but nothing caps
         # the attempt count. Past the configured limit, close the slot
         # and let the normal retire path reclaim it.
-        if self.loss[slot].pto_count > self.config.max_pto_count:
+        var probes = self.loss[slot].pto_count
+        if slot < len(self.loss_hs):
+            probes = max(
+                probes,
+                max(
+                    self.loss_init[slot].pto_count, self.loss_hs[slot].pto_count
+                ),
+            )
+        if probes > self.config.max_pto_count:
             self.connections[slot].alive = False
             self._cancel_pto_timer(slot)
             return
         var peer = self.peer_addrs[slot]
+        # A handshake still in flight probes its earliest space first
+        # (RFC 9002 sec 6.2.1): re-send that space's oldest CRYPTO.
+        if slot < len(self.loss_hs):
+            var di = self.loss_init[slot].pto_deadline()
+            var dh = self.loss_hs[slot].pto_deadline()
+            if di != 0 or dh != 0:
+                if di != 0 and (dh == 0 or di <= dh):
+                    var lost = self.loss_init[slot].fire_pto()
+                    self._resend_lh(slot, QuicEncryptionLevel.INITIAL, lost)
+                else:
+                    var lost = self.loss_hs[slot].fire_pto()
+                    self._resend_lh(slot, QuicEncryptionLevel.HANDSHAKE, lost)
+                self._rearm_pto_timer(slot)
+                return
         var frames = self.loss[slot].fire_pto()
         if len(frames) > 0:
             var dg = self._build_1rtt_response(
@@ -3260,6 +3412,66 @@ struct QuicListener(Movable):
         )
         self._retransmit_lost(slot)
         self._rearm_pto_timer(slot)
+
+    def _consume_lh_acks(
+        mut self, slot: Int, events: ConnectionEvents, level: Int
+    ) raises:
+        """Feed an Initial or Handshake ACK to that space's loss
+        recovery and re-send the CRYPTO of any packet now lost (RFC 9002
+        sec 6.1). An ACK naming a packet never sent in the space is a
+        PROTOCOL_VIOLATION (RFC 9000 sec 13.1)."""
+        if len(events.acked_packets) == 0 or slot >= len(self.loss_hs):
+            return
+        var is_init = level == QuicEncryptionLevel.INITIAL
+        var next_pn = self.connections[slot].tx_initial_pn if is_init else (
+            self.connections[slot].tx_handshake_pn
+        )
+        for i in range(len(events.acked_packets)):
+            if events.acked_packets[i] >= next_pn:
+                self._close_for(
+                    slot,
+                    QUIC_PROTOCOL_VIOLATION,
+                    "ACK for a packet that was never sent",
+                )
+                return
+        var lost: List[List[UInt8]]
+        if is_init:
+            _ = self.loss_init[slot].on_ack(
+                events.acked_packets, _monotonic_ms(), next_pn
+            )
+            lost = self.loss_init[slot].detect_lost(_monotonic_ms())
+        else:
+            _ = self.loss_hs[slot].on_ack(
+                events.acked_packets, _monotonic_ms(), next_pn
+            )
+            lost = self.loss_hs[slot].detect_lost(_monotonic_ms())
+        for i in range(len(lost)):
+            self._resend_lh(slot, level, lost[i])
+        self._rearm_pto_timer(slot)
+
+    def _resend_lh(mut self, slot: Int, level: Int, frames: List[UInt8]) raises:
+        """Re-send long-header CRYPTO ``frames`` in a fresh packet at
+        ``level``, within the anti-amplification budget (RFC 9000 sec
+        8.1). An Initial is padded to 1200 bytes (sec 14.1)."""
+        if len(frames) == 0 or slot >= len(self.peer_addrs):
+            return
+        var is_init = level == QuicEncryptionLevel.INITIAL
+        var est = len(frames) + _LONG_PACKET_OVERHEAD
+        if is_init and est < _MIN_INITIAL_DATAGRAM:
+            est = _MIN_INITIAL_DATAGRAM
+        if not self._amplification_allows(slot, est):
+            return
+        var dg: List[UInt8]
+        if is_init:
+            dg = self._build_initial_response(
+                slot, frames=frames, pad_to=_MIN_INITIAL_DATAGRAM
+            )
+        else:
+            dg = self._build_handshake_response(slot, frames=frames)
+        if len(dg) == 0:
+            return
+        _ = self.send_to(Span[UInt8, _](dg), self.peer_addrs[slot])
+        self.connections[slot].amp_tx += len(dg)
 
     def _retransmit_lost(mut self, slot: Int) raises:
         """Re-send the frames of every packet now declared lost.
@@ -3307,9 +3519,14 @@ struct QuicListener(Movable):
         if slot >= len(self.loss):
             return
         self._cancel_pto_timer(slot)
-        if self.loss[slot].outstanding() == 0:
-            return
         var deadline = self.loss[slot].pto_deadline()
+        if slot < len(self.loss_hs):
+            var di = self.loss_init[slot].pto_deadline()
+            var dh = self.loss_hs[slot].pto_deadline()
+            if di != 0 and (deadline == 0 or di < deadline):
+                deadline = di
+            if dh != 0 and (deadline == 0 or dh < deadline):
+                deadline = dh
         if deadline == UInt64(0):
             return
         var now = _monotonic_ms()
