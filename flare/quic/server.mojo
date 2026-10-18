@@ -148,7 +148,9 @@ from ..tls._rustls_quic_ffi import (
     _do_header_encrypt,
     _do_install_early_keys,
     _do_is_handshake_complete,
+    _do_key_update,
     _do_packet_decrypt,
+    _do_packet_decrypt_1rtt,
     _do_packet_encrypt,
     _do_peer_transport_params,
     _do_session_free,
@@ -1199,14 +1201,35 @@ struct QuicListener(Movable):
         # 16-byte tag (RFC 9001 sec 5.3), so the plaintext is exactly
         # the leading ``len(payload) - 16`` bytes; we slice that
         # directly rather than depend on the out-parameter readback.
-        _ = _do_packet_decrypt(
-            self.tls_acceptor._fns,
-            handle,
-            level,
-            packet_number,
-            header,
-            payload,
-        )
+        if level == QuicEncryptionLevel.APPLICATION:
+            # The key phase bit picks the key (RFC 9001 sec 6.3). A
+            # packet that opens under the next generation is the peer's
+            # key update: rustls has rotated, and we answer in the new
+            # phase from the next packet on.
+            var phase = (Int(first_local) >> 2) & 1
+            if (
+                _do_packet_decrypt_1rtt(
+                    self.tls_acceptor._fns,
+                    handle,
+                    phase,
+                    packet_number,
+                    header,
+                    payload,
+                )
+                == 1
+            ):
+                ref c = self.connections[slot]
+                c.key_phase = not c.key_phase
+                c.phase_first_pn = c.tx_1rtt_pn
+        else:
+            _ = _do_packet_decrypt(
+                self.tls_acceptor._fns,
+                handle,
+                level,
+                packet_number,
+                header,
+                payload,
+            )
         comptime QUIC_AEAD_TAG_LEN = 16
         var plaintext_len = len(payload) - QUIC_AEAD_TAG_LEN
         if plaintext_len < 0:
@@ -3069,17 +3092,29 @@ struct QuicListener(Movable):
                 "_build_1rtt_response: pn_length out of [1, 4]: "
                 + String(pn_length)
             )
-        var peer_cid = self.connections[slot].peer_cid.copy()
-        # 1. Build the unprotected short-header prefix.
-        # spin_bit + key_phase stay 0 (no key-update yet).
+        var pn = self.connections[slot].tx_1rtt_pn
+        # Start a key update once the current key has protected
+        # ``key_update_interval`` packets and one of them was acked
+        # (RFC 9001 sec 6.1, 6.6).
+        ref kc = self.connections[slot]
+        if (
+            pn - kc.phase_first_pn >= self.config.key_update_interval
+            and slot < len(self.loss)
+            and self.loss[slot].has_largest_acked
+            and self.loss[slot].largest_acked >= kc.phase_first_pn
+        ):
+            _ = _do_key_update(self.tls_acceptor._lib, handle)
+            kc.key_phase = not kc.key_phase
+            kc.phase_first_pn = pn
+        var peer_cid = kc.peer_cid.copy()
+        # 1. Build the unprotected short-header prefix (spin bit 0).
         var prefix = encode_short_header(
             peer_cid,
             spin_bit=False,
-            key_phase=False,
+            key_phase=kc.key_phase,
             pn_length=pn_length,
         )
         # 2. Build unprotected header = prefix + pn bytes.
-        var pn = self.connections[slot].tx_1rtt_pn
         var unprotected_header = List[UInt8](capacity=len(prefix) + pn_length)
         for i in range(len(prefix)):
             unprotected_header.append(prefix[i])

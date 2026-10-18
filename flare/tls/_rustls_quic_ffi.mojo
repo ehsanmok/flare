@@ -64,6 +64,9 @@ comptime _PacketEncryptFn = def(
 comptime _PacketDecryptFn = def(
     Int, c_int, UInt64, Int, Int, Int, Int, Int
 ) thin abi("C") -> c_int
+comptime _PacketDecrypt1RttFn = def(
+    Int, c_int, UInt64, Int, Int, Int, Int, Int
+) thin abi("C") -> c_int
 comptime _HeaderProtectFn = def(Int, c_int, Int, Int, Int, Int, Int) thin abi(
     "C"
 ) -> c_int
@@ -90,12 +93,16 @@ struct RustlsQuicPacketFns(ImplicitlyCopyable, Movable):
 
     var packet_encrypt: Int
     var packet_decrypt: Int
+    var packet_decrypt_1rtt: Int
     var header_encrypt: Int
     var header_decrypt: Int
 
     def __init__(out self, lib: OwnedDLHandle):
         self.packet_encrypt = _sym_addr(lib, "flare_rustls_quic_packet_encrypt")
         self.packet_decrypt = _sym_addr(lib, "flare_rustls_quic_packet_decrypt")
+        self.packet_decrypt_1rtt = _sym_addr(
+            lib, "flare_rustls_quic_packet_decrypt_1rtt"
+        )
         self.header_encrypt = _sym_addr(lib, "flare_rustls_quic_header_encrypt")
         self.header_decrypt = _sym_addr(lib, "flare_rustls_quic_header_decrypt")
 
@@ -586,6 +593,55 @@ def _do_packet_decrypt(
             String("flare_rustls_quic_packet_decrypt returned ") + String(rc)
         )
     return len_ptr[]
+
+
+def _do_packet_decrypt_1rtt(
+    fns: RustlsQuicPacketFns,
+    session: Int,
+    key_phase: Int,
+    packet_number: UInt64,
+    imm header: List[UInt8],
+    mut payload: List[UInt8],
+) raises -> Int:
+    """``flare_rustls_quic_packet_decrypt_1rtt``: open a 1-RTT payload
+    in place under the header's key phase bit (RFC 9001 sec 6.3).
+    Returns 1 when the packet carried the peer's next phase and the
+    session's keys rotated (the caller now sends in the new phase), 0
+    otherwise. Raises on any failure; a failed open never rotates."""
+    _need(fns.packet_decrypt_1rtt, "flare_rustls_quic_packet_decrypt_1rtt")
+    var f = _as_fn[_PacketDecrypt1RttFn](fns.packet_decrypt_1rtt)
+    var plaintext_len: Int = 0
+    var len_ptr = Pointer(to=plaintext_len)
+    var rc = Int(
+        f(
+            session,
+            c_int(key_phase),
+            packet_number,
+            Int(header.unsafe_ptr()),
+            len(header),
+            Int(payload.unsafe_ptr()),
+            len(payload),
+            Int(len_ptr),
+        )
+    )
+    if rc < 0:
+        raise Error(
+            String("flare_rustls_quic_packet_decrypt_1rtt returned ")
+            + String(rc)
+        )
+    return rc
+
+
+def _do_key_update(imm lib: OwnedDLHandle, session: Int) raises -> Int:
+    """``flare_rustls_quic_key_update``: rotate to the next 1-RTT key
+    generation (RFC 9001 sec 6.1); returns the new key phase bit."""
+    var f = dl_sym[def(Int) thin abi("C") -> c_int](
+        lib, "flare_rustls_quic_key_update"
+    )
+    var rc = Int(f(session))
+    if rc < 0:
+        raise Error("flare_rustls_quic_key_update: no 1-RTT keys")
+    return rc
 
 
 def _do_header_encrypt(

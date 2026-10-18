@@ -297,6 +297,9 @@ struct QuicClientConnection(Movable):
     var tx_handshake_pn: UInt64
     var tx_handshake_offset: UInt64
     var tx_1rtt_pn: UInt64
+    var key_phase: Bool
+    """1-RTT key phase bit we send; flips on every key update
+    (RFC 9001 sec 6)."""
 
     var tx_initial_crypto: List[UInt8]
     """Outbound Initial-level CRYPTO awaiting egress (the
@@ -418,6 +421,7 @@ struct QuicClientConnection(Movable):
         self.tx_handshake_pn = UInt64(0)
         self.tx_handshake_offset = UInt64(0)
         self.tx_1rtt_pn = UInt64(0)
+        self.key_phase = False
         self.tx_initial_crypto = List[UInt8]()
         self.tx_handshake_crypto = List[UInt8]()
         self.tx_1rtt_crypto = List[UInt8]()
@@ -1099,7 +1103,22 @@ struct QuicClientConnection(Movable):
         var payload = List[UInt8]()
         for i in range(ciphertext_start, packet_end):
             payload.append(datagram[i])
-        _ = self.session.packet_decrypt(level, packet_number, header, payload)
+        if level == QuicEncryptionLevel.APPLICATION:
+            # The key phase bit picks the key; a packet that opens under
+            # the next generation is the peer's key update (RFC 9001
+            # sec 6.3), answered in the new phase from here on.
+            var phase = (Int(first_local) >> 2) & 1
+            if (
+                self.session.packet_decrypt_1rtt(
+                    phase, packet_number, header, payload
+                )
+                == 1
+            ):
+                self.key_phase = not self.key_phase
+        else:
+            _ = self.session.packet_decrypt(
+                level, packet_number, header, payload
+            )
         var plaintext_len = len(payload) - _AEAD_TAG_LEN
         if plaintext_len < 0:
             raise Error("quic client: payload shorter than AEAD tag")
@@ -1386,7 +1405,7 @@ struct QuicClientConnection(Movable):
         var prefix = encode_short_header(
             self.dcid,
             spin_bit=False,
-            key_phase=False,
+            key_phase=self.key_phase,
             pn_length=pn_length,
         )
         var pn = self.tx_1rtt_pn
@@ -1841,6 +1860,12 @@ struct QuicClientConnection(Movable):
         return True
 
     # ── Accessors ───────────────────────────────────────────────────
+
+    def initiate_key_update(mut self) raises:
+        """Start a 1-RTT key update (RFC 9001 sec 6.1): later packets go
+        out under the next key generation and the other phase bit."""
+        _ = self.session.key_update()
+        self.key_phase = not self.key_phase
 
     def is_established(self) -> Bool:
         """Whether the QUIC + TLS handshake has completed and 1-RTT

@@ -197,6 +197,10 @@ struct QuicServerConfig(Copyable, Defaultable):
     short enough to bound replay. Only consulted when
     :attr:`require_address_validation` is set."""
 
+    var key_update_interval: UInt64
+    """1-RTT packets sent under one key before the server starts a key
+    update (RFC 9001 sec 6). Default 2^23, the AES-GCM confidentiality
+    limit of RFC 9001 sec 6.6, which also covers ChaCha20-Poly1305."""
     var max_pto_count: Int
     """Consecutive probe timeouts before the connection is given up on.
 
@@ -225,6 +229,7 @@ struct QuicServerConfig(Copyable, Defaultable):
         self.require_address_validation = False
         self.retry_token_max_age_ms = UInt64(10_000)
         self.max_pto_count = 10
+        self.key_update_interval = UInt64(1) << 23
 
 
 # -- Per-connection driver ----------------------------------------------
@@ -345,6 +350,13 @@ struct QuicConnection(Copyable):
 
     var tx_1rtt_pn: UInt64
     """Next packet number to use on the outbound 1-RTT path."""
+
+    var key_phase: Bool
+    """1-RTT key phase bit we send (RFC 9001 sec 6): flips on every key
+    update, ours or the peer's."""
+    var phase_first_pn: UInt64
+    """First packet number sent in the current key phase. A new update
+    waits until a packet from this phase is acknowledged (sec 6.1)."""
 
     var amp_rx: Int
     """Bytes received from the peer's address while it is unvalidated."""
@@ -473,6 +485,8 @@ struct QuicConnection(Copyable):
         self.tx_handshake_pn = UInt64(0)
         self.tx_handshake_offset = UInt64(0)
         self.tx_1rtt_pn = UInt64(0)
+        self.key_phase = False
+        self.phase_first_pn = UInt64(0)
         self.amp_rx = 0
         self.amp_tx = 0
         self.addr_validated = False

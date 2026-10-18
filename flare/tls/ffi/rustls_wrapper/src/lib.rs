@@ -46,7 +46,10 @@ use std::slice;
 use std::sync::Arc;
 
 use rustls::pki_types::ServerName;
-use rustls::quic::{Connection as QuicConnection, DirectionalKeys, KeyChange, Keys, Version};
+use rustls::quic::{
+    Connection as QuicConnection, DirectionalKeys, KeyChange, Keys, PacketKey, PacketKeySet, Secrets,
+    Version,
+};
 use rustls::server::{ServerConfig, ServerConnection};
 use rustls::{ClientConfig, RootCertStore};
 
@@ -143,6 +146,59 @@ pub struct Session {
     /// `connect` on a resumed client, or after the ClientHello is
     /// read on the server).
     early_keys: Option<DirectionalKeys>,
+    /// 1-RTT key update (RFC 9001 sec 6): the secrets the next
+    /// generation derives from (from `KeyChange::OneRtt`), that
+    /// generation's packet keys once derived, the previous
+    /// generation's read key (kept for packets reordered across an
+    /// update), the current key phase bit, and the lowest packet
+    /// number read in the current phase (`u64::MAX` until one is).
+    next_secrets: Option<Secrets>,
+    next_keys: Option<PacketKeySet>,
+    prev_remote: Option<Box<dyn PacketKey>>,
+    phase: u8,
+    phase_rx_start: u64,
+}
+
+impl Session {
+    fn new(conn: QuicConnection) -> Self {
+        Session {
+            conn,
+            pending: [Vec::new(), Vec::new(), Vec::new(), Vec::new()],
+            keys: [None, None, None, None],
+            early_keys: None,
+            next_secrets: None,
+            next_keys: None,
+            prev_remote: None,
+            phase: 0,
+            phase_rx_start: u64::MAX,
+        }
+    }
+
+    /// The next generation's packet keys, derived on first use.
+    fn next_keys(&mut self) -> Option<&PacketKeySet> {
+        if self.next_keys.is_none() {
+            let secrets = self.next_secrets.as_mut()?;
+            self.next_keys = Some(secrets.next_packet_keys());
+        }
+        self.next_keys.as_ref()
+    }
+
+    /// Move to the next key generation: header keys stay (RFC 9001
+    /// sec 6), the packet keys rotate, the old read key is kept for
+    /// reordered packets, and the phase bit flips.
+    fn rotate(&mut self) -> bool {
+        if self.next_keys().is_none() || self.keys[LEVEL_1RTT].is_none() {
+            return false;
+        }
+        let nk = self.next_keys.take().unwrap();
+        let keys = self.keys[LEVEL_1RTT].as_mut().unwrap();
+        let old_remote = std::mem::replace(&mut keys.remote.packet, nk.remote);
+        keys.local.packet = nk.local;
+        self.prev_remote = Some(old_remote);
+        self.phase ^= 1;
+        self.phase_rx_start = u64::MAX;
+        true
+    }
 }
 
 /// `flare_rustls_quic_acceptor_new` parses the PEM cert + key,
@@ -338,12 +394,7 @@ pub extern "C" fn flare_rustls_quic_accept(
             }
         };
     drop(inner);
-    let session = Box::new(Session {
-        conn: QuicConnection::Server(quic_conn),
-        pending: [Vec::new(), Vec::new(), Vec::new(), Vec::new()],
-        keys: [None, None, None, None],
-        early_keys: None,
-    });
+    let session = Box::new(Session::new(QuicConnection::Server(quic_conn)));
     Box::into_raw(session) as *mut c_void
 }
 
@@ -604,12 +655,7 @@ pub extern "C" fn flare_rustls_quic_connect(
             return std::ptr::null_mut();
         }
     };
-    let session = Box::new(Session {
-        conn: QuicConnection::Client(quic_conn),
-        pending: [Vec::new(), Vec::new(), Vec::new(), Vec::new()],
-        keys: [None, None, None, None],
-        early_keys: None,
-    });
+    let session = Box::new(Session::new(QuicConnection::Client(quic_conn)));
     Box::into_raw(session) as *mut c_void
 }
 
@@ -876,6 +922,100 @@ pub extern "C" fn flare_rustls_quic_is_early_data_accepted(session: *mut c_void)
     }
 }
 
+/// Decrypt a 1-RTT payload under the key phase bit of its header
+/// (RFC 9001 sec 6.3). The current phase uses the current read key. A
+/// packet in the other phase numbered below the first packet read in
+/// the current phase was sent before the last update and uses the
+/// previous key. Any other packet in the other phase starts a key
+/// update by the peer: it is opened with the next generation's key,
+/// and only if that succeeds do the keys rotate. A failed open never
+/// changes state.
+///
+/// Returns 0 on success, 1 on success that rotated the keys (the
+/// caller must now send in the new phase), -1 on bad arguments or
+/// missing keys, -2 on an AEAD failure.
+#[no_mangle]
+pub extern "C" fn flare_rustls_quic_packet_decrypt_1rtt(
+    session: *mut c_void,
+    key_phase: c_int,
+    packet_number: u64,
+    header_ptr: *const u8,
+    header_len: usize,
+    payload_ptr: *mut u8,
+    payload_len: usize,
+    plaintext_len: *mut usize,
+) -> c_int {
+    if session.is_null() || plaintext_len.is_null() || header_ptr.is_null() {
+        set_last_error("flare_rustls_quic_packet_decrypt_1rtt: NULL argument");
+        return -1;
+    }
+    if payload_ptr.is_null() && payload_len > 0 {
+        set_last_error("flare_rustls_quic_packet_decrypt_1rtt: NULL payload");
+        return -1;
+    }
+    let sess = unsafe { &mut *(session as *mut Session) };
+    if sess.keys[LEVEL_1RTT].is_none() {
+        set_last_error("rustls_quic: per-level keys not yet installed");
+        return -1;
+    }
+    let header = unsafe { slice::from_raw_parts(header_ptr, header_len) };
+    let payload = unsafe { slice::from_raw_parts_mut(payload_ptr, payload_len) };
+    let phase = (key_phase & 1) as u8;
+    let mut rotate = false;
+    let key: &dyn PacketKey = if phase == sess.phase {
+        &*sess.keys[LEVEL_1RTT].as_ref().unwrap().remote.packet
+    } else if sess.prev_remote.is_some() && packet_number < sess.phase_rx_start {
+        &**sess.prev_remote.as_ref().unwrap()
+    } else {
+        rotate = true;
+        match sess.next_keys() {
+            Some(nk) => &*nk.remote,
+            None => {
+                set_last_error("rustls_quic: no next 1-RTT keys");
+                return -1;
+            }
+        }
+    };
+    let n = match key.decrypt_in_place(packet_number, header, payload) {
+        Ok(pt) => pt.len(),
+        Err(e) => {
+            set_last_error(format!(
+                "flare_rustls_quic_packet_decrypt_1rtt: rustls AEAD error: {e}"
+            ));
+            return -2;
+        }
+    };
+    unsafe { *plaintext_len = n };
+    if rotate {
+        sess.rotate();
+    }
+    if phase == sess.phase && packet_number < sess.phase_rx_start {
+        sess.phase_rx_start = packet_number;
+    }
+    if rotate {
+        1
+    } else {
+        0
+    }
+}
+
+/// Start a 1-RTT key update (RFC 9001 sec 6.1): rotate to the next
+/// key generation and flip the phase bit. Returns the new phase (0 or
+/// 1), or -1 when there are no 1-RTT keys yet.
+#[no_mangle]
+pub extern "C" fn flare_rustls_quic_key_update(session: *mut c_void) -> c_int {
+    if session.is_null() {
+        set_last_error("flare_rustls_quic_key_update: NULL session");
+        return -1;
+    }
+    let sess = unsafe { &mut *(session as *mut Session) };
+    if !sess.rotate() {
+        set_last_error("flare_rustls_quic_key_update: no 1-RTT keys");
+        return -1;
+    }
+    sess.phase as c_int
+}
+
 /// Crate version sanity-check thunk so Mojo callers can confirm
 /// the .so dlopen resolved to this crate (not a stale build).
 /// Returns 2 for the current surface (rustls KeyChange bridge +
@@ -921,9 +1061,13 @@ pub extern "C" fn flare_rustls_quic_is_early_data_accepted(session: *mut c_void)
 ///   peer's raw `quic_transport_parameters` extension out for the
 ///   Mojo-side decoder, so the stack can apply the peer's flow
 ///   control / CID limits after the handshake).
+/// * 7 -- adds 1-RTT key update (RFC 9001 sec 6):
+///   `flare_rustls_quic_packet_decrypt_1rtt` (phase-aware open that
+///   rotates on a peer-initiated update) and
+///   `flare_rustls_quic_key_update`.
 #[no_mangle]
 pub extern "C" fn flare_rustls_quic_abi_version() -> i64 {
-    6
+    7
 }
 
 /// Returns 1 if rustls has installed per-level keys at the given
@@ -1257,9 +1401,8 @@ pub extern "C" fn flare_rustls_quic_header_decrypt(
 /// from `None` to `Some(keys)`; the new
 /// `flare_rustls_quic_packet_{encrypt,decrypt}` +
 /// `_header_{encrypt,decrypt}` thunks read those slots to drive
-/// the post-Initial AEAD path on the Mojo side.  We ignore the
-/// `next` `Secrets` from the OneRtt variant -- key updates land
-/// in a follow-up FFI (when QuicListener requests them).
+/// the post-Initial AEAD path on the Mojo side.  The OneRtt
+/// variant's `next` `Secrets` are kept for 1-RTT key updates.
 fn drain_outbound(sess: &mut Session) {
     // Encryption level the bytes coming *back* from this batch
     // belong to. Start at the lowest level the session still has
@@ -1276,8 +1419,9 @@ fn drain_outbound(sess: &mut Session) {
                 sess.keys[LEVEL_HANDSHAKE] = Some(keys);
                 current_level = LEVEL_HANDSHAKE;
             }
-            Some(KeyChange::OneRtt { keys, next: _ }) => {
+            Some(KeyChange::OneRtt { keys, next }) => {
                 sess.keys[LEVEL_1RTT] = Some(keys);
+                sess.next_secrets = Some(next);
                 current_level = LEVEL_1RTT;
             }
             None => {
@@ -1414,7 +1558,7 @@ mod tests {
     }
 
     #[test]
-    fn abi_version_returns_six() {
+    fn abi_version_returns_seven() {
         // The ABI bumped 1 -> 2 (KeyChange-capture + per-level
         // AEAD/HP thunks) -> 3 (client role: connector_new/_free +
         // connect) -> 4 (0-RTT early data + resumption: install_early_keys
@@ -1424,7 +1568,7 @@ mod tests {
         // activation script keys off this number, so a stale .so on a
         // developer machine surfaces as a hard mismatch on
         // `pixi install` rather than a silent run-time confusion.
-        assert_eq!(flare_rustls_quic_abi_version(), 6);
+        assert_eq!(flare_rustls_quic_abi_version(), 7);
     }
 
     #[test]
@@ -1590,6 +1734,124 @@ mod tests {
             c2.zero_rtt_keys().is_some(),
             "resumed client must be handed 0-RTT early keys",
         );
+    }
+
+    #[test]
+    fn key_update_rotates_on_peer_phase_and_keeps_old_reads() {
+        // RFC 9001 sec 6: a peer-initiated update is accepted only when
+        // the next-phase packet authenticates; an older packet from the
+        // previous phase still opens; a forged phase flip changes
+        // nothing.
+        use rustls::pki_types::ServerName;
+        use rustls::quic::{ClientConnection, ServerConnection};
+
+        let ca_pem = include_str!(
+            "../../../../../tests/tls/fixtures/rustls-quic-client/ca.pem"
+        );
+        let cert_pem = include_str!(
+            "../../../../../tests/tls/fixtures/rustls-quic-client/cert.pem"
+        );
+        let key_pem = include_str!(
+            "../../../../../tests/tls/fixtures/rustls-quic-client/key.pem"
+        );
+        let mut roots = RootCertStore::empty();
+        for c in rustls_pemfile::certs(&mut std::io::Cursor::new(ca_pem.as_bytes())) {
+            roots.add(c.unwrap()).unwrap();
+        }
+        let provider = Arc::new(rustls::crypto::ring::default_provider());
+        let mut cc = ClientConfig::builder_with_provider(provider.clone())
+            .with_safe_default_protocol_versions()
+            .unwrap()
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+        cc.alpn_protocols = vec![b"h3".to_vec()];
+        let certs = rustls_pemfile::certs(&mut std::io::Cursor::new(cert_pem.as_bytes()))
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        let key = rustls_pemfile::private_key(&mut std::io::Cursor::new(key_pem.as_bytes()))
+            .unwrap()
+            .unwrap();
+        let mut sc = ServerConfig::builder_with_provider(provider)
+            .with_safe_default_protocol_versions()
+            .unwrap()
+            .with_no_client_auth()
+            .with_single_cert(certs, key)
+            .unwrap();
+        sc.alpn_protocols = vec![b"h3".to_vec()];
+        let tp = vec![0x00u8, 0x01, 0x02, 0x03];
+        let pair = || {
+            let c = Session::new(QuicConnection::Client(
+                ClientConnection::new(
+                    Arc::new(cc.clone()),
+                    Version::V1,
+                    ServerName::try_from("localhost").unwrap(),
+                    tp.clone(),
+                )
+                .unwrap(),
+            ));
+            let s = Session::new(QuicConnection::Server(
+                ServerConnection::new(Arc::new(sc.clone()), Version::V1, tp.clone()).unwrap(),
+            ));
+            (c, s)
+        };
+        fn pump(from: &mut Session, to: &mut Session) {
+            drain_outbound(from);
+            for lvl in 0..LEVEL_COUNT {
+                let bytes = std::mem::take(&mut from.pending[lvl]);
+                if !bytes.is_empty() {
+                    to.conn.read_hs(&bytes).unwrap();
+                }
+            }
+        }
+        fn seal(s: &Session, pn: u64, hdr: &[u8], msg: &[u8]) -> Vec<u8> {
+            let mut buf = msg.to_vec();
+            let k = &s.keys[LEVEL_1RTT].as_ref().unwrap().local.packet;
+            let tag = k.encrypt_in_place(pn, hdr, &mut buf).unwrap();
+            buf.extend_from_slice(tag.as_ref());
+            buf
+        }
+        fn open(s: &mut Session, phase: c_int, pn: u64, hdr: &[u8], mut buf: Vec<u8>) -> (c_int, Vec<u8>) {
+            let mut n = 0usize;
+            let rc = flare_rustls_quic_packet_decrypt_1rtt(
+                s as *mut Session as *mut c_void,
+                phase,
+                pn,
+                hdr.as_ptr(),
+                hdr.len(),
+                buf.as_mut_ptr(),
+                buf.len(),
+                &mut n,
+            );
+            buf.truncate(if rc >= 0 { n } else { 0 });
+            (rc, buf)
+        }
+        let (mut c, mut s) = pair();
+        for _ in 0..8 {
+            pump(&mut c, &mut s);
+            pump(&mut s, &mut c);
+        }
+        assert!(c.keys[LEVEL_1RTT].is_some() && s.keys[LEVEL_1RTT].is_some());
+        let hdr = [0x40u8, 1, 2, 3];
+        let old = seal(&c, 5, &hdr, b"before");
+        assert_eq!(flare_rustls_quic_key_update(&mut c as *mut Session as *mut c_void), 1);
+        let new = seal(&c, 10, &hdr, b"after");
+        assert_eq!(open(&mut s, 1, 10, &hdr, new), (1, b"after".to_vec()));
+        assert_eq!(s.phase, 1);
+        assert_eq!(open(&mut s, 0, 5, &hdr, old), (0, b"before".to_vec()));
+        // The server now sends in phase 1 and the client reads it.
+        let back = seal(&s, 3, &hdr, b"reply");
+        assert_eq!(open(&mut c, 1, 3, &hdr, back), (0, b"reply".to_vec()));
+
+        let (mut c2, mut s2) = pair();
+        for _ in 0..8 {
+            pump(&mut c2, &mut s2);
+            pump(&mut s2, &mut c2);
+        }
+        let forged = vec![0u8; 32];
+        assert_eq!(open(&mut s2, 1, 7, &hdr, forged).0, -2);
+        assert_eq!(s2.phase, 0, "a forged phase flip must not rotate");
+        let ok = seal(&c2, 8, &hdr, b"still");
+        assert_eq!(open(&mut s2, 0, 8, &hdr, ok), (0, b"still".to_vec()));
     }
 
     #[test]

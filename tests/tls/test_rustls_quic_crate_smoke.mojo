@@ -5,7 +5,7 @@ This test confirms that:
 1. ``libflare_rustls_quic.so`` is present in the expected location
    (next to ``libflare_tls.so`` under the canonical build root, or
    in ``$CONDA_PREFIX/lib`` after the activation script runs).
-2. The ABI-version thunk resolves and returns 6 (the crate version
+2. The ABI-version thunk resolves and returns 7 (the crate version
    the Mojo binding expects).
 3. The acceptor-new thunk rejects empty PEM input with a non-NULL
    "no CERTIFICATE blocks" error path through ``last_error``.
@@ -67,8 +67,8 @@ def _call_acceptor_new(
 
 
 def test_abi_version() raises:
-    # ABI v6 adds the peer transport-params getter
-    # (`flare_rustls_quic_peer_transport_params`) on top of v5's
+    # ABI v7 adds 1-RTT key update (`_packet_decrypt_1rtt`,
+    # `_key_update`) on top of v6's peer transport-params getter, v5's
     # native-roots connector and v4's 0-RTT early data + resumption.
     # The activation script keys off this number, so a stale .so on a
     # developer machine surfaces as a hard mismatch on `pixi install`
@@ -76,7 +76,7 @@ def test_abi_version() raises:
     var path = _find_rustls_lib()
     var lib = OwnedDLHandle(path)
     var v = _call_abi_version(lib)
-    assert_equal(v, 6)
+    assert_equal(v, 7)
 
 
 def test_acceptor_new_rejects_empty_pem() raises:

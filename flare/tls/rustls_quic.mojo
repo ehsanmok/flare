@@ -69,6 +69,8 @@ from ._rustls_quic_ffi import (
     _do_packet_decrypt,
     _do_header_encrypt,
     _do_header_decrypt,
+    _do_key_update,
+    _do_packet_decrypt_1rtt,
     RustlsQuicPacketFns,
     _do_last_error,
     _find_rustls_quic_lib,
@@ -855,6 +857,34 @@ struct RustlsQuicSession(Movable):
             header,
             payload,
         )
+
+    def packet_decrypt_1rtt(
+        self,
+        key_phase: Int,
+        packet_number: UInt64,
+        header: List[UInt8],
+        mut payload: List[UInt8],
+    ) raises -> Int:
+        """Open a 1-RTT ``payload`` in place under the header's key
+        phase bit (RFC 9001 sec 6.3). Returns 1 when the peer started a
+        key update and the keys rotated, else 0; raises on failure."""
+        if self._opaque_session_handle == 0:
+            raise Error("RustlsQuicSession.packet_decrypt_1rtt: NULL session")
+        return _do_packet_decrypt_1rtt(
+            self._fns,
+            self._opaque_session_handle,
+            key_phase,
+            packet_number,
+            header,
+            payload,
+        )
+
+    def key_update(self) raises -> Int:
+        """Start a 1-RTT key update (RFC 9001 sec 6.1); returns the new
+        key phase bit."""
+        if self._opaque_session_handle == 0:
+            raise Error("RustlsQuicSession.key_update: NULL session")
+        return _do_key_update(self._lib, self._opaque_session_handle)
 
     def header_encrypt(
         self,

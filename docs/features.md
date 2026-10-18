@@ -460,6 +460,13 @@ v0.11 audit fixes; before them the server accepted what follows.
   that does not decode, carries a server-only parameter, or lacks the
   client's `initial_source_connection_id` closes the connection with
   TRANSPORT_PARAMETER_ERROR (RFC 9000 sec 7.3, 18.2).
+- 1-RTT key updates (RFC 9001 sec 6) work in both directions: a packet
+  in the other key phase that opens under the next key generation
+  rotates the keys, an older packet from the previous phase still opens,
+  and a forged phase bit changes nothing. The server starts an update
+  itself after `QuicServerConfig.key_update_interval` packets (2^23, the
+  AES-GCM confidentiality limit), once a packet in the current phase has
+  been acknowledged.
 - Only CRYPTO, ACK, PADDING, PING and CONNECTION_CLOSE are accepted in
   Initial and Handshake packets, Initial keys are dropped once the
   handshake moves on, and HTTP/3 is dispatched only on 1-RTT or 0-RTT
