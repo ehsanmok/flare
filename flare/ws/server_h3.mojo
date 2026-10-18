@@ -203,7 +203,7 @@ def ws_h3_accept(
     ``on_open``; any other is refused (400 malformed, 501 another
     protocol) and its stream ends. Other requests are left for the
     HTTP handler."""
-    for slot in range(listener.connection_count()):
+    for slot in listener.ready_slots():
         var ready = listener.take_http3_completed_streams(slot)
         for i in range(len(ready)):
             var sid = ready[i]

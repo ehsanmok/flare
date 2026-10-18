@@ -318,6 +318,15 @@ struct QuicListener(Movable):
     idle-timed-out connections get reaped against the same
     monotonic clock the wheel uses."""
     var _next_serial: UInt64
+    var _dirty: List[Int]
+    """Slots with egress queued outside packet processing, drained by
+    the next :meth:`drain_all_egress`; idle slots are not visited."""
+    var _ready: List[Int]
+    """Slots that received request-stream data since the last
+    :meth:`take_ready_slots`."""
+    var _slot_marks: List[UInt8]
+    """Per slot: bit 0 set while in ``_dirty``, bit 1 while in
+    ``_ready``."""
     var tls_acceptor: RustlsQuicAcceptor
     """Long-lived rustls QUIC acceptor built once at
     :meth:`bind` from :attr:`QuicServerConfig.rustls_config`.
@@ -545,6 +554,9 @@ struct QuicListener(Movable):
         self.cid_table = ConnectionIdTable()
         self.connections = List[QuicConnection]()
         self._next_serial = 1
+        self._dirty = List[Int]()
+        self._ready = List[Int]()
+        self._slot_marks = List[UInt8]()
         self.tls_acceptor = tls_acceptor^
         self.tls_sessions = List[_SessionSlot]()
         self.tls_egress_queues = List[List[UInt8]]()
@@ -778,9 +790,11 @@ struct QuicListener(Movable):
                     and self.peer_addrs[slot] != peer
                 ):
                     self._begin_path_validation(slot, peer, len(datagram))
+                self._mark(slot, 1)
             return slot
         if slot >= 0 and slot < len(self.connections):
             _ = self._handle_inbound(slot, datagram)
+            self._mark(slot, 1)
         return slot
 
     def _handle_inbound(
@@ -1711,6 +1725,7 @@ struct QuicListener(Movable):
             return
         if len(events.stream_chunks) == 0:
             return
+        self._mark(slot, 2)
         # Pass 1: connection + stream flow-control accounting (RFC
         # 9000 sec 4). Track total inbound stream bytes for MAX_DATA
         # and the client bidi-stream high-water mark (id & 3 == 0)
@@ -1929,6 +1944,7 @@ struct QuicListener(Movable):
                         )
                     )
                 encode_response_trailers(tr, trailer_bytes)
+            self._mark(slot, 1)
             ref h3 = self.http3_connections[slot]
             h3.emit_response(stream_id, response^)
             var frames = h3.take_response_frames(stream_id)
@@ -1938,6 +1954,7 @@ struct QuicListener(Movable):
             st.trailer_bytes = trailer_bytes^
             self._open_sources += 1
             return
+        self._mark(slot, 1)
         ref h3 = self.http3_connections[slot]
         var early = not h3.stream_fin_received(stream_id)
         h3.emit_response(stream_id, response^)
@@ -1974,6 +1991,7 @@ struct QuicListener(Movable):
         """Accept the extended CONNECT request on ``stream_id`` (taken
         with :meth:`take_http3_request`): queue a 200 HEADERS and keep the
         stream open both ways."""
+        self._mark(slot, 1)
         ref h3 = self.http3_connections[slot]
         h3.emit_response(stream_id, Response(status=200))
         self._append_http3_egress(
@@ -2026,6 +2044,7 @@ struct QuicListener(Movable):
         tunnel is closed. The drain sends it as flow control allows."""
         if not self.http3_tunnel_open(t):
             return False
+        self._mark(t.slot, 1)
         encode_response_data(
             data, self.connections[t.slot].h3_tx[t.stream_id].buf
         )
@@ -2051,6 +2070,7 @@ struct QuicListener(Movable):
         """End our side of ``t``: FIN after the queued bytes, then the
         stream is reclaimed."""
         if self._tunnel_live(t):
+            self._mark(t.slot, 1)
             try:
                 self.connections[t.slot].h3_tx[t.stream_id].done = True
             except:
@@ -2106,6 +2126,7 @@ struct QuicListener(Movable):
                     st.done = True
                     self._open_sources -= 1
                 advanced += 1
+                self._mark(slot, 1)
         return advanced
 
     def _dispatch_long(
@@ -2579,19 +2600,42 @@ struct QuicListener(Movable):
         sends the whole datagram or raises)."""
         return self._socket.send_to(datagram, addr)
 
-    def drain_all_egress(mut self) raises -> Int:
-        """Drain every slot's :attr:`tls_egress_queues` onto the
-        wire. Returns the number of datagrams emitted.
+    def _mark(mut self, slot: Int, bit: UInt8):
+        if slot >= len(self._slot_marks):
+            self._slot_marks.resize(slot + 1, UInt8(0))
+        if self._slot_marks[slot] & bit != 0:
+            return
+        self._slot_marks[slot] |= bit
+        if bit == 1:
+            self._dirty.append(slot)
+        else:
+            self._ready.append(slot)
 
-        Called from the reactor between recv ticks (and on the
-        ``recv_from`` timeout path) so a slot with pending
-        outbound CRYPTO bytes can flush even if no inbound
-        datagram arrived. Pure no-op if no slot has pending
-        bytes.
-        """
+    def ready_slots(self) -> List[Int]:
+        """:meth:`take_ready_slots` without consuming them."""
+        return self._ready.copy()
+
+    def take_ready_slots(mut self) -> List[Int]:
+        """The slots that received request-stream data since the last
+        call; only these can have new completed requests."""
+        var out = List[Int]()
+        swap(out, self._ready)
+        for i in range(len(out)):
+            self._slot_marks[out[i]] &= ~UInt8(2)
+        return out^
+
+    def drain_all_egress(mut self) raises -> Int:
+        """Drain the egress of every slot something was queued on since
+        the last call (a packet, a response, a tunnel or datagram send,
+        a streaming chunk, GOAWAY). Returns the number of slots that
+        emitted. Timers drain their own slot."""
+        var slots = List[Int]()
+        swap(slots, self._dirty)
+        for i in range(len(slots)):
+            self._slot_marks[slots[i]] &= ~UInt8(1)
         var emitted = 0
-        for slot in range(len(self.connections)):
-            if self._drain_and_send(slot):
+        for i in range(len(slots)):
+            if self._drain_and_send(slots[i]):
                 emitted += 1
         return emitted
 
@@ -3306,6 +3350,7 @@ struct QuicListener(Movable):
             return False
         c.dg_tx_bytes += n
         c.dg_tx.append(List[UInt8](payload))
+        self._mark(slot, 1)
         return True
 
     def _queue_datagrams(mut self, slot: Int, events: ConnectionEvents) -> Bool:
@@ -4078,6 +4123,7 @@ struct QuicListener(Movable):
             var next_id = UInt64(4) * self.rx_bidi_stream_count[slot]
             var goaway = self.http3_connections[slot].emit_goaway(next_id)
             self.connections[slot].ctrl_tx.extend(Span[UInt8, _](goaway))
+            self._mark(slot, 1)
 
     def drain_step(mut self) raises -> Bool:
         """Advance a drain started by :meth:`begin_drain`: close (H3_NO_ERROR,

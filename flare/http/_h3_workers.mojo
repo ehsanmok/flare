@@ -113,7 +113,7 @@ def pump_h3_requests[
     """Run ``handler`` over every completed request on every connection
     of ``listener``; returns how many were answered."""
     var dispatched = 0
-    for slot in range(listener.connection_count()):
+    for slot in listener.take_ready_slots():
         var ready = listener.take_http3_completed_streams(slot)
         for j in range(len(ready)):
             _serve_h3_stream[H](listener, slot, ready[j], handler)
