@@ -2893,6 +2893,14 @@ struct QuicListener(Movable):
                     if not self.loss[slot].can_send(UInt64(budget)):
                         cc_open = False
                         break
+                    var wait = self.loss[slot].pace_admit(
+                        _monotonic_ms(), UInt64(budget)
+                    )
+                    if wait > 0:
+                        # Paced: resume when the bucket refills.
+                        cc_open = False
+                        self._arm_send_timer(slot, Int(wait))
+                        break
                     dg_admitted = True
                 var take = min(room, avail - sent)
                 var fin = fin_now and sent + take == avail
@@ -2955,6 +2963,16 @@ struct QuicListener(Movable):
         self._note_stream_consumed(slot, sid)
         if UInt64(sid) in self.connections[slot].conn.streams:
             _ = self.connections[slot].conn.streams.pop(UInt64(sid))
+
+    def _arm_send_timer(mut self, slot: Int, after_ms: Int) raises:
+        """Wake the slot's egress in ``after_ms`` (the pacer is holding
+        data back), unless a wake-up is already armed."""
+        if self.connections[slot].send_timer_id != UInt64(0):
+            return
+        self.connections[slot].send_timer_id = self.timer_wheel.schedule(
+            after_ms=after_ms,
+            token=encode_timer_token(TIMER_KIND_ACK_DELAY, slot),
+        )
 
     def _flush_1rtt(
         mut self,
@@ -3675,6 +3693,8 @@ struct QuicListener(Movable):
             if decoded.kind == TIMER_KIND_IDLE:
                 self.connections[slot].on_idle_expired()
             elif decoded.kind == TIMER_KIND_ACK_DELAY:
+                # Deferred ACK, or the pacer's resume.
+                self.connections[slot].send_timer_id = UInt64(0)
                 if slot < len(self.peer_addrs):
                     var peer = self.peer_addrs[slot]
                     _ = self._drain_1rtt_coalesced(slot, peer)

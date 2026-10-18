@@ -360,6 +360,9 @@ struct QuicConnection(Copyable):
     var tx_1rtt_pn: UInt64
     """Next packet number to use on the outbound 1-RTT path."""
 
+    var send_timer_id: UInt64
+    """Armed timer that resumes egress once the pacer allows it (0 when
+    none)."""
     var ctrl_off: UInt64
     """Bytes sent so far on the server's HTTP/3 control stream."""
     var ctrl_tx: List[UInt8]
@@ -508,6 +511,7 @@ struct QuicConnection(Copyable):
         self.tx_handshake_pn = UInt64(0)
         self.tx_handshake_offset = UInt64(0)
         self.tx_1rtt_pn = UInt64(0)
+        self.send_timer_id = 0
         self.ctrl_off = 0
         self.ctrl_tx = List[UInt8]()
         self.issued_cids = Dict[UInt64, String]()

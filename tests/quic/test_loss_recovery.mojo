@@ -249,6 +249,24 @@ def test_ack_ranges_with_a_gap_leave_only_the_gap() raises:
     assert_equal(lr.outstanding(), 0)
 
 
+def test_pacer_spreads_a_window_over_the_rtt() raises:
+    """RFC 9002 sec 7.7: ten datagrams go at once, then the rest wait at
+    5/4 of the window per smoothed RTT; a sub-4 ms RTT is not paced."""
+    var lr = LossRecovery()
+    assert_equal(lr.pace_admit(UInt64(100), UInt64(1452)), UInt64(0))
+    lr.has_rtt = True
+    lr.smoothed_rtt = UInt64(10)
+    var rate = lr.cc.window() * 5 // 4 // 10
+    for _ in range(10):  # the burst; unpaced sends charged nothing
+        assert_equal(lr.pace_admit(UInt64(100), UInt64(1452)), UInt64(0))
+    var wait = lr.pace_admit(UInt64(100), UInt64(1452))
+    assert_equal(wait, (UInt64(1452) + rate - 1) // rate)
+    assert_equal(lr.pace_admit(UInt64(100) + wait, UInt64(1452)), UInt64(0))
+    lr.smoothed_rtt = UInt64(3)
+    for _ in range(50):
+        assert_equal(lr.pace_admit(UInt64(200), UInt64(1452)), UInt64(0))
+
+
 def main() raises:
     test_ack_retires_and_resets_backoff()
     test_ack_gap_leaves_lost_packet_outstanding()
@@ -263,4 +281,5 @@ def main() raises:
     test_loss_deadline_is_the_time_threshold()
     test_one_ack_range_retires_a_large_window()
     test_ack_ranges_with_a_gap_leave_only_the_gap()
-    print("test_loss_recovery: 13 passed")
+    test_pacer_spreads_a_window_over_the_rtt()
+    print("test_loss_recovery: 14 passed")

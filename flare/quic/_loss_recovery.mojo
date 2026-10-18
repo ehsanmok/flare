@@ -60,6 +60,14 @@ comptime _DEFAULT_MAX_ACK_DELAY_MS: UInt64 = 25
 """RFC 9000 default max_ack_delay (25 ms) until the peer's value is
 decoded from transport parameters."""
 
+comptime _PACING_BURST: UInt64 = 10 * 1452
+"""Smallest pacer bucket: ten full datagrams may leave back to back, the
+initial-window burst RFC 9002 sec 7.7 allows."""
+
+comptime _PACING_MIN_RTT_MS: UInt64 = 4
+"""Shortest smoothed RTT that is paced: whole-millisecond RTTs are then
+within 25% of the true one."""
+
 comptime _DEFAULT_INITIAL_RTT_MS: UInt64 = 250
 """RFC 9002 kInitialRtt: PTO base before the first RTT sample."""
 
@@ -127,6 +135,10 @@ struct LossRecovery(Movable):
     # Congestion control.
     var bytes_in_flight: UInt64
     var cc: CubicController
+    # Pacing (RFC 9002 sec 7.7): a token bucket refilled at the pacing
+    # rate, at most :data:`_PACING_BURST` bytes deep.
+    var pace_tokens: UInt64
+    var pace_last_ms: UInt64
 
     def __init__(out self, base_pto_ms: UInt64 = _DEFAULT_INITIAL_RTT_MS):
         self.sent = List[SentPacket]()
@@ -144,6 +156,8 @@ struct LossRecovery(Movable):
         self.has_largest_acked = False
         self.bytes_in_flight = 0
         self.cc = CubicController()
+        self.pace_tokens = _PACING_BURST
+        self.pace_last_ms = 0
 
     def on_sent(
         mut self,
@@ -216,6 +230,32 @@ struct LossRecovery(Movable):
     def window(self) -> UInt64:
         """Current congestion window in bytes."""
         return self.cc.window()
+
+    def pace_admit(mut self, now_ms: UInt64, size: UInt64) -> UInt64:
+        """Pacing gate (RFC 9002 sec 7.7): 0 when ``size`` bytes may be
+        sent now (and charges them), else the milliseconds until they
+        may. The rate is 5/4 of the congestion window per smoothed RTT,
+        so a window spreads over most of a round trip instead of leaving
+        in one burst. RTTs are kept in whole milliseconds, so below
+        :data:`_PACING_MIN_RTT_MS` the rate cannot be known closely
+        enough (a 0.2 ms loopback RTT reads as 1 ms and would be paced
+        five times too slow); such short paths are not paced."""
+        if not self.has_rtt or self.smoothed_rtt < _PACING_MIN_RTT_MS:
+            return 0
+        var rate = max(self.cc.window() * 5 // 4 // self.smoothed_rtt, 1)
+        # Timers tick in whole milliseconds, so the bucket must hold at
+        # least two of them at the current rate; a fixed ten-datagram
+        # bucket capped the send rate at ten datagrams per millisecond.
+        var depth = max(_PACING_BURST, 2 * rate)
+        if now_ms > self.pace_last_ms:
+            self.pace_tokens = min(
+                depth, self.pace_tokens + rate * (now_ms - self.pace_last_ms)
+            )
+            self.pace_last_ms = now_ms
+        if self.pace_tokens >= size:
+            self.pace_tokens -= size
+            return 0
+        return max(UInt64(1), (size - self.pace_tokens + rate - 1) // rate)
 
     # ── RTT estimation (RFC 9002 section 5.3) ───────────────────────
 
