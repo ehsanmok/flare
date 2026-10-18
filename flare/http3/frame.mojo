@@ -60,6 +60,8 @@ comptime H3_SETTINGS_MAX_FIELD_SECTION_SIZE: UInt64 = 0x06
 comptime H3_SETTINGS_QPACK_BLOCKED_STREAMS: UInt64 = 0x07
 comptime H3_SETTINGS_ENABLE_CONNECT_PROTOCOL: UInt64 = 0x08
 """RFC 9220 — Bootstrapping WebSockets with HTTP/3."""
+comptime H3_SETTINGS_H3_DATAGRAM: UInt64 = 0x33
+"""RFC 9297 sec 2.1.1 — HTTP Datagrams; the value is 0 or 1."""
 
 
 @fieldwise_init

@@ -60,12 +60,19 @@ from .frame import (
     H3_SETTINGS_MAX_FIELD_SECTION_SIZE,
     H3_SETTINGS_QPACK_BLOCKED_STREAMS,
     H3_SETTINGS_ENABLE_CONNECT_PROTOCOL,
+    H3_SETTINGS_H3_DATAGRAM,
     Http3Frame,
     Http3Setting,
     decode_http3_frame,
     encode_http3_frame,
     decode_http3_settings,
     encode_http3_settings,
+)
+from .capsule import (
+    CAPSULE_TYPE_DATAGRAM,
+    Capsule,
+    encode_capsule,
+    parse_capsule,
 )
 from .request_reader import (
     H3_REQUEST_STATE_BODY,

@@ -77,6 +77,7 @@ from flare.http3.frame import (
     H3_FRAME_TYPE_PUSH_PROMISE,
     H3_FRAME_TYPE_SETTINGS,
     H3_SETTINGS_ENABLE_CONNECT_PROTOCOL,
+    H3_SETTINGS_H3_DATAGRAM,
     H3_SETTINGS_MAX_FIELD_SECTION_SIZE,
     H3_SETTINGS_QPACK_BLOCKED_STREAMS,
     H3_SETTINGS_QPACK_MAX_TABLE_CAPACITY,
@@ -130,6 +131,8 @@ comptime H3_FRAME_ERROR: UInt64 = 0x106
 comptime H3_EXCESSIVE_LOAD: UInt64 = 0x107
 comptime H3_SETTINGS_ERROR: UInt64 = 0x109
 comptime H3_MISSING_SETTINGS: UInt64 = 0x10A
+comptime H3_DATAGRAM_ERROR: UInt64 = 0x33
+"""RFC 9297 sec 2.1: a malformed HTTP Datagram."""
 comptime QPACK_DECOMPRESSION_FAILED: UInt64 = 0x200
 """RFC 9204 section 6."""
 comptime QPACK_ENCODER_STREAM_ERROR: UInt64 = 0x201
@@ -164,6 +167,8 @@ def h3_error_code(message: String) -> UInt64:
         return H3_SETTINGS_ERROR
     if "H3_MISSING_SETTINGS" in message:
         return H3_MISSING_SETTINGS
+    if "H3_DATAGRAM_ERROR" in message:
+        return H3_DATAGRAM_ERROR
     return H3_GENERAL_PROTOCOL_ERROR
 
 
@@ -228,6 +233,11 @@ struct Http3Config(Copyable, Defaultable):
     advertising it obliges the server to accept such requests (RFC 8441
     sec 3), and it used to be advertised while every one was refused."""
 
+    var h3_datagram: Bool
+    """RFC 9297 -- advertise SETTINGS_H3_DATAGRAM and carry HTTP
+    Datagrams on extended CONNECT tunnels. Needs QUIC DATAGRAM support
+    (``QuicServerConfig.max_datagram_frame_size`` > 0). Default False."""
+
     var goaway_threshold_streams: UInt64
     """Local soft cap on the stream count above which the server
     emits GOAWAY and refuses new request streams. Default
@@ -239,6 +249,7 @@ struct Http3Config(Copyable, Defaultable):
         self.qpack_max_table_capacity = UInt64(0)
         self.qpack_blocked_streams = UInt64(0)
         self.enable_connect_protocol = False
+        self.h3_datagram = False
         self.goaway_threshold_streams = UInt64((1 << 63) - 1)
 
 
@@ -617,6 +628,12 @@ struct Http3Connection(Copyable, Defaultable):
     var peer_settings_enable_connect_protocol: Bool
     """RFC 9220 §3 -- whether the peer advertises CONNECT-
     Protocol support."""
+    var peer_settings_h3_datagram: Bool
+    """RFC 9297 -- the peer sent SETTINGS_H3_DATAGRAM = 1."""
+    var peer_quic_datagram: Bool
+    """Set by the QUIC layer: the peer advertised a non-zero
+    ``max_datagram_frame_size``. SETTINGS_H3_DATAGRAM = 1 without it is
+    an H3_SETTINGS_ERROR (RFC 9297 sec 2.1.1)."""
 
     var peer_goaway_max_stream_id: UInt64
     """RFC 9114 §5.2 -- peer-emitted GOAWAY identifier. UINT64_MAX
@@ -693,6 +710,8 @@ struct Http3Connection(Copyable, Defaultable):
         self.peer_settings_qpack_max_table_capacity = UInt64(0)
         self.peer_settings_qpack_blocked_streams = UInt64(0)
         self.peer_settings_enable_connect_protocol = False
+        self.peer_settings_h3_datagram = False
+        self.peer_quic_datagram = False
         self.peer_goaway_max_stream_id = UInt64((1 << 63) - 1)
         self.reassembly = Dict[Int, _StreamReassembly]()
         self.closed_request_streams = Dict[Int, Bool]()
@@ -1443,6 +1462,13 @@ struct Http3Connection(Copyable, Defaultable):
                 self.peer_settings_qpack_blocked_streams = v
             elif id_ == H3_SETTINGS_ENABLE_CONNECT_PROTOCOL:
                 self.peer_settings_enable_connect_protocol = v != UInt64(0)
+            elif id_ == H3_SETTINGS_H3_DATAGRAM:
+                if v > 1 or (v == 1 and not self.peer_quic_datagram):
+                    raise Error(
+                        "h3 server: bad SETTINGS_H3_DATAGRAM (RFC 9297"
+                        " 2.1.1 H3_SETTINGS_ERROR)"
+                    )
+                self.peer_settings_h3_datagram = v == 1
 
     def emit_initial_settings(self) raises -> List[UInt8]:
         """Build the server's outbound control-stream prefix:
@@ -1485,6 +1511,10 @@ struct Http3Connection(Copyable, Defaultable):
                     identifier=H3_SETTINGS_ENABLE_CONNECT_PROTOCOL,
                     value=UInt64(1),
                 )
+            )
+        if self.config.h3_datagram:
+            settings.append(
+                Http3Setting(identifier=H3_SETTINGS_H3_DATAGRAM, value=1)
             )
         var payload = List[UInt8]()
         encode_http3_settings(settings, payload)

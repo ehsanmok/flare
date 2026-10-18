@@ -122,6 +122,7 @@ from .state import (
     mark_local_stream_opened,
 )
 from ..http3.server import (
+    H3_DATAGRAM_ERROR,
     H3_SERVER_CONTROL_STREAM_ID,
     Http3Connection,
     h3_error_code,
@@ -622,6 +623,11 @@ struct QuicListener(Movable):
         surfaces a NULL handle and CRYPTO bytes route through
         the silent-drop branch.
         """
+        if config.http3.h3_datagram and config.max_datagram_frame_size == 0:
+            raise Error(
+                "QuicListener.bind: http3.h3_datagram needs"
+                " max_datagram_frame_size > 0 (RFC 9297 sec 2.1.1)"
+            )
         var ip = IpAddr.parse(config.host)
         var addr = SocketAddr(ip, config.port)
         var sock = UdpSocket.bind(addr, reuse_port=config.num_workers > 1)
@@ -993,13 +999,10 @@ struct QuicListener(Movable):
             ok = False  # Retry not handled here
         if not ok:
             return False
-        if len(events.datagrams) > 0:
-            ref qd = self.connections[slot]
-            for i in range(len(events.datagrams)):
-                var n = len(events.datagrams[i])
-                if qd.dg_rx_bytes + n <= MAX_QUEUED_DATAGRAM_BYTES:
-                    qd.dg_rx_bytes += n
-                    qd.dg_rx.append(events.datagrams[i].copy())
+        if len(events.datagrams) > 0 and not self._queue_datagrams(
+            slot, events
+        ):
+            return True
         self._dispatch_crypto_frames(slot, events, inbound_lvl)
         # LossRecovery tracks the 1-RTT packets we send, so only
         # application-space ACKs name its packet numbers. An Initial or
@@ -1618,6 +1621,9 @@ struct QuicListener(Movable):
             self.connections[
                 slot
             ].peer_max_datagram = tp.max_datagram_frame_size.or_else(0)
+            self.http3_connections[slot].peer_quic_datagram = (
+                self.connections[slot].peer_max_datagram > 0
+            )
             var msd = tp.initial_max_stream_data_bidi_local.or_else(UInt64(0))
             c.peer_initial_max_stream_data = msd
             var open_sids = List[UInt64]()
@@ -3161,6 +3167,80 @@ struct QuicListener(Movable):
         c.dg_tx_bytes += n
         c.dg_tx.append(List[UInt8](payload))
         return True
+
+    def _queue_datagrams(mut self, slot: Int, events: ConnectionEvents) -> Bool:
+        """Queue the DATAGRAM payloads received in one packet, up to the
+        queue cap. With HTTP Datagrams on (RFC 9297 sec 2.1), each must
+        start with a Quarter Stream ID below 2^60 or the connection is
+        closed with H3_DATAGRAM_ERROR (returns False); one for a stream
+        that is not an open tunnel is dropped."""
+        for i in range(len(events.datagrams)):
+            ref d = events.datagrams[i]
+            if self.config.http3.h3_datagram:
+                var sid = -1
+                try:
+                    var q = decode_varint(Span[UInt8, _](d))
+                    if q.value < UInt64(1) << 60:
+                        sid = Int(q.value) * 4
+                except:
+                    pass
+                if sid < 0:
+                    self._close_for(
+                        slot,
+                        H3_DATAGRAM_ERROR,
+                        "malformed HTTP Datagram",
+                        application=True,
+                    )
+                    return False
+                if not (
+                    sid in self.connections[slot].h3_tx
+                    and self.http3_connections[slot].is_tunnel(sid)
+                ):
+                    continue
+            ref qd = self.connections[slot]
+            if qd.dg_rx_bytes + len(d) <= MAX_QUEUED_DATAGRAM_BYTES:
+                qd.dg_rx_bytes += len(d)
+                qd.dg_rx.append(d.copy())
+        return True
+
+    def send_http3_datagram(
+        mut self, t: Http3Tunnel, payload: Span[UInt8, _]
+    ) raises -> Bool:
+        """Send ``payload`` as an HTTP Datagram (RFC 9297) on tunnel
+        ``t``. False, and nothing sent, unless both ends sent
+        SETTINGS_H3_DATAGRAM, the tunnel is open, and
+        :meth:`send_datagram` takes it."""
+        if (
+            not self.config.http3.h3_datagram
+            or not self.http3_tunnel_open(t)
+            or not self.http3_connections[t.slot].peer_settings_h3_datagram
+        ):
+            return False
+        var dg = encode_varint(UInt64(t.stream_id // 4))
+        dg.extend(payload)
+        return self.send_datagram(t.slot, Span[UInt8, _](dg))
+
+    def take_http3_datagrams(mut self, t: Http3Tunnel) -> List[List[UInt8]]:
+        """The HTTP Datagram payloads received on tunnel ``t`` since the
+        last call, Quarter Stream ID removed."""
+        var out = List[List[UInt8]]()
+        if not self._tunnel_live(t):
+            return out^
+        ref qd = self.connections[t.slot]
+        var keep = List[List[UInt8]]()
+        for i in range(len(qd.dg_rx)):
+            ref d = qd.dg_rx[i]
+            try:
+                var q = decode_varint(Span[UInt8, _](d))
+                if Int(q.value) * 4 == t.stream_id:
+                    qd.dg_rx_bytes -= len(d)
+                    out.append(List[UInt8](Span[UInt8, _](d)[q.consumed :]))
+                    continue
+            except:
+                pass
+            keep.append(d.copy())
+        qd.dg_rx = keep^
+        return out^
 
     def take_datagrams(mut self, slot: Int) -> List[List[UInt8]]:
         """The DATAGRAM payloads received on ``slot`` since the last call,
