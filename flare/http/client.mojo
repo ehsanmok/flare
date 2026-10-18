@@ -91,9 +91,9 @@ from ._client.stream_response import HttpStreamResponse
 from ._client.h2_download import Http2Download
 from ._client.h2_transport import _H2Transport
 from ._client.h2_send import (
+    H2Link,
+    h2_roundtrip,
     _build_h2_request_headers,
-    _send_h2_over_tcp,
-    _send_h2_over_tls,
     _send_h2c_via_upgrade,
 )
 from ._client.alt_svc import (
@@ -102,7 +102,7 @@ from ._client.alt_svc import (
     decide_http3_wire,
     monotonic_now_s,
 )
-from ._client.quic_pool import QuicConnectionPool
+from ._client.quic_pool import IdleConnPool, QuicConnectionPool
 from ._client.tls_pool import TlsConnectionPool
 from ._client.h3_race import (
     RACE_H3,
@@ -313,6 +313,11 @@ struct HttpClient(Movable):
     by :meth:`http3_wire_choice` so an origin that advertised an h3
     endpoint upgrades transparently on the next request. Freed in
     :meth:`__deinit__`."""
+    var _h2_pool: IdleConnPool[H2Link]
+    """Idle HTTP/2 connections (h2 over TLS, and h2c prior knowledge)
+    keyed by ``scheme://host:port``. Every h2 request used to dial and
+    handshake a new connection and GOAWAY it after one response; gRPC
+    calls inherited that. Freed in :meth:`__deinit__`."""
     var _quic_pool: QuicConnectionPool
     """Idle HTTP/3 (QUIC) connection pool keyed on ``host:port``,
     behind a pointer-backed interior-mutable handle so the read-``self``
@@ -426,6 +431,7 @@ struct HttpClient(Movable):
         self._prefer_http3 = prefer_http3
         self._alt_svc = AltSvcStore.new()
         self._quic_pool = QuicConnectionPool.new()
+        self._h2_pool = IdleConnPool[H2Link].new()
         self._tls_pool = TlsConnectionPool.disabled()
         self._redirect_policy = RedirectPolicy.follow_all(max_redirects)
         self._auto_decompress = auto_decompress
@@ -461,6 +467,7 @@ struct HttpClient(Movable):
         self._prefer_http3 = prefer_http3
         self._alt_svc = AltSvcStore.new()
         self._quic_pool = QuicConnectionPool.new()
+        self._h2_pool = IdleConnPool[H2Link].new()
         self._tls_pool = TlsConnectionPool.disabled()
         self._redirect_policy = RedirectPolicy.follow_all(max_redirects)
         self._auto_decompress = auto_decompress
@@ -500,6 +507,7 @@ struct HttpClient(Movable):
         self._prefer_http3 = prefer_http3
         self._alt_svc = AltSvcStore.new()
         self._quic_pool = QuicConnectionPool.new()
+        self._h2_pool = IdleConnPool[H2Link].new()
         self._tls_pool = TlsConnectionPool.disabled()
         self._redirect_policy = RedirectPolicy.follow_all(max_redirects)
         self._auto_decompress = auto_decompress
@@ -539,6 +547,7 @@ struct HttpClient(Movable):
         self._prefer_http3 = prefer_http3
         self._alt_svc = AltSvcStore.new()
         self._quic_pool = QuicConnectionPool.new()
+        self._h2_pool = IdleConnPool[H2Link].new()
         self._tls_pool = TlsConnectionPool.disabled()
         self._redirect_policy = RedirectPolicy.follow_all(max_redirects)
         self._auto_decompress = auto_decompress
@@ -568,6 +577,7 @@ struct HttpClient(Movable):
             pass
         try:
             self._quic_pool.free()
+            self._h2_pool.free()
         except:
             pass
         try:
@@ -1224,6 +1234,14 @@ struct HttpClient(Movable):
         var pool_on = self._tls_pool.enabled() and proxy.byte_length() == 0
         var key = TlsConnectionPool.build_key(u.scheme, u.host, Int(u.port))
 
+        # 0. Reuse a pooled h2 connection to this origin.
+        if proxy.byte_length() == 0:
+            var reused_h2 = self._h2_pooled(
+                key, u, method, extra_headers, body, auth_header
+            )
+            if reused_h2:
+                return reused_h2.take()
+
         # 1. Reuse a pooled http/1.1-over-TLS connection if available.
         #    The helper owns the moved-in stream so a stale connection
         #    is closed there and signalled back as a miss (None).
@@ -1254,8 +1272,9 @@ struct HttpClient(Movable):
         self._arm_read_timeout(stream)
         var negotiated = stream.alpn_selected()
         if negotiated == "h2":
-            var resp_h2 = _send_h2_over_tls(
-                stream^,
+            var link = H2Link(stream^)
+            var resp_h2 = h2_roundtrip(
+                link,
                 method,
                 u,
                 extra_headers,
@@ -1263,6 +1282,7 @@ struct HttpClient(Movable):
                 self._user_agent,
                 auth_header,
             )
+            self._h2_release(key, link^, proxy.byte_length() == 0)
             return resp_h2^
         # HTTP/1.1 over TLS.
         var wire_bytes = wire.as_bytes()
@@ -1283,6 +1303,54 @@ struct HttpClient(Movable):
         var resp = _read_http_response_tls(stream, method)
         stream.close()
         return resp^
+
+    def _h2_pooled(
+        self,
+        key: String,
+        u: Url,
+        method: String,
+        extra_headers: HeaderMap,
+        body: List[UInt8],
+        auth_header: String,
+    ) raises -> Optional[Response]:
+        """Run the request on a pooled HTTP/2 connection to ``key``, if
+        one is idle and usable; None means dial a fresh one. A pooled
+        connection that fails (closed while idle) is dropped; the request
+        is then re-sent on a fresh connection only when it is idempotent,
+        since the server may have processed it."""
+        var pooled = self._h2_pool.acquire(key)
+        if not pooled:
+            return None
+        var link = pooled.take()
+        if not link.usable():
+            link.retire()
+            return None
+        var resp: Response
+        try:
+            resp = h2_roundtrip(
+                link,
+                method,
+                u,
+                extra_headers,
+                body,
+                self._user_agent,
+                auth_header,
+            )
+        except e:
+            link.close()
+            if not _is_idempotent(method):
+                raise e^
+            return None
+        self._h2_release(key, link^, True)
+        return Optional(resp^)
+
+    def _h2_release(self, key: String, var link: H2Link, poolable: Bool) raises:
+        """Keep ``link`` for the next request to ``key`` (when it can take
+        one), else GOAWAY and close it."""
+        if poolable and link.usable():
+            self._h2_pool.release(key, link^)
+        else:
+            link.retire()
 
     def _send_h1_tls_pooled_once(
         self,
@@ -2458,6 +2526,13 @@ struct HttpClient(Movable):
                 # (pooled direct connections would bypass the proxy).
                 var key = ClientPool.build_key(u.scheme, u.host, Int(u.port))
                 return self._send_h1_pooled(key, u.host, u.port, wire, body)
+            var h2c_key = ClientPool.build_key(u.scheme, u.host, Int(u.port))
+            if self._prefer_h2c and proxy.byte_length() == 0:
+                var reused = self._h2_pooled(
+                    h2c_key, u, method, extra_headers, body, auth_header
+                )
+                if reused:
+                    return reused.take()
             var stream: TcpStream
             if proxy.byte_length() > 0:
                 stream = self._connect_tunnel(proxy, u.host, u.port)
@@ -2472,8 +2547,9 @@ struct HttpClient(Movable):
                 # drive the request through Http2ClientConnection
                 # over the cleartext TCP stream. The response
                 # comes back lowered to a regular Response.
-                var resp_h2c = _send_h2_over_tcp(
-                    stream^,
+                var link = H2Link(stream^)
+                var resp_h2c = h2_roundtrip(
+                    link,
                     method,
                     u,
                     extra_headers,
@@ -2481,6 +2557,7 @@ struct HttpClient(Movable):
                     self._user_agent,
                     auth_header,
                 )
+                self._h2_release(h2c_key, link^, proxy.byte_length() == 0)
                 return resp_h2c^
             if self._h2c_upgrade:
                 # h2c via the RFC 7540 §3.2 Upgrade dance: send the

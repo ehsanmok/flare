@@ -15,6 +15,7 @@ from ..url import Url
 from ...tcp import TcpStream
 from ...tls import TlsStream
 from ...net import NetworkError
+from ...runtime.pool import PoolableConn
 from ...http2.client import (
     Http2ClientConfig,
     Http2ClientConnection,
@@ -89,8 +90,68 @@ def _h2_authority(u: Url) -> String:
     return authority^
 
 
-def _send_h2_over_tls(
-    var stream: TlsStream,
+struct H2Link(Movable, PoolableConn):
+    """One HTTP/2 client connection: the protocol state plus the
+    transport it runs on (TLS for ``h2``, TCP for h2c). Kept open across
+    requests so the client's pool reuses it instead of paying a TCP and
+    TLS handshake per request."""
+
+    var conn: Http2ClientConnection
+    var tcp: Optional[TcpStream]
+    var tls: Optional[TlsStream]
+
+    def __init__(out self, var tls: TlsStream):
+        self.conn = Http2ClientConnection()
+        self.tcp = None
+        self.tls = Optional(tls^)
+
+    def __init__(out self, var tcp: TcpStream):
+        self.conn = Http2ClientConnection()
+        self.tcp = Optional(tcp^)
+        self.tls = None
+
+    def write_all(mut self, data: Span[UInt8, _]) raises:
+        if self.tls:
+            self.tls.value().write_all(data)
+        else:
+            self.tcp.value().write_all(data)
+
+    def read(mut self, buf: Pointer[UInt8, _], size: Int) raises -> Int:
+        if self.tls:
+            return self.tls.value().read(buf, size)
+        return self.tcp.value().read(buf, size)
+
+    def flush(mut self) raises:
+        """Write whatever the protocol state has queued."""
+        var out = self.conn.drain()
+        if len(out) > 0:
+            self.write_all(Span[UInt8, _](out))
+
+    def usable(self) -> Bool:
+        """Whether a new request may use this connection: no GOAWAY
+        received and stream ids left (RFC 9113 sec 5.1.1)."""
+        return not self.conn.goaway_received() and self.conn._next_sid < (
+            1 << 30
+        )
+
+    def close(mut self):
+        if self.tls:
+            self.tls.value().close()
+        if self.tcp:
+            self.tcp.value().close()
+
+    def retire(mut self):
+        """GOAWAY, then close (RFC 9113 sec 6.8)."""
+        try:
+            self.conn.send_goaway(0, 0)
+            self.flush()
+        except:
+            pass
+        self.close()
+
+
+def h2_roundtrip(
+    mut link: H2Link,
     method: String,
     u: Url,
     extra_headers: HeaderMap,
@@ -98,21 +159,14 @@ def _send_h2_over_tls(
     user_agent: String,
     auth_header: String,
 ) raises -> Response:
-    """Drive a single HTTP/2 request over an already-handshaken TLS
-    stream and return the response.
-
-    Used by :meth:`HttpClient._do_request` when the server selected
-    ALPN ``h2``. The caller is responsible for owning the
-    :class:`TlsStream` -- this helper consumes it (sends GOAWAY +
-    closes on the way out) and returns the lowered
-    :class:`flare.http.Response`.
-    """
-    var conn = Http2ClientConnection()
+    """Run one request on ``link`` and return the response; the
+    connection stays open for the next one. Raises on GOAWAY before the
+    response, on the peer closing mid-response, and on RST_STREAM."""
     var extra = _build_h2_request_headers(
         extra_headers, user_agent, auth_header
     )
-    var sid = conn.next_stream_id()
-    conn.send_request(
+    var sid = link.conn.next_stream_id()
+    link.conn.send_request(
         sid,
         method,
         u.scheme,
@@ -121,130 +175,32 @@ def _send_h2_over_tls(
         extra,
         Span[UInt8, _](body),
     )
-    var out_bytes = conn.drain()
-    if len(out_bytes) > 0:
-        stream.write_all(Span[UInt8, _](out_bytes))
-    var buf = List[UInt8](capacity=_H2_READ_BUF_SIZE)
-    buf.resize(_H2_READ_BUF_SIZE, UInt8(0))
-    while not conn.response_ready(sid):
-        if conn.goaway_received():
-            stream.close()
+    link.flush()
+    var buf = List[UInt8](length=_H2_READ_BUF_SIZE, fill=UInt8(0))
+    while not link.conn.response_ready(sid):
+        if link.conn.goaway_received():
             raise NetworkError(
                 "HttpClient(h2): peer sent GOAWAY before responding to stream "
                 + String(sid)
             )
-        var n = stream.read(buf.unsafe_ptr(), _H2_READ_BUF_SIZE)
+        var n = link.read(buf.unsafe_ptr(), _H2_READ_BUF_SIZE)
         if n == 0:
-            stream.close()
             raise NetworkError(
                 "HttpClient(h2): peer closed connection mid-response on stream "
                 + String(sid)
             )
-        # Name the slice's lifetime via ``buf`` itself; ``buf[:n]``
-        # was an anonymous temporary whose storage could be freed
-        # before ``feed`` returned.
-        conn.feed(Span[UInt8, _](unsafe_ptr=buf.unsafe_ptr(), length=n))
-        var ack_bytes = conn.drain()
-        if len(ack_bytes) > 0:
-            stream.write_all(Span[UInt8, _](ack_bytes))
-    var maybe_err = conn.stream_error(sid)
+        # Name the slice's lifetime via ``buf`` itself.
+        link.conn.feed(Span[UInt8, _](unsafe_ptr=buf.unsafe_ptr(), length=n))
+        link.flush()
+    var maybe_err = link.conn.stream_error(sid)
     if Bool(maybe_err):
-        stream.close()
         raise NetworkError(
             "HttpClient(h2): peer sent RST_STREAM (error code "
             + String(maybe_err.value())
             + ") on stream "
             + String(sid)
         )
-    var h2_resp = conn.take_response(sid)
-    try:
-        conn.send_goaway(sid, 0)
-        var goaway_bytes = conn.drain()
-        if len(goaway_bytes) > 0:
-            stream.write_all(Span[UInt8, _](goaway_bytes))
-    except:
-        pass
-    stream.close()
-    return _h2_response_to_http(h2_resp^)
-
-
-def _send_h2_over_tcp(
-    var stream: TcpStream,
-    method: String,
-    u: Url,
-    extra_headers: HeaderMap,
-    body: List[UInt8],
-    user_agent: String,
-    auth_header: String,
-) raises -> Response:
-    """Drive a single HTTP/2 cleartext (h2c) request over a plain
-    TCP stream via prior knowledge.
-
-    Mirror of :func:`_send_h2_over_tls`, used when the caller
-    constructed :class:`HttpClient` with ``prefer_h2c=True`` and
-    targeted an ``http://`` URL. RFC 9113 §3.4: the client sends
-    the connection preface immediately (no ``Upgrade`` dance);
-    if the server doesn't speak h2, the connection just dies.
-    """
-    var conn = Http2ClientConnection()
-    var extra = _build_h2_request_headers(
-        extra_headers, user_agent, auth_header
-    )
-    var sid = conn.next_stream_id()
-    conn.send_request(
-        sid,
-        method,
-        u.scheme,
-        _h2_authority(u),
-        u.request_target(),
-        extra,
-        Span[UInt8, _](body),
-    )
-    var out_bytes = conn.drain()
-    if len(out_bytes) > 0:
-        stream.write_all(Span[UInt8, _](out_bytes))
-    var buf = List[UInt8](capacity=_H2_READ_BUF_SIZE)
-    buf.resize(_H2_READ_BUF_SIZE, UInt8(0))
-    while not conn.response_ready(sid):
-        if conn.goaway_received():
-            stream.close()
-            raise NetworkError(
-                "HttpClient(h2c): peer sent GOAWAY before responding to stream "
-                + String(sid)
-            )
-        var n = stream.read(buf.unsafe_ptr(), _H2_READ_BUF_SIZE)
-        if n == 0:
-            stream.close()
-            raise NetworkError(
-                "HttpClient(h2c): peer closed connection mid-response on"
-                " stream "
-                + String(sid)
-            )
-        # Span lifetime: same fix as the h2-over-tls path -- bind
-        # to the named ``buf`` rather than the slice temporary.
-        conn.feed(Span[UInt8, _](unsafe_ptr=buf.unsafe_ptr(), length=n))
-        var ack_bytes = conn.drain()
-        if len(ack_bytes) > 0:
-            stream.write_all(Span[UInt8, _](ack_bytes))
-    var maybe_err = conn.stream_error(sid)
-    if Bool(maybe_err):
-        stream.close()
-        raise NetworkError(
-            "HttpClient(h2c): peer sent RST_STREAM (error code "
-            + String(maybe_err.value())
-            + ") on stream "
-            + String(sid)
-        )
-    var h2_resp = conn.take_response(sid)
-    try:
-        conn.send_goaway(sid, 0)
-        var goaway_bytes = conn.drain()
-        if len(goaway_bytes) > 0:
-            stream.write_all(Span[UInt8, _](goaway_bytes))
-    except:
-        pass
-    stream.close()
-    return _h2_response_to_http(h2_resp^)
+    return _h2_response_to_http(link.conn.take_response(sid))
 
 
 def _send_h2c_via_upgrade(

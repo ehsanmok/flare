@@ -48,6 +48,7 @@ from flare.qpack import QpackHeader
 from flare.quic.client import QuicClientConnection, _monotonic_ms
 from flare.quic.state import ConnectionEvents
 from flare.quic.varint import decode_varint
+from flare.runtime.pool import PoolableConn
 
 from .frame import H3_FRAME_TYPE_GOAWAY
 
@@ -215,7 +216,7 @@ struct _PendingRequest(Copyable):
         self.reader = reader^
 
 
-struct Http3ClientConnection(Movable):
+struct Http3ClientConnection(Movable, PoolableConn):
     """An HTTP/3 client over an established QUIC connection.
 
     Wraps a :class:`QuicClientConnection` (whose handshake must
@@ -763,17 +764,14 @@ struct Http3ClientConnection(Movable):
             self._ctrl_typed = True
         while pos < len(self._ctrl):
             var view = Span[UInt8, _](self._ctrl)[pos:]
-            var ftype = UInt64(0)
-            var start = 0
-            var flen = 0
+            var hdr: Tuple[UInt64, Int, Int]
             try:
-                var t = decode_varint(view)
-                var n = decode_varint(view[t.consumed :])
-                ftype = t.value
-                start = t.consumed + n.consumed
-                flen = Int(n.value)
+                hdr = _frame_header(view)
             except:
                 break  # frame header not complete yet
+            var ftype = hdr[0]
+            var start = hdr[1]
+            var flen = hdr[2]
             if start + flen > len(view):
                 break
             if ftype == H3_FRAME_TYPE_GOAWAY and flen > 0:
@@ -786,3 +784,18 @@ struct Http3ClientConnection(Movable):
 
     def close(mut self):
         self.quic.close()
+
+    def retire(mut self):
+        """Graceful CONNECTION_CLOSE, for a connection a pool drops."""
+        try:
+            self.quic.shutdown()
+        except:
+            pass
+
+
+def _frame_header(view: Span[UInt8, _]) raises -> Tuple[UInt64, Int, Int]:
+    """An HTTP/3 frame's (type, header length, payload length); raises
+    while the header is incomplete."""
+    var t = decode_varint(view)
+    var n = decode_varint(view[t.consumed :])
+    return (t.value, t.consumed + n.consumed, Int(n.value))

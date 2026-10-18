@@ -50,6 +50,16 @@ from std.memory.alloc import unsafe_alloc
 from std.sys.info import size_of
 
 
+trait PoolableConn(Deinitable, Movable):
+    """A client connection an idle-connection pool can hold: the pool
+    calls :meth:`retire` on one it drops (cap reached, idle timeout,
+    pool freed), so the peer is told it is going away."""
+
+    def retire(mut self):
+        """Close gracefully (GOAWAY / CONNECTION_CLOSE), best effort."""
+        ...
+
+
 struct Pool[T: Deinitable & Movable]:
     """Typed heap allocator over ``Pointer[T].alloc(1)``.
 

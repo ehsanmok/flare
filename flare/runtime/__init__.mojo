@@ -42,7 +42,7 @@ from .timer_wheel import TimerWheel
 from ._thread import num_cpus
 from .frontend import Frontend
 from .scheduler import Scheduler, default_worker_count
-from .pool import Pool
+from .pool import Pool, PoolableConn
 from .buffer_pool import BufferHandle, BufferPool
 from .iovec import IoVecBuf, writev_buf, writev_buf_all
 from .io_uring import (

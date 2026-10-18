@@ -14,7 +14,7 @@ The pool mirrors :class:`flare.http.client_pool.ClientPool`:
 * Per-host idle cap + wallclock idle-timeout eviction on
   :meth:`acquire`.
 * A thin ``Copyable`` handle over a single heap-allocated
-  ``_QuicPoolState`` (pointer-backed interior mutability) so the
+  ``_PoolState`` (pointer-backed interior mutability) so the
   owning ``HttpClient`` can acquire / release from a ``read self``
   method (``_send_http3`` stays read-self, like the Alt-Svc store). The
   OWNER frees the state in ``__deinit__``; copies must not.
@@ -41,7 +41,7 @@ from std.memory import Layout, Pointer, alloc
 from std.sys.info import CompilationTarget
 
 from flare.http3.client import Http3ClientConnection
-from flare.runtime.pool import Pool
+from flare.runtime.pool import Pool, PoolableConn
 
 # CLOCK_MONOTONIC clock id: 1 on Linux, 6 on Darwin/macOS (id 1 is
 # undefined there, so clock_gettime would fail and the clock read 0).
@@ -51,7 +51,7 @@ comptime _CLOCK_MONOTONIC: c_int = c_int(
 
 
 @fieldwise_init
-struct _QuicPoolState(Movable):
+struct _PoolState(Movable):
     """Mutable state behind a :class:`QuicConnectionPool` handle.
 
     Heap-allocated once; all access goes through the typed pointer
@@ -79,29 +79,32 @@ struct _QuicPoolState(Movable):
     :meth:`note_dial` -- observability + reuse assertions."""
 
 
-struct QuicConnectionPool(Copyable):
-    """Idle h3-connection pool handle (pointer-backed)."""
+struct IdleConnPool[T: PoolableConn](Copyable):
+    """Idle client-connection pool handle (pointer-backed), one LIFO
+    deque of connections per origin key. Used for HTTP/3
+    (:data:`QuicConnectionPool`) and HTTP/2
+    (:class:`flare.http._client.h2_pool.H2Link`)."""
 
     var _addr: Int
-    """Heap address of the ``_QuicPoolState``; ``0`` = pooling off."""
+    """Heap address of the ``_PoolState``; ``0`` = pooling off."""
 
     @staticmethod
-    def disabled() -> QuicConnectionPool:
+    def disabled() -> Self:
         """The no-op handle: every acquire misses, every release
         drops the connection."""
-        return QuicConnectionPool(0)
+        return Self(0)
 
     @staticmethod
     def new(
         max_idle_per_host: Int = 8,
         idle_timeout_ms: Int = 90_000,
-    ) -> QuicConnectionPool:
+    ) -> Self:
         """Allocate an enabled pool. Non-raising (the allocation +
         moves can't raise) so it can initialize a ``read self``
         ``HttpClient`` field eagerly, like the Alt-Svc store."""
-        var p = alloc(Layout[_QuicPoolState](count=1)).unsafe_leak()
+        var p = alloc(Layout[_PoolState](count=1)).unsafe_leak()
         p.unsafe_write(
-            _QuicPoolState(
+            _PoolState(
                 Dict[String, List[Int]](),
                 Dict[Int, Int](),
                 max_idle_per_host,
@@ -109,7 +112,7 @@ struct QuicConnectionPool(Copyable):
                 0,
             )
         )
-        return QuicConnectionPool(Int(p))
+        return Self(Int(p))
 
     @always_inline
     def __init__(out self, addr: Int):
@@ -121,10 +124,10 @@ struct QuicConnectionPool(Copyable):
 
     def _state(
         imm self,
-    ) -> Pointer[_QuicPoolState, MutUntrackedOrigin]:
+    ) -> Pointer[_PoolState, MutUntrackedOrigin]:
         return Pointer[UInt8, MutUntrackedOrigin](
             unsafe_from_address=self._addr
-        ).unsafe_bitcast[_QuicPoolState]()
+        ).unsafe_bitcast[_PoolState]()
 
     @staticmethod
     def build_key(host: String, port: Int) -> String:
@@ -146,9 +149,7 @@ struct QuicConnectionPool(Copyable):
             return 0
         return self._state()[].dials
 
-    def acquire(
-        imm self, key: String
-    ) raises -> Optional[Http3ClientConnection]:
+    def acquire(imm self, key: String) raises -> Optional[Self.T]:
         """Move out the most-recently-released idle connection for
         ``key``, evicting any that exceeded the idle timeout first.
         Returns ``None`` on a miss (pooling off, deque empty, or all
@@ -168,10 +169,11 @@ struct QuicConnectionPool(Copyable):
                 sp[].idle_timeout_ms > 0
                 and (now_ms - inserted) > sp[].idle_timeout_ms
             ):
-                # Stale: drop the cell (UdpSocket.__deinit__ closes fd).
-                Pool[Http3ClientConnection].free(addr)
+                # Stale: retire and drop the cell.
+                Pool[Self.T].get_ptr(addr)[].retire()
+                Pool[Self.T].free(addr)
                 continue
-            var cell = Pool[Http3ClientConnection].get_ptr(addr)
+            var cell = Pool[Self.T].get_ptr(addr)
             var h3 = cell.unsafe_take_pointee()
             cell.unsafe_free()
             sp[].entries[key] = deque^
@@ -179,16 +181,16 @@ struct QuicConnectionPool(Copyable):
         _ = sp[].entries.pop(key)
         return None
 
-    def release(imm self, key: String, var h3: Http3ClientConnection) raises:
+    def release(imm self, key: String, var h3: Self.T) raises:
         """Hand ``h3`` back for reuse, or drop it (closing the fd via
         its destructor) when pooling is off or the per-host cap is
         reached."""
         if not self.enabled():
-            h3.close()
+            h3.retire()
             return
         var sp = self._state()
         if sp[].max_idle_per_host <= 0:
-            h3.close()
+            h3.retire()
             return
         var deque: List[Int]
         if key in sp[].entries:
@@ -196,10 +198,10 @@ struct QuicConnectionPool(Copyable):
         else:
             deque = List[Int]()
         if len(deque) >= sp[].max_idle_per_host:
-            h3.close()
+            h3.retire()
             sp[].entries[key] = deque^
             return
-        var addr = Pool[Http3ClientConnection].alloc_move(h3^)
+        var addr = Pool[Self.T].alloc_move(h3^)
         deque.append(addr)
         sp[].entries[key] = deque^
         sp[].ts_ms[addr] = _monotonic_ms()
@@ -224,10 +226,9 @@ struct QuicConnectionPool(Copyable):
         for entry in sp[].entries.items():
             for i in range(len(entry.value)):
                 var addr = entry.value[i]
-                # Graceful CONNECTION_CLOSE in place, then destroy the
-                # cell (UdpSocket.__deinit__ closes the fd idempotently).
-                Pool[Http3ClientConnection].get_ptr(addr)[].quic.shutdown()
-                Pool[Http3ClientConnection].free(addr)
+                # Graceful close in place, then destroy the cell.
+                Pool[Self.T].get_ptr(addr)[].retire()
+                Pool[Self.T].free(addr)
         sp.unsafe_deinit_pointee()
         sp.unsafe_free()
         self._addr = 0
@@ -247,3 +248,7 @@ def _monotonic_ms() -> Int:
     var nsec = ts_buf[unsafe_offset=1]
     ts_buf.unsafe_free()
     return sec * 1000 + nsec // 1_000_000
+
+
+comptime QuicConnectionPool = IdleConnPool[Http3ClientConnection]
+"""The HTTP/3 client pool."""
