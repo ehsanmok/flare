@@ -264,6 +264,7 @@ from .session import (
     signed_cookie_encode,
 )
 from .middleware import (
+    AltSvc,
     CatchPanic,
     Compress,
     Logger,

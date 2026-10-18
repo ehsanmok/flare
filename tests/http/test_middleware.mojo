@@ -15,6 +15,7 @@ Covers:
 from std.testing import assert_equal, assert_false, assert_raises, assert_true
 
 from flare.http import (
+    AltSvc,
     CatchPanic,
     Compress,
     Handler,
@@ -238,6 +239,23 @@ def test_request_id_generates_when_absent() raises:
     assert_true(generated.startswith("req-"))
 
 
+def test_alt_svc_advertises_h3_and_keeps_a_handler_value() raises:
+    var a = AltSvc(_Echo(status=200, body="hi"), 8443, max_age_s=3600)
+    var resp = a.serve(Request(method=Method.GET, url="/"))
+    assert_equal(resp.headers.get("alt-svc"), 'h3=":8443"; ma=3600')
+    var b = AltSvc(_AltSvcSet(), 8443)
+    var own = b.serve(Request(method=Method.GET, url="/"))
+    assert_equal(own.headers.get("alt-svc"), "clear")
+
+
+@fieldwise_init
+struct _AltSvcSet(Copyable, Handler):
+    def serve(self, req: Request) raises -> Response:
+        var r = ok("x")
+        r.headers.set("Alt-Svc", "clear")
+        return r^
+
+
 # ── Compress ──────────────────────────────────────────────────────────────
 
 
@@ -425,6 +443,7 @@ def main() raises:
     test_logger_propagates_raise()
     test_request_id_echoes_inbound()
     test_request_id_generates_when_absent()
+    test_alt_svc_advertises_h3_and_keeps_a_handler_value()
     test_compress_small_body_passthrough()
     test_compress_large_body_gzipped()
     test_compress_no_acceptable_encoding_skips()
@@ -437,4 +456,4 @@ def main() raises:
     test_catch_panic_returns_500()
     test_catch_panic_passthrough_when_ok()
     test_middleware_wraps_a_handler_without_a_default()
-    print("test_middleware: 26 passed")
+    print("test_middleware: 27 passed")

@@ -138,6 +138,7 @@ from ..http.extract import (
     Extracted,
 )
 from ..http.middleware import (
+    AltSvc,
     CatchPanic,
     Compress,
     Logger,

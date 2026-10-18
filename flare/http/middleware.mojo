@@ -111,6 +111,33 @@ struct RequestId[Inner: Handler & Copyable](Copyable, Handler):
         return resp^
 
 
+struct AltSvc[Inner: Handler & Copyable](Copyable, Handler):
+    """Advertise an HTTP/3 endpoint with ``Alt-Svc`` (RFC 7838, RFC 9114
+    sec 3.1.1) on every response, so a browser that reached the server
+    over HTTP/1.1 or HTTP/2 moves to HTTP/3 for later requests. Wrap the
+    handler served on the TCP listener of a server bound with
+    ``bind_with_http3``. A handler's own ``Alt-Svc`` is kept.
+    """
+
+    var inner: Self.Inner
+    var value: String
+    """``h3=":<port>"; ma=<max_age>``, built once."""
+
+    def __init__(
+        out self, var inner: Self.Inner, h3_port: Int, max_age_s: Int = 86400
+    ):
+        self.inner = inner^
+        self.value = (
+            String('h3=":') + String(h3_port) + '"; ma=' + String(max_age_s)
+        )
+
+    def serve(self, req: Request) raises -> Response:
+        var resp = self.inner.serve(req).lower()
+        if not resp.headers.contains("alt-svc"):
+            resp.headers.set("Alt-Svc", self.value)
+        return resp^
+
+
 # ── Compress ───────────────────────────────────────────────────────────────
 
 
