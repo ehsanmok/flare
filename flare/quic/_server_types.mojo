@@ -201,6 +201,17 @@ struct QuicServerConfig(Copyable, Defaultable):
     short enough to bound replay. Only consulted when
     :attr:`require_address_validation` is set."""
 
+    var num_workers: Int
+    """Workers sharing this listener's port (``SO_REUSEPORT``); 1 for a
+    single-socket listener. See :mod:`flare.quic._worker_route`."""
+    var worker_id: Int
+    """This listener's index among :attr:`num_workers`."""
+    var cid_route_key: List[UInt8]
+    """Key every worker uses to tell which worker owns a CID; drawn at
+    bind time when empty and shared with the other workers."""
+    var inbox_table: Int
+    """Address of the workers' forwarded-datagram inboxes (0 when
+    single-worker)."""
     var http3: Http3Config
     """HTTP/3 settings every accepted connection's driver is built with
     (field-section limit, QPACK capacity, extended CONNECT, GOAWAY
@@ -239,6 +250,10 @@ struct QuicServerConfig(Copyable, Defaultable):
         self.max_pto_count = 10
         self.key_update_interval = UInt64(1) << 23
         self.http3 = Http3Config()
+        self.num_workers = 1
+        self.worker_id = 0
+        self.cid_route_key = List[UInt8]()
+        self.inbox_table = 0
 
 
 # -- Per-connection driver ----------------------------------------------

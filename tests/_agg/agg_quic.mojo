@@ -224,6 +224,9 @@ from test_loss_recovery import (
 from test_loss_recovery import (
     test_ack_ranges_with_a_gap_leave_only_the_gap as test_loss_recovery__test_ack_ranges_with_a_gap_leave_only_the_gap,
 )
+from test_loss_recovery import (
+    test_pacer_spreads_a_window_over_the_rtt as test_loss_recovery__test_pacer_spreads_a_window_over_the_rtt,
+)
 from test_openssl_quic_crypto import (
     test_derive_packet_keys_rfc9001_a5_chacha20 as test_openssl_quic_crypto__test_derive_packet_keys_rfc9001_a5_chacha20,
 )
@@ -810,6 +813,9 @@ from test_quic_timers import (
 from test_quic_timers import (
     test_live_connections_are_capped as test_quic_timers__test_live_connections_are_capped,
 )
+from test_quic_timers import (
+    test_poll_timeout_follows_the_next_timer as test_quic_timers__test_poll_timeout_follows_the_next_timer,
+)
 from test_quic_version_negotiation import (
     test_unknown_version_gets_version_negotiation as test_quic_version_negotiation__test_unknown_version_gets_version_negotiation,
 )
@@ -1147,6 +1153,7 @@ def main() raises:
     suite.test[
         test_loss_recovery__test_ack_ranges_with_a_gap_leave_only_the_gap
     ]()
+    suite.test[test_loss_recovery__test_pacer_spreads_a_window_over_the_rtt]()
     # tests/quic/test_openssl_quic_crypto.mojo
     suite.test[
         test_openssl_quic_crypto__test_derive_packet_keys_rfc9001_a5_chacha20
@@ -1606,6 +1613,7 @@ def main() raises:
     ]()
     suite.test[test_quic_timers__test_dead_slots_are_reclaimed_and_reused]()
     suite.test[test_quic_timers__test_live_connections_are_capped]()
+    suite.test[test_quic_timers__test_poll_timeout_follows_the_next_timer]()
     # tests/quic/test_quic_version_negotiation.mojo
     suite.test[
         test_quic_version_negotiation__test_unknown_version_gets_version_negotiation

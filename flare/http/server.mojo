@@ -52,6 +52,14 @@ from ..errors import map_handler_error, log_handler_error
 from ..net import IpAddr, SocketAddr, NetworkError, BrokenPipe, Timeout
 from ..tcp import TcpListener, TcpStream
 from ..quic.server import QuicListener, QuicServerConfig
+from ._h3_workers import (
+    _serve_h3_stream,
+    free_h3_control,
+    h3_control_set,
+    new_h3_control,
+    pump_h3_requests,
+    serve_h3,
+)
 from ..tls._server_ffi import ServerCtx
 
 
@@ -66,38 +74,6 @@ from flare.runtime.scheduler import ShutdownReport
 
 
 # ── HttpServer ────────────────────────────────────────────────────────────────
-
-
-def _serve_h3_stream[
-    H: Handler & Copyable
-](mut listener: QuicListener, slot: Int, stream_id: Int, mut handler: H):
-    """Answer one completed HTTP/3 request stream, whatever happens.
-
-    Both h3 dispatch loops used to call take / serve / emit bare, so a
-    request the h3 layer could not build or a handler that raised
-    propagated out of ``serve_http3`` and stopped the server for every
-    connection. Now a request that cannot be built gets a 400, a handler
-    error is mapped the way the h1 and h2 paths map it (``500``, the
-    text only with ``expose_errors``), and a response that cannot be
-    framed ends just that stream.
-    """
-    var resp: Response
-    try:
-        var req = listener.take_http3_request(slot, stream_id)
-        var expose = req.expose_errors
-        var request_id = req.headers.get("x-request-id")
-        try:
-            resp = handler.serve(req^).lower()
-        except e:
-            log_handler_error(request_id, String(e))
-            var mapped = map_handler_error(String(e), expose)
-            resp = Response(status=mapped.status, reason=mapped.reason)
-    except:
-        resp = Response(status=400, reason="Bad Request")
-    try:
-        listener.emit_http3_response(slot, stream_id, resp^)
-    except:
-        pass
 
 
 struct HttpServer(Movable):
@@ -157,6 +133,9 @@ struct HttpServer(Movable):
     var _stopping: Bool
     """Set by ``close()`` to break the reactor loop. Read from the loop
     itself each iteration."""
+    var _h3_ctl: Int
+    """Control cell the HTTP/3 loop (every worker) reads: stop flag and
+    drain window; 0 while no loop runs."""
     var _h3_drain_ms: Int
     """Grace window :meth:`drain` asked the HTTP/3 loop for; -1 when no
     drain was requested. :meth:`serve_http3` reads it each turn."""
@@ -213,6 +192,7 @@ struct HttpServer(Movable):
         self.config = config^
         self._stopping = False
         self._h3_drain_ms = -1
+        self._h3_ctl = 0
         self._http3_listener = None
         self._tls_ctx = None
         self._ws_h2_hooks = None
@@ -608,40 +588,21 @@ struct HttpServer(Movable):
         """
         if not self.has_http3():
             raise Error("HttpServer.serve_http3: no h3 listener bound")
-        # Inline: pulled from the leaf _server_support helper module
-        # (not flare.quic.server) to avoid loading the QUIC reactor --
-        # which imports flare.http -- at flare.http.server import time.
-        from flare.quic._server_support import (
-            _monotonic_ms as _quic_monotonic_ms,
-        )
-
         var listener = self._http3_listener.take()
+        var ctl = new_h3_control()
+        h3_control_set(ctl, 1, self._h3_drain_ms)
+        if self._stopping:
+            h3_control_set(ctl, 0, 1)
+        self._h3_ctl = ctl
         try:
-            while not listener._stopping and not self._stopping:
-                # Graceful drain: GOAWAY to every connection, then each
-                # closes once its requests are answered (RFC 9114 sec
-                # 5.2); the loop ends when none is left.
-                if self._h3_drain_ms >= 0:
-                    if listener._drain_deadline_ms == 0:
-                        listener.begin_drain(self._h3_drain_ms)
-                    if listener.drain_step():
-                        break
-                _ = listener.tick(timeout_ms=listener.poll_timeout_ms())
-                _ = self._pump_listener_h3[H](listener, handler)
-                # Advance any in-flight streaming responses by one chunk
-                # each so their DATA frames ride this loop turn's drain.
-                # A streaming stream stays registered across turns until
-                # its source is exhausted, so the loop keeps pulling.
-                _ = listener.pump_http3_streams(Cancel.never())
-                # Flush H3 responses the handler just queued so they
-                # leave on this loop turn rather than waiting for the
-                # next inbound datagram to trigger a per-slot drain.
-                _ = listener.drain_all_egress()
-                var now_ms = _quic_monotonic_ms()
-                _ = listener.advance_timers(now_ms)
+            serve_h3[H](listener, handler, ctl)
         except e:
+            self._h3_ctl = 0
+            free_h3_control(ctl)
             self._http3_listener = listener^
             raise e^
+        self._h3_ctl = 0
+        free_h3_control(ctl)
         self._http3_listener = listener^
 
     @staticmethod
@@ -655,14 +616,7 @@ struct HttpServer(Movable):
         its own loop variable without bouncing through the
         Optional dance every iteration.
         """
-        var dispatched = 0
-        for slot in range(listener.connection_count()):
-            var ready = listener.take_http3_completed_streams(slot)
-            for j in range(len(ready)):
-                var stream_id = ready[j]
-                _serve_h3_stream[H](listener, slot, stream_id, handler)
-                dispatched += 1
-        return dispatched
+        return pump_h3_requests[H](listener, handler)
 
     def serve(
         mut self,
@@ -1490,6 +1444,7 @@ struct HttpServer(Movable):
         automatically next iteration).
         """
         self._stopping = True
+        h3_control_set(self._h3_ctl, 0, 1)
         self._listener.close()
 
     def drain(mut self, timeout_ms: Int) raises -> ShutdownReport:
@@ -1538,6 +1493,7 @@ struct HttpServer(Movable):
         # Step 1: close the listener so new accepts fail; an HTTP/3 loop
         # sends GOAWAY and closes each connection once it is idle.
         self._h3_drain_ms = timeout_ms if timeout_ms > 0 else 0
+        h3_control_set(self._h3_ctl, 1, self._h3_drain_ms)
         self._listener.close()
 
         # Step 2: hold the reactor open for the grace window. The wait
@@ -1558,6 +1514,7 @@ struct HttpServer(Movable):
         # iteration, where it flips Cancel.SHUTDOWN on every live
         # connection before closing it.
         self._stopping = True
+        h3_control_set(self._h3_ctl, 0, 1)
         return ShutdownReport(
             drained=0, timed_out=0, in_flight_at_deadline=0, crashed=0
         )

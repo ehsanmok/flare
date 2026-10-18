@@ -194,6 +194,7 @@ from ._server_support import (
     _ready_sentinel,
 )
 from ._loss_recovery import LossRecovery
+from ._worker_route import DatagramInbox, cid_owner, inbox_at
 from ._server_types import (
     ConnectionIdTable,
     QuicConnection,
@@ -489,6 +490,10 @@ struct QuicListener(Movable):
     var _gso_seg: Int
     var _gso_count: Int
     var _gso_peer: SocketAddr
+    var _fwd_data: List[UInt8]
+    var _fwd_lens: List[Int]
+    var _fwd_peers: List[SocketAddr]
+    """Scratch for the datagrams taken from this worker's inbox."""
     var _rcv_timeout_ms: Int
     """``SO_RCVTIMEO`` currently set on the socket (-1 before the first
     :meth:`tick`)."""
@@ -562,6 +567,9 @@ struct QuicListener(Movable):
         self._gso_count = 0
         self._gso_peer = addr
         self._rcv_timeout_ms = -1
+        self._fwd_data = List[UInt8]()
+        self._fwd_lens = List[Int]()
+        self._fwd_peers = List[SocketAddr]()
         self._rx_batch_ok = udp_batch_supported() and (
             getenv("FLARE_QUIC_NO_BATCH", "0") != "1"
         )
@@ -610,7 +618,7 @@ struct QuicListener(Movable):
         """
         var ip = IpAddr.parse(config.host)
         var addr = SocketAddr(ip, config.port)
-        var sock = UdpSocket.bind(addr)
+        var sock = UdpSocket.bind(addr, reuse_port=config.num_workers > 1)
         # UDP buffer sizing is opt-in (default keeps the kernel
         # default; see _DEFAULT_QUIC_RCVBUF for why raising it hurt the
         # loopback bench). When the env knob requests a non-zero size we
@@ -634,7 +642,10 @@ struct QuicListener(Movable):
                 pass
         var actual = sock.local_addr()
         var acceptor = RustlsQuicAcceptor(config.rustls_config.copy())
-        return QuicListener(config, sock^, actual, acceptor^)
+        var cfg = config.copy()
+        if cfg.num_workers > 1 and len(cfg.cid_route_key) == 0:
+            cfg.cid_route_key = _random_bytes(32)
+        return QuicListener(cfg, sock^, actual, acceptor^)
 
     def local_addr(self) -> SocketAddr:
         """Return the address the UDP socket is actually bound to.
@@ -688,7 +699,8 @@ struct QuicListener(Movable):
             # out its idle timeout. Bounded + loop-safe by
             # :meth:`_build_stateless_reset`.
             if slot < 0:
-                self._maybe_send_stateless_reset(datagram, peer)
+                if not self._forward_foreign(datagram, peer):
+                    self._maybe_send_stateless_reset(datagram, peer)
                 return -1
             # Connection migration (RFC 9000 sec 9): a short-header
             # (1-RTT) packet routed by a known DCID but arriving from
@@ -1078,8 +1090,8 @@ struct QuicListener(Movable):
         if cid_len <= 0 or cid_len > MAX_CID_LENGTH:
             return
         var seq = self.next_local_cid_seq[slot]
-        var cid_bytes = _random_bytes(cid_len)
-        var new_cid = ConnectionId(bytes=cid_bytes.copy())
+        var new_cid = self._new_local_cid()
+        var cid_bytes = new_cid.bytes.copy()
         # Derive the reset token from the CID so a later stateless reset
         # for this CID (RFC 9000 sec 10.3) reproduces the same 16 bytes
         # the peer stored here.
@@ -1119,6 +1131,60 @@ struct QuicListener(Movable):
                 except:
                     pass
                 self.connections[slot].cid_replenish += 1
+
+    def _new_local_cid(self) raises -> ConnectionId:
+        """A fresh random CID of the pinned length. On a multi-worker
+        listener it is redrawn until its owner (see
+        :func:`flare.quic._worker_route.cid_owner`) is this worker, which
+        takes ``num_workers`` draws on average."""
+        while True:
+            var b = _random_bytes(self.config.local_cid_length)
+            if (
+                cid_owner(self.config.cid_route_key, b, self.config.num_workers)
+                == self.config.worker_id
+            ):
+                return ConnectionId(bytes=b^)
+
+    def _forward_foreign(
+        mut self, datagram: Span[UInt8, _], peer: SocketAddr
+    ) raises -> Bool:
+        """Hand a short-header packet for an unknown CID to the worker
+        that owns the CID, if that is another worker of this listener (a
+        migrated or rebound client whose new 4-tuple hashed elsewhere).
+        Returns whether it was forwarded; a datagram the inbox cannot take
+        is dropped and counts as forwarded, never answered with a reset."""
+        if self.config.num_workers <= 1 or self.config.inbox_table == 0:
+            return False
+        var n = self.config.local_cid_length
+        if len(datagram) < 1 + n:
+            return False
+        var cid = List[UInt8](capacity=n)
+        cid.extend(datagram[1 : 1 + n])
+        var owner = cid_owner(
+            self.config.cid_route_key, cid, self.config.num_workers
+        )
+        if owner == self.config.worker_id:
+            return False
+        _ = inbox_at(self.config.inbox_table, owner)[].push(datagram, peer)
+        return True
+
+    def _take_forwarded(mut self, mut dirty: List[Int]) raises:
+        """Dispatch the datagrams other workers forwarded to this one."""
+        if self.config.inbox_table == 0:
+            return
+        inbox_at(self.config.inbox_table, self.config.worker_id)[].take(
+            self._fwd_data, self._fwd_lens, self._fwd_peers
+        )
+        var pos = 0
+        for i in range(len(self._fwd_lens)):
+            var n = self._fwd_lens[i]
+            var data = List[UInt8](capacity=n)
+            data.extend(Span[UInt8, _](self._fwd_data)[pos : pos + n])
+            pos += n
+            var peer = self._fwd_peers[i]
+            var slot = self.dispatch_datagram(Span[UInt8, _](data), peer)
+            if slot >= 0 and slot not in dirty:
+                dirty.append(slot)
 
     def _stateless_reset_token(self, cid: ConnectionId) raises -> List[UInt8]:
         """Derive the 16-byte stateless-reset token for ``cid``
@@ -2063,9 +2129,7 @@ struct QuicListener(Movable):
         # Our own CID, of the length the short-header parser assumes
         # (RFC 9000 sec 7.2). The client's DCID stays registered too,
         # for its Initial retransmits and for Initial keys.
-        var local_cid = ConnectionId(
-            bytes=_random_bytes(self.config.local_cid_length)
-        )
+        var local_cid = self._new_local_cid()
         var peer_cid = lh.scid.copy()
         var qc = QuicConnection(
             local_cid,
@@ -2229,10 +2293,14 @@ struct QuicListener(Movable):
             # session can flush its ServerHello fragments.
             var msg = String(e)
             if msg.startswith("Timeout") or msg.startswith("recvfrom"):
+                var fwd = List[Int]()
+                self._take_forwarded(fwd)
                 _ = self.drain_all_egress()
                 return False
             raise e^
         if got <= 0:
+            var fwd = List[Int]()
+            self._take_forwarded(fwd)
             _ = self.drain_all_egress()
             return False
         # Drain each touched slot once, after the whole burst: draining
@@ -2257,6 +2325,7 @@ struct QuicListener(Movable):
                     )
                     if nslot >= 0 and nslot not in dirty:
                         dirty.append(nslot)
+                self._take_forwarded(dirty)
                 self._drain_slots(dirty)
                 return True
             except e:
@@ -2283,6 +2352,7 @@ struct QuicListener(Movable):
             )
             if nslot >= 0 and nslot not in dirty:
                 dirty.append(nslot)
+        self._take_forwarded(dirty)
         self._drain_slots(dirty)
         return True
 

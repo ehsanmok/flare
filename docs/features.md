@@ -42,7 +42,7 @@ handler is the same object in every cell.
 |---|---|---|---|---|
 | HTTP/1.1 | yes | yes | yes | yes |
 | HTTP/2 | yes (h2c) | yes (h2c) | yes (ALPN `h2`) | yes (ALPN `h2`) |
-| HTTP/3 | n/a | n/a | yes (`serve_http3`) | not yet |
+| HTTP/3 | n/a | n/a | yes (`serve_http3`) | yes (`QuicServerConfig.num_workers`) |
 | WebSocket | yes | yes | yes (over h1 or h2) | yes |
 
 Every HTTP/2 cell above is verified against **curl**, not just against
@@ -922,8 +922,12 @@ of what you might reasonably assume from the surrounding feature.
   minimum protocol version and session tickets are configurable on
   `TlsAcceptor` but are not reachable through `HttpServer`; the reactor
   builds its own context.
-- HTTP/3 serves single-worker only. The other three wires serve at any
-  worker count, cleartext or TLS.
+- Multi-worker HTTP/3 (`QuicServerConfig.num_workers = N`) gives each
+  worker its own `SO_REUSEPORT` socket, so the kernel spreads client
+  flows by 4-tuple, not by load. A packet that arrives at the wrong
+  worker after a migration is forwarded to the worker its connection ID
+  names. That forwarded packet waits for the owner's next loop turn, at
+  most 100 ms.
 - `bind(List[SocketAddr])` is single-worker only for its address cross product.
 - The io_uring buffer-ring handler path (`FLARE_BUFRING_HANDLER=1`) is
   HTTP/1.1 cleartext only and cannot stream.
