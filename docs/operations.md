@@ -87,6 +87,16 @@ On `HttpServer.drain(timeout_ms)`:
    losing the socket mid-chunk.
 4. `ServerConfig.shutdown_timeout_ms` (default 5 s) is the value to pass.
 
+A `serve_http3` loop drains the same call (RFC 9114 sec 5.2): every
+QUIC connection is sent GOAWAY naming the next request stream it may
+not open, new connections are refused, and each connection is closed
+with `H3_NO_ERROR` as soon as its in-flight requests are answered, or
+when `timeout_ms` passes. The loop returns once none is left. The h3
+client reads the GOAWAY, finishes what is in flight, and no longer
+reuses that connection from its pool. A program driving a
+`QuicListener` directly calls `begin_drain(timeout_ms)` and then
+`drain_step()` each turn until it returns `True`.
+
 Multi-worker `Scheduler.drain(timeout_ms)` returns one
 `ShutdownReport` per worker. `in_flight_at_deadline` and `timed_out`
 are the real per-worker live-connection counts (each worker publishes

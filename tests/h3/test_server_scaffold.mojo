@@ -112,17 +112,19 @@ def test_close_request_stream_unknown_id_is_noop() raises:
 
 
 def test_goaway_rejects_new_streams() raises:
-    """Once GOAWAY is emitted, ``open_request_stream`` raises
-    so the reactor surfaces the rejection back to the QUIC
-    layer as H3_REQUEST_CANCELLED."""
+    """Once GOAWAY names stream 4, ``open_request_stream`` raises for 4
+    and above (RFC 9114 sec 5.2) but still opens 0, a request sent
+    before the GOAWAY that arrived after it."""
     var c = Http3Connection()
-    c.goaway_emitted = True
+    _ = c.emit_goaway(UInt64(4))
     var raised = False
     try:
-        c.open_request_stream(0)
+        c.open_request_stream(4)
     except:
         raised = True
     assert_true(raised, "expected open after GOAWAY to raise")
+    c.open_request_stream(0)
+    assert_equal(c.active_request_count(), 1)
 
 
 def test_feed_stream_chunk_allocates_stream_implicitly() raises:

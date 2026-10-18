@@ -157,6 +157,9 @@ struct HttpServer(Movable):
     var _stopping: Bool
     """Set by ``close()`` to break the reactor loop. Read from the loop
     itself each iteration."""
+    var _h3_drain_ms: Int
+    """Grace window :meth:`drain` asked the HTTP/3 loop for; -1 when no
+    drain was requested. :meth:`serve_http3` reads it each turn."""
     var _http3_listener: Optional[QuicListener]
     """Optional HTTP/3 UDP listener.
 
@@ -209,6 +212,7 @@ struct HttpServer(Movable):
         self._extra_local_addrs = List[SocketAddr]()
         self.config = config^
         self._stopping = False
+        self._h3_drain_ms = -1
         self._http3_listener = None
         self._tls_ctx = None
         self._ws_h2_hooks = None
@@ -613,7 +617,15 @@ struct HttpServer(Movable):
 
         var listener = self._http3_listener.take()
         try:
-            while not listener._stopping:
+            while not listener._stopping and not self._stopping:
+                # Graceful drain: GOAWAY to every connection, then each
+                # closes once its requests are answered (RFC 9114 sec
+                # 5.2); the loop ends when none is left.
+                if self._h3_drain_ms >= 0:
+                    if listener._drain_deadline_ms == 0:
+                        listener.begin_drain(self._h3_drain_ms)
+                    if listener.drain_step():
+                        break
                 _ = listener.tick(timeout_ms=100)
                 var h_copy = handler.copy()
                 _ = self._pump_listener_h3[H](listener, h_copy^)
@@ -1524,7 +1536,9 @@ struct HttpServer(Movable):
             flip and short-circuit on their next ``cancel.cancelled()``
             poll once the window has elapsed.
         """
-        # Step 1: close the listener so new accepts fail.
+        # Step 1: close the listener so new accepts fail; an HTTP/3 loop
+        # sends GOAWAY and closes each connection once it is idle.
+        self._h3_drain_ms = timeout_ms if timeout_ms > 0 else 0
         self._listener.close()
 
         # Step 2: hold the reactor open for the grace window. The wait

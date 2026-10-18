@@ -357,6 +357,10 @@ struct QuicConnection(Copyable):
     var tx_1rtt_pn: UInt64
     """Next packet number to use on the outbound 1-RTT path."""
 
+    var ctrl_off: UInt64
+    """Bytes sent so far on the server's HTTP/3 control stream."""
+    var ctrl_tx: List[UInt8]
+    """Control-stream frames (GOAWAY) queued for the next 1-RTT flight."""
     var issued_cids: Dict[UInt64, String]
     """Connection IDs we issued that are still routable, as table keys
     by sequence number (0 is the handshake CID). All are unrouted when
@@ -501,6 +505,8 @@ struct QuicConnection(Copyable):
         self.tx_handshake_pn = UInt64(0)
         self.tx_handshake_offset = UInt64(0)
         self.tx_1rtt_pn = UInt64(0)
+        self.ctrl_off = 0
+        self.ctrl_tx = List[UInt8]()
         self.issued_cids = Dict[UInt64, String]()
         self.peer_cid_limit = UInt64(2)
         self.cid_replenish = 0

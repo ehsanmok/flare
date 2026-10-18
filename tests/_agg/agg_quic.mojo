@@ -688,6 +688,9 @@ from test_quic_server_close import (
     test_close_reaches_the_client_as_connection_close as test_quic_server_close__test_close_reaches_the_client_as_connection_close,
 )
 from test_quic_server_close import (
+    test_http3_errors_close_with_the_application_frame as test_quic_server_close__test_http3_errors_close_with_the_application_frame,
+)
+from test_quic_server_close import (
     test_closing_state_answers_packets_and_lasts_three_ptos as test_quic_server_close__test_closing_state_answers_packets_and_lasts_three_ptos,
 )
 from test_quic_server_close import (
@@ -1494,6 +1497,9 @@ def main() raises:
     # tests/quic/test_quic_server_close.mojo
     suite.test[
         test_quic_server_close__test_close_reaches_the_client_as_connection_close
+    ]()
+    suite.test[
+        test_quic_server_close__test_http3_errors_close_with_the_application_frame
     ]()
     suite.test[
         test_quic_server_close__test_closing_state_answers_packets_and_lasts_three_ptos

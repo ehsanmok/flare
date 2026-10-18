@@ -1078,7 +1078,7 @@ struct HttpClient(Movable):
         var pooled = self._quic_pool.acquire(key)
         if pooled:
             var existing = pooled.take()
-            if existing.is_established():
+            if existing.is_usable():
                 self._quic_pool.release(key, existing^)
                 return True
             existing.close()
@@ -1153,7 +1153,7 @@ struct HttpClient(Movable):
                 failed = True
                 err = String(e)
             if not failed:
-                if h3.is_established():
+                if h3.is_usable():
                     self._quic_pool.release(key, h3^)
                 else:
                     h3.close()
@@ -1179,7 +1179,7 @@ struct HttpClient(Movable):
             if err_ni.byte_length() > 0:
                 fresh.close()
                 raise Error(_H3_SENT_ERROR + err_ni)
-            if fresh.is_established():
+            if fresh.is_usable():
                 self._quic_pool.release(key, fresh^)
             else:
                 fresh.close()
@@ -1187,7 +1187,7 @@ struct HttpClient(Movable):
         var resp = self._run_http3_request(
             fresh, u, method, extra_headers, body, auth_header
         )
-        if fresh.is_established():
+        if fresh.is_usable():
             self._quic_pool.release(key, fresh^)
         else:
             fresh.close()

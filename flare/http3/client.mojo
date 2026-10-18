@@ -47,6 +47,9 @@ from std.collections.span import Span
 from flare.qpack import QpackHeader
 from flare.quic.client import QuicClientConnection, _monotonic_ms
 from flare.quic.state import ConnectionEvents
+from flare.quic.varint import decode_varint
+
+from .frame import H3_FRAME_TYPE_GOAWAY
 
 from .request_writer import (
     encode_client_control_stream,
@@ -236,6 +239,20 @@ struct Http3ClientConnection(Movable):
     var _cancelled: Dict[UInt64, Bool]
     """Stream ids already told to stop, so STOP_SENDING is sent once and
     not once per poll."""
+    var _ctrl: List[UInt8]
+    """The server's control stream (RFC 9114 sec 6.2.1), in order, not
+    yet parsed into frames."""
+    var _ctrl_off: UInt64
+    """Stream offset of the first byte past :attr:`_ctrl`'s parsed
+    prefix plus its unparsed bytes."""
+    var _ctrl_pending: Dict[UInt64, List[UInt8]]
+    """Control-stream chunks that arrived ahead of :attr:`_ctrl_off`."""
+    var _ctrl_typed: Bool
+    """Whether the control stream's type byte has been consumed."""
+    var goaway_id: UInt64
+    """The server's GOAWAY stream id (RFC 9114 sec 5.2): requests on
+    streams at or above it will not be processed. ``UInt64.MAX`` until
+    a GOAWAY arrives."""
 
     def __init__(
         out self,
@@ -248,6 +265,11 @@ struct Http3ClientConnection(Movable):
         self._pending = Dict[UInt64, _PendingRequest]()
         self._ext_reasms = Dict[UInt64, _StreamReasm]()
         self._cancelled = Dict[UInt64, Bool]()
+        self._ctrl = List[UInt8]()
+        self._ctrl_off = 0
+        self._ctrl_pending = Dict[UInt64, List[UInt8]]()
+        self._ctrl_typed = False
+        self.goaway_id = UInt64.MAX
 
     def _send_stream(
         mut self,
@@ -306,6 +328,8 @@ struct Http3ClientConnection(Movable):
         first if not already open. When ``early`` the control/QPACK
         streams and the request ride 0-RTT (EarlyData) packets."""
         self.open_streams(early)
+        if self.goaway_id != UInt64.MAX:
+            raise Error("h3 client: server sent GOAWAY; open a new connection")
         var sid = self.quic.open_bidi_stream()
         var wire = List[UInt8]()
         encode_request_headers(method, scheme, authority, path, headers, wire)
@@ -328,6 +352,7 @@ struct Http3ClientConnection(Movable):
         single-stream API; :meth:`poll_responses` is the multiplexed
         owned-reader counterpart."""
         var events = self.quic.poll(timeout_ms)
+        self._scan_control(events)
         self._feed_ext(stream_id, events, reader)
         return reader.is_complete()
 
@@ -396,6 +421,8 @@ struct Http3ClientConnection(Movable):
     ) raises -> UInt64:
         """Send request headers without FIN and register its response reader."""
         self.open_streams()
+        if self.goaway_id != UInt64.MAX:
+            raise Error("h3 client: server sent GOAWAY; open a new connection")
         var sid = self.quic.open_bidi_stream()
         self._pending[sid] = _PendingRequest(
             _StreamReasm(),
@@ -453,6 +480,7 @@ struct Http3ClientConnection(Movable):
         complete or failed. Stream errors are retained for that request's
         accessors; they do not interrupt delivery to other requests."""
         var events = self.quic.poll(timeout_ms)
+        self._scan_control(events)
         var sids = List[UInt64]()
         var credits = List[UInt64]()
         for entry in self._pending.items():
@@ -701,6 +729,60 @@ struct Http3ClientConnection(Movable):
 
     def is_established(self) -> Bool:
         return self.quic.is_established()
+
+    def is_usable(self) -> Bool:
+        """Established and not told to go away: a pool may reuse it for
+        a new request."""
+        return self.quic.is_established() and self.goaway_id == UInt64.MAX
+
+    def _scan_control(mut self, events: ConnectionEvents) raises:
+        """Follow the server's control stream (stream 3) for GOAWAY.
+        Chunks are taken in offset order; frames other than GOAWAY are
+        skipped (SETTINGS arrives first and needs nothing here, since
+        the client sends static-only QPACK)."""
+        for i in range(len(events.stream_chunks)):
+            ref ch = events.stream_chunks[i]
+            if ch.stream_id != UInt64(3):
+                continue
+            if ch.offset + UInt64(len(ch.data)) <= self._ctrl_off:
+                continue
+            if ch.offset > self._ctrl_off:
+                if len(self._ctrl_pending) < 64:
+                    self._ctrl_pending[ch.offset] = ch.data.copy()
+                continue
+            var skip = Int(self._ctrl_off - ch.offset)
+            self._ctrl.extend(Span[UInt8, _](ch.data)[skip:])
+            self._ctrl_off = ch.offset + UInt64(len(ch.data))
+            while self._ctrl_off in self._ctrl_pending:
+                var more = self._ctrl_pending.pop(self._ctrl_off)
+                self._ctrl.extend(Span[UInt8, _](more))
+                self._ctrl_off += UInt64(len(more))
+        var pos = 0
+        if not self._ctrl_typed and len(self._ctrl) > 0:
+            pos = decode_varint(Span[UInt8, _](self._ctrl)).consumed
+            self._ctrl_typed = True
+        while pos < len(self._ctrl):
+            var view = Span[UInt8, _](self._ctrl)[pos:]
+            var ftype = UInt64(0)
+            var start = 0
+            var flen = 0
+            try:
+                var t = decode_varint(view)
+                var n = decode_varint(view[t.consumed :])
+                ftype = t.value
+                start = t.consumed + n.consumed
+                flen = Int(n.value)
+            except:
+                break  # frame header not complete yet
+            if start + flen > len(view):
+                break
+            if ftype == H3_FRAME_TYPE_GOAWAY and flen > 0:
+                var id = decode_varint(view[start : start + flen])
+                if id.value < self.goaway_id:
+                    self.goaway_id = id.value
+            pos += start + flen
+        if pos > 0:
+            self._ctrl = List[UInt8](Span[UInt8, _](self._ctrl)[pos:])
 
     def close(mut self):
         self.quic.close()

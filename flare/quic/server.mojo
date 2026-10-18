@@ -232,6 +232,8 @@ comptime _MAX_ISSUED_CIDS: UInt64 = 4
 and rotation without a routing entry per CID the peer would buffer."""
 comptime _H3_REQUEST_CANCELLED: UInt64 = 0x10C
 """RFC 9114 sec 8.1: the RESET_STREAM code for an abandoned response."""
+comptime _H3_NO_ERROR: UInt64 = 0x100
+"""RFC 9114 sec 8.1: the code for a graceful close."""
 
 # Max datagrams drained per reactor tick. Bounds the time spent in one
 # tick so a single hot connection cannot starve the serve loop's H3
@@ -418,6 +420,9 @@ struct QuicListener(Movable):
     :meth:`Http3Connection.feed_stream_chunk` until 1-RTT keys
     install, at which point the peer already negotiated H3 via
     ALPN by definition)."""
+    var _drain_deadline_ms: UInt64
+    """Monotonic ms by which a graceful drain closes every connection;
+    0 when not draining (see :meth:`begin_drain`)."""
     var _open_sources: Int
     """Streaming responses whose chunk source is still open, across
     every slot; lets :meth:`pump_http3_streams` return at once when 0."""
@@ -496,6 +501,7 @@ struct QuicListener(Movable):
         self.slot_free = List[Bool]()
         self.http3_connections = List[Http3Connection]()
         self._open_sources = 0
+        self._drain_deadline_ms = 0
         self.early_strike = EarlyDataStrikeSet(
             window_ms=config.early_data_strike_window_ms
         )
@@ -2029,7 +2035,7 @@ struct QuicListener(Movable):
         if retry_odcid:
             qc.addr_validated = True  # the Retry token proved it
         var live = len(self.connections) - len(self.free_slots)
-        if live >= self.config.max_connections:
+        if live >= self.config.max_connections or self._drain_deadline_ms != 0:
             return -1
         var reuse = len(self.free_slots) > 0
         var slot: Int
@@ -2680,6 +2686,7 @@ struct QuicListener(Movable):
                         Span[UInt8, _](control),
                         fin=False,
                     )
+                    self.connections[slot].ctrl_off = UInt64(len(control))
                     mark_local_stream_opened(
                         self.connections[slot].conn,
                         UInt64(H3_SERVER_CONTROL_STREAM_ID),
@@ -2698,6 +2705,25 @@ struct QuicListener(Movable):
         # :meth:`_drain_migration_probe`, which runs separately in
         # :meth:`_drain_and_send`. This drain only ever targets the
         # validated egress address.
+
+        # Control-stream frames (GOAWAY) after the stream's SETTINGS.
+        if (
+            len(self.connections[slot].ctrl_tx) > 0
+            and self.handshake_done_sent[slot]
+        ):
+            var frames = List[UInt8]()
+            swap(frames, self.connections[slot].ctrl_tx)
+            if budget - len(plaintext) < len(frames) + 24:
+                if self._flush_1rtt(slot, plaintext, peer, budget):
+                    emitted = True
+            _encode_h3_stream_frame(
+                plaintext,
+                UInt64(H3_SERVER_CONTROL_STREAM_ID),
+                self.connections[slot].ctrl_off,
+                Span[UInt8, _](frames),
+                fin=False,
+            )
+            self.connections[slot].ctrl_off += UInt64(len(frames))
 
         # Replacements for CIDs the peer retired (RFC 9000 sec 5.1.2).
         while (
@@ -3382,6 +3408,48 @@ struct QuicListener(Movable):
             _ = self.tick(timeout_ms=100)
             var now_ms = _monotonic_ms()
             _ = self.advance_timers(now_ms)
+
+    def begin_drain(mut self, timeout_ms: Int) raises:
+        """Start a graceful shutdown (RFC 9114 sec 5.2): every live
+        connection is sent GOAWAY naming the next request stream it may
+        not open, new connections are refused, and :meth:`drain_step`
+        closes each connection once its requests are answered or
+        ``timeout_ms`` has passed."""
+        var wait = UInt64(timeout_ms) if timeout_ms > 0 else UInt64(0)
+        self._drain_deadline_ms = _monotonic_ms() + wait + 1
+        for slot in range(len(self.connections)):
+            if not self.connections[slot].alive:
+                continue
+            if self.http3_connections[slot].goaway_emitted:
+                continue
+            # Client request streams are 0, 4, 8, ...: the next unseen
+            # one is 4 x the count seen so far.
+            var next_id = UInt64(4) * self.rx_bidi_stream_count[slot]
+            var goaway = self.http3_connections[slot].emit_goaway(next_id)
+            self.connections[slot].ctrl_tx.extend(Span[UInt8, _](goaway))
+
+    def drain_step(mut self) raises -> Bool:
+        """Advance a drain started by :meth:`begin_drain`: close (H3_NO_ERROR,
+        RFC 9114 sec 5.2) each connection with no request left in flight,
+        and every connection once the deadline passes. Returns whether no
+        live connection remains; False when no drain is running."""
+        if self._drain_deadline_ms == 0:
+            return False
+        var expired = _monotonic_ms() >= self._drain_deadline_ms
+        var live = 0
+        for slot in range(len(self.connections)):
+            if not self.connections[slot].alive:
+                continue
+            var busy = (
+                self.http3_connections[slot].active_request_count() > 0
+                or len(self.connections[slot].h3_tx) > 0
+                or len(self.connections[slot].ctrl_tx) > 0
+            )
+            if busy and not expired:
+                live += 1
+                continue
+            self._close_for(slot, _H3_NO_ERROR, "", application=True)
+        return live == 0
 
     def shutdown(mut self):
         """Request the event loop to exit. Idempotent; safe to

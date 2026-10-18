@@ -550,8 +550,12 @@ struct Http3Connection(Copyable, Defaultable):
     field-section-size + QPACK parameters."""
 
     var goaway_emitted: Bool
-    """Whether the server has emitted GOAWAY. Once True, new
-    request streams are rejected with H3_REQUEST_CANCELLED."""
+    """Whether the server has emitted GOAWAY. Once True, request
+    streams at or above :attr:`goaway_id` are rejected."""
+    var goaway_id: UInt64
+    """The stream id the GOAWAY named: requests below it are still
+    served (RFC 9114 sec 5.2), so one reordered behind the GOAWAY is not
+    lost."""
 
     var streams: Dict[Int, _Http3StreamState]
     """Per-stream state carriers. Keys are QUIC stream IDs.
@@ -665,6 +669,7 @@ struct Http3Connection(Copyable, Defaultable):
         self.config = Http3Config()
         self.peer_settings_received = False
         self.goaway_emitted = False
+        self.goaway_id = UInt64.MAX
         self.streams = Dict[Int, _Http3StreamState]()
         self.control_stream_id = -1
         self.qpack_encoder_stream_id = -1
@@ -709,7 +714,7 @@ struct Http3Connection(Copyable, Defaultable):
         """
         if stream_id in self.streams:
             return
-        if self.goaway_emitted:
+        if self.goaway_emitted and UInt64(stream_id) >= self.goaway_id:
             raise Error(
                 "Http3Connection.open_request_stream: GOAWAY emitted;"
                 " new request streams are rejected"
@@ -1470,6 +1475,7 @@ struct Http3Connection(Copyable, Defaultable):
         var payload = encode_varint(max_stream_id)
         encode_http3_frame(H3_FRAME_TYPE_GOAWAY, Span[UInt8, _](payload), out)
         self.goaway_emitted = True
+        self.goaway_id = max_stream_id
         return out^
 
     def take_response_frames(mut self, stream_id: Int) raises -> List[UInt8]:
