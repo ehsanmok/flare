@@ -28,6 +28,7 @@ from std.collections.span import Span
 
 from flare.quic import (
     AckFrame,
+    AckFrequencyFrame,
     ConnectionCloseFrame,
     FrameHandler,
     StreamFrame,
@@ -161,6 +162,14 @@ struct _PrintingHandler(FrameHandler, Movable):
 
     def on_datagram(mut self, dg: DatagramFrame) raises:
         print("  DATAGRAM       len=" + String(len(dg.data)))
+        self.other += 1
+
+    def on_ack_frequency(mut self, f: AckFrequencyFrame) raises:
+        print("  ACK_FREQUENCY  threshold=" + String(f.ack_eliciting_threshold))
+        self.other += 1
+
+    def on_immediate_ack(mut self) raises:
+        print("  IMMEDIATE_ACK")
         self.other += 1
 
 
