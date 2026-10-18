@@ -2045,9 +2045,18 @@ struct QuicListener(Movable):
     def send_http3_tunnel(
         mut self, t: Http3Tunnel, data: Span[UInt8, _]
     ) raises -> Bool:
-        """Queue ``data`` as one DATA frame on ``t``; False when the
-        tunnel is closed. The drain sends it as flow control allows."""
-        if not self.http3_tunnel_open(t):
+        """Queue ``data`` as one DATA frame on ``t``; False once our side
+        has ended or been reset (the peer having ended its side does not
+        stop ours). The drain sends it as flow control allows."""
+        if not self._tunnel_live(t):
+            return False
+        var s = self.connections[t.slot].conn.streams.get(UInt64(t.stream_id))
+        if not s or s.value().send_reset:
+            return False
+        try:
+            if self.connections[t.slot].h3_tx[t.stream_id].done:
+                return False
+        except:
             return False
         self._mark(t.slot, 1)
         encode_response_data(

@@ -13,6 +13,7 @@ from flare.http import HttpServer, ok
 from flare.http.handler import Handler
 from flare.http.request import Request
 from flare.http.response import Response
+from flare.http3 import Http3ClientConnection
 from flare.http3.frame import decode_http3_frame, encode_http3_frame
 from flare.net import IpAddr, SocketAddr
 from flare.qpack import QpackHeader, decode_field_section, encode_field_section
@@ -111,11 +112,11 @@ struct _Client(Movable):
         self.fin = False
         self.quic.send_stream(self.sid, _connect(protocol), fin=False)
 
-    def send_ws(mut self, frame: WsFrame) raises:
+    def send_ws(mut self, frame: WsFrame, fin: Bool = False) raises:
         var wire = frame.encode(mask=True)
         var frames = List[UInt8]()
         encode_http3_frame(0x00, Span[UInt8, _](wire), frames)
-        self.quic.send_stream(self.sid, frames, fin=False)
+        self.quic.send_stream(self.sid, frames, fin=fin)
 
     def pump(mut self, until_frames: Int, until_fin: Bool = False) raises:
         var deadline = _monotonic_ms() + 5_000
@@ -190,6 +191,20 @@ def test_websocket_over_h3_echoes_and_closes() raises:
     assert_equal(close.opcode, WsOpcode.CLOSE)
     assert_false(close.masked, "a server never masks (RFC 6455 sec 5.3)")
     assert_true(c.fin, "the server ended the stream after its CLOSE")
+
+
+def test_a_close_with_fin_is_still_answered() raises:
+    """The peer ending its side must not stop ours: a tunnel that got
+    CLOSE and FIN together used to drop the CLOSE reply."""
+    var s = _serve()
+    var c = _Client(s[1], "websocket")
+    c.send_ws(WsFrame.close(1000, ""), fin=True)
+    c.pump(until_frames=2, until_fin=True)
+    kill_forked_server(s[0])
+    var fs = c.frames()
+    assert_equal(len(fs), 2, "HEADERS, CLOSE DATA")
+    var close = WsFrame.decode_one(Span[UInt8, _](fs[1][1])).take_frame()
+    assert_equal(close.opcode, WsOpcode.CLOSE)
 
 
 def test_websocket_over_h3_on_several_workers() raises:
