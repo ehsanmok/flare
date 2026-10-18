@@ -209,6 +209,7 @@ from ._server_support import (
 from ._loss_recovery import LossRecovery
 from ._worker_route import DatagramInbox, cid_owner, inbox_at
 from ._server_types import (
+    CidKey,
     ConnectionIdTable,
     Http3Tunnel,
     QuicConnection,
@@ -1178,9 +1179,9 @@ struct QuicListener(Movable):
             ),
             plaintext,
         )
-        var key = cid_to_hex(new_cid)
+        var key = CidKey(new_cid)
         self.cid_table.register(key, slot)
-        self.connections[slot].issued_cids[seq] = key^
+        self.connections[slot].issued_cids[seq] = key
         self.next_local_cid_seq[slot] = seq + UInt64(1)
 
     def _retire_local_cids(mut self, slot: Int, events: ConnectionEvents):
@@ -1198,7 +1199,7 @@ struct QuicListener(Movable):
                 return
             var key = self.connections[slot].issued_cids.get(seq)
             if key:
-                _ = self.connections[slot].issued_cids.pop(seq, String(""))
+                _ = self.connections[slot].issued_cids.pop(seq, key.value())
                 try:
                     self.cid_table.retire(key.value())
                 except:
@@ -2147,8 +2148,7 @@ struct QuicListener(Movable):
             and len(datagram) < _MIN_INITIAL_DATAGRAM
         ):
             return -1  # RFC 9000 sec 14.1
-        var dcid_hex = cid_to_hex(lh.dcid)
-        var slot = self.cid_table.lookup(dcid_hex)
+        var slot = self.cid_table.lookup(CidKey(lh.dcid))
         if slot >= 0:
             return slot
         if lh.packet_type == PACKET_TYPE_INITIAL:
@@ -2285,8 +2285,7 @@ struct QuicListener(Movable):
         if sh_dcid_len <= 0 or sh_dcid_len > MAX_CID_LENGTH:
             return -1
         var sh = parse_short_header(datagram, sh_dcid_len)
-        var dcid_hex = cid_to_hex(sh.dcid)
-        return self.cid_table.lookup(dcid_hex)
+        return self.cid_table.lookup(CidKey(sh.dcid))
 
     def _maybe_send_stateless_reset(
         mut self, datagram: Span[UInt8, _], peer: SocketAddr
@@ -2421,9 +2420,9 @@ struct QuicListener(Movable):
             self.loss.append(LossRecovery())
             self.loss_init.append(LossRecovery())
             self.loss_hs.append(LossRecovery())
-        self.cid_table.register(cid_to_hex(local_cid), slot)
-        self.connections[slot].issued_cids[UInt64(0)] = cid_to_hex(local_cid)
-        self.cid_table.register(cid_to_hex(lh.dcid), slot)
+        self.cid_table.register(CidKey(local_cid), slot)
+        self.connections[slot].issued_cids[UInt64(0)] = CidKey(local_cid)
+        self.cid_table.register(CidKey(lh.dcid), slot)
         _ = self.schedule_idle_timeout(slot)
         return slot
 
@@ -4545,8 +4544,8 @@ struct QuicListener(Movable):
             return
         for entry in self.connections[slot].issued_cids.items():
             self.cid_table.retire(entry.value)
-        self.cid_table.retire(cid_to_hex(self.connections[slot].local_cid))
-        self.cid_table.retire(cid_to_hex(self.connections[slot].initial_dcid))
+        self.cid_table.retire(CidKey(self.connections[slot].local_cid))
+        self.cid_table.retire(CidKey(self.connections[slot].initial_dcid))
 
     def close(mut self):
         """Close the underlying UDP socket. Idempotent. The

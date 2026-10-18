@@ -233,6 +233,7 @@ from .cc import (
 )
 from .client import QuicClientConnection
 from .server import (
+    CidKey,
     ConnectionIdTable,
     QuicConnection,
     QuicListener,

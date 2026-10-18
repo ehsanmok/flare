@@ -48,6 +48,7 @@ from flare.quic import (
     CryptoFrame,
     QuicListener,
     QuicServerConfig,
+    CidKey,
     cid_to_hex,
     encode_crypto,
     encode_long_header,
@@ -433,7 +434,7 @@ def test_retransmit_does_not_grow_session_slab() raises:
         "egress queue slab must stay in lockstep with connections",
     )
     assert_equal(
-        listener.cid_table.lookup(cid_to_hex(dcid)),
+        listener.cid_table.lookup(CidKey(dcid)),
         0,
     )
     listener.shutdown()

@@ -19,6 +19,7 @@ keep resolving unchanged.
 - :func:`cid_to_hex` -- lowercase-hex CID key for the table.
 """
 
+from std.hashlib import Hasher
 from std.collections import Dict, List, Optional
 from std.collections.span import Span
 
@@ -407,7 +408,7 @@ struct QuicConnection(Copyable):
     """Bytes sent so far on the server's HTTP/3 control stream."""
     var ctrl_tx: List[UInt8]
     """Control-stream frames (GOAWAY) queued for the next 1-RTT flight."""
-    var issued_cids: Dict[UInt64, String]
+    var issued_cids: Dict[UInt64, CidKey]
     """Connection IDs we issued that are still routable, as table keys
     by sequence number (0 is the handshake CID). All are unrouted when
     the slot is reclaimed; one used to stay mapped to the reused slot."""
@@ -589,7 +590,7 @@ struct QuicConnection(Copyable):
         self.send_timer_id = 0
         self.ctrl_off = 0
         self.ctrl_tx = List[UInt8]()
-        self.issued_cids = Dict[UInt64, String]()
+        self.issued_cids = Dict[UInt64, CidKey]()
         self.peer_cid_limit = UInt64(2)
         self.cid_replenish = 0
         self.key_phase = False
@@ -832,51 +833,67 @@ struct QuicConnection(Copyable):
 # -- Connection ID table ------------------------------------------------
 
 
+@fieldwise_init
+struct CidKey(Copyable, Equatable, Hashable, ImplicitlyCopyable):
+    """A Connection ID (at most 20 bytes, RFC 9000 sec 17.2) as a
+    fixed-size key: the bytes packed into three words, with the length
+    in the top byte of the last."""
+
+    var a: UInt64
+    var b: UInt64
+    var c: UInt64
+
+    def __init__(out self, cid: ConnectionId):
+        self = CidKey.of(Span[UInt8, _](cid.bytes))
+
+    @staticmethod
+    def of(bytes: Span[UInt8, _]) -> CidKey:
+        var w = (UInt64(0), UInt64(0), UInt64(0))
+        var n = min(len(bytes), 20)
+        for i in range(n):
+            var v = UInt64(bytes[i]) << UInt64((i & 7) * 8)
+            if i < 8:
+                w[0] |= v
+            elif i < 16:
+                w[1] |= v
+            else:
+                w[2] |= v
+        return CidKey(w[0], w[1], w[2] | (UInt64(n) << 56))
+
+    def __eq__(self, other: Self) -> Bool:
+        return self.a == other.a and self.b == other.b and self.c == other.c
+
+    def __ne__(self, other: Self) -> Bool:
+        return not self == other
+
+    def __hash__[H: Hasher](self, mut hasher: H):
+        self.a.__hash__(hasher)
+        self.b.__hash__(hasher)
+        self.c.__hash__(hasher)
+
+
 struct ConnectionIdTable(Copyable, Defaultable, Sized):
-    """Per-listener routing table from Connection ID to connection.
+    """Per-listener routing table from Connection ID to connection
+    slot (RFC 9000 sec 5.1). A connection can have up to
+    ``active_connection_id_limit`` CIDs at once, each pointing at the
+    same slot."""
 
-    QUIC routes inbound datagrams to the right connection via
-    the Destination Connection ID in the packet header (RFC 9000
-    §5.1). The table maps each issued CID (server-side: the
-    local_cid from :class:`QuicConnection`; client-side: the
-    Source Connection IDs the server sent in NEW_CONNECTION_ID
-    frames) to the connection slot it belongs to.
-
-    The carrier uses :class:`Dict[String, Int]` where the key is
-    the lowercase-hex CID and the value is the slot index into
-    the listener's connection slab.
-    """
-
-    var cid_to_slot: Dict[String, Int]
-    """CID (lowercase-hex of CID bytes) -> slot index. Empty
-    string is invalid; a connection can have up to
-    `active_connection_id_limit` (RFC 9000 §18.2) CIDs at once,
-    each pointing at the same slot."""
+    var cid_to_slot: Dict[CidKey, Int]
 
     def __init__(out self):
-        self.cid_to_slot = Dict[String, Int]()
+        self.cid_to_slot = Dict[CidKey, Int]()
 
-    def register(mut self, cid_hex: String, slot: Int):
-        """Add a CID -> slot mapping. Idempotent: overwriting
-        an existing mapping is allowed (the server may reissue
-        CIDs after migration)."""
-        self.cid_to_slot[cid_hex] = slot
+    def register(mut self, cid: CidKey, slot: Int):
+        """Add (or overwrite) a CID -> slot mapping."""
+        self.cid_to_slot[cid] = slot
 
-    def lookup(self, cid_hex: String) raises -> Int:
-        """Look up the slot for a CID. Returns -1 if absent.
-        The reactor uses -1 to gate the Initial packet path
-        (no slot -> potentially new connection -> run the
-        accept-handshake state machine)."""
-        if cid_hex in self.cid_to_slot:
-            return self.cid_to_slot[cid_hex]
-        return -1
+    def lookup(self, cid: CidKey) -> Int:
+        """The slot for ``cid``, or -1."""
+        return self.cid_to_slot.get(cid, -1)
 
-    def retire(mut self, cid_hex: String) raises:
-        """Drop a CID -> slot mapping. Called when the connection
-        retires a CID via RETIRE_CONNECTION_ID (RFC 9000 §19.16)
-        or when the connection itself closes."""
-        if cid_hex in self.cid_to_slot:
-            _ = self.cid_to_slot.pop(cid_hex)
+    def retire(mut self, cid: CidKey):
+        """Drop a CID -> slot mapping, if present."""
+        _ = self.cid_to_slot.pop(cid, -1)
 
     def __len__(self) -> Int:
         return len(self.cid_to_slot)

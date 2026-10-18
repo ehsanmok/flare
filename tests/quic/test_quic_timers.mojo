@@ -46,6 +46,7 @@ from flare.quic import (
     TIMER_KIND_ACK_DELAY,
     TIMER_KIND_IDLE,
     TIMER_KIND_PTO,
+    CidKey,
     cid_to_hex,
     decode_timer_token,
     encode_long_header,
@@ -177,7 +178,7 @@ def test_advance_idle_closes_connection() raises:
     assert_false(listener.connections[0].alive)
     assert_equal(listener.connections[0].conn.state, CONN_STATE_CLOSED)
     assert_equal(
-        listener.cid_table.lookup(cid_to_hex(dcid)),
+        listener.cid_table.lookup(CidKey(dcid)),
         -1,
         "dead slot's CID must be retired",
     )
@@ -247,7 +248,7 @@ def test_dead_slots_are_reclaimed_and_reused() raises:
     )
     assert_false(listener.connections[0].alive)
     assert_equal(len(listener.free_slots), 1)
-    assert_equal(listener.cid_table.lookup(cid_to_hex(dcid)), -1)
+    assert_equal(listener.cid_table.lookup(CidKey(dcid)), -1)
     var dcid2 = _make_cid(UInt8(0x72), 8)
     var slot = listener.dispatch_datagram(
         Span[UInt8, _](_make_initial_datagram(dcid2, scid)), peer

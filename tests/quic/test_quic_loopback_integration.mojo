@@ -59,6 +59,7 @@ from flare.quic import (
     QuicListener,
     QuicServerConfig,
     StreamFrame,
+    CidKey,
     cid_to_hex,
     encode_long_header,
     encode_stream,
@@ -184,7 +185,7 @@ def test_loopback_initial_handshake_round_trip() raises:
     var got = listener.tick(500)
     assert_true(got, "listener.tick must observe the inbound datagram")
     assert_equal(listener.connection_count(), 1)
-    assert_equal(listener.cid_table.lookup(cid_to_hex(dcid)), 0)
+    assert_equal(listener.cid_table.lookup(CidKey(dcid)), 0)
     var qc = listener.connections[0].copy()
     assert_equal(qc.conn.largest_received_packet, UInt64(0))
     assert_true(qc.alive, "freshly-accepted connection must be alive")
@@ -252,7 +253,7 @@ def test_loopback_idle_close_retires_cid() raises:
     var qc = listener.connections[0].copy()
     assert_false(qc.alive, "idle expiry flips alive=False")
     assert_equal(
-        listener.cid_table.lookup(cid_to_hex(dcid)),
+        listener.cid_table.lookup(CidKey(dcid)),
         -1,
         "closed-slot CID must be retired from the routing table",
     )
@@ -509,7 +510,7 @@ def test_server_chooses_its_own_connection_id() raises:
         cid_to_hex(ours) != cid_to_hex(dcid), "server kept the client DCID"
     )
     # The client's Initial DCID still routes (Initial retransmits) ...
-    assert_equal(listener.cid_table.lookup(cid_to_hex(dcid)), slot)
+    assert_equal(listener.cid_table.lookup(CidKey(dcid)), slot)
     # ... and a short header addressed to our CID reaches the slot.
     var sh = List[UInt8]()
     sh.append(UInt8(0x40))

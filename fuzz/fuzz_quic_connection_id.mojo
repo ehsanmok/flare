@@ -31,7 +31,7 @@ Run:
 from mozz import fuzz, FuzzConfig
 
 from flare.quic import ConnectionId
-from flare.quic.server import ConnectionIdTable, cid_to_hex
+from flare.quic.server import CidKey, ConnectionIdTable, cid_to_hex
 
 
 def _bytes(s: StringLiteral) -> List[UInt8]:
@@ -88,28 +88,34 @@ def target(data: List[UInt8]) raises:
     )
 
     # Property 2: register + lookup round-trips the slot.
+    var key = CidKey(cid)
     var table = ConnectionIdTable()
     var slot = (Int(data[0]) >> 3) & 0x1FFF  # 0..8191
-    table.register(hex_a, slot)
+    table.register(key, slot)
     _assert(
-        table.lookup(hex_a) == slot,
+        table.lookup(key) == slot,
         "table.lookup must return the slot just registered",
     )
 
     # Property 3: retire removes the mapping.
-    table.retire(hex_a)
-    _assert(
-        table.lookup(hex_a) == -1,
-        "lookup of a retired CID must return -1",
-    )
+    table.retire(key)
+    _assert(table.lookup(key) == -1, "lookup of a retired CID must return -1")
 
     # Property 4: re-register overwrites.
-    table.register(hex_a, slot)
+    table.register(key, slot)
     var new_slot = (slot + 1) & 0x1FFF
-    table.register(hex_a, new_slot)
+    table.register(key, new_slot)
     _assert(
-        table.lookup(hex_a) == new_slot,
+        table.lookup(key) == new_slot,
         "re-register must overwrite the prior slot",
+    )
+
+    # Property 5: the key is injective -- two CIDs share a key only when
+    # they are the same bytes.
+    var other = _cid_from(data, 2, (length + Int(data[n - 1])) % 21)
+    _assert(
+        (CidKey(other) == key) == (other.bytes == cid.bytes),
+        "two different CIDs map to one key",
     )
 
     # Bonus: empty CID short-circuits to an empty string.

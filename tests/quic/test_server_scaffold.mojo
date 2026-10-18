@@ -21,6 +21,7 @@ from std.testing import assert_equal, assert_false, assert_true
 
 from flare.quic import (
     ConnectionId,
+    CidKey,
     ConnectionIdTable,
     QuicAead,
     QuicConnection,
@@ -91,14 +92,31 @@ def test_quic_connection_records_cids() raises:
     assert_equal(Int(qc.peer_cid.bytes[0]), 0x20)
 
 
+def _k(s: String) -> CidKey:
+    return CidKey.of(s.as_bytes())
+
+
+def test_cid_keys_differ_by_length() raises:
+    """A CID key keeps the length: ``00`` and ``0000`` are different
+    CIDs, as are any two of different bytes."""
+    var z = List[UInt8](length=20, fill=0)
+    for n in range(20):
+        assert_true(
+            CidKey.of(Span[UInt8, _](z)[:n])
+            != CidKey.of(Span[UInt8, _](z)[: n + 1])
+        )
+    assert_true(_k("abc") != _k("abd"))
+    assert_true(_k("abc") == _k("abc"))
+
+
 def test_cid_table_register_lookup_retire() raises:
     """Round-trip a CID through register / lookup / retire."""
     var table = ConnectionIdTable()
-    table.register(String("aabbccdd"), 7)
-    assert_equal(table.lookup(String("aabbccdd")), 7)
+    table.register(_k("aabbccdd"), 7)
+    assert_equal(table.lookup(_k("aabbccdd")), 7)
     assert_equal(len(table), 1)
-    table.retire(String("aabbccdd"))
-    assert_equal(table.lookup(String("aabbccdd")), -1)
+    table.retire(_k("aabbccdd"))
+    assert_equal(table.lookup(_k("aabbccdd")), -1)
     assert_equal(len(table), 0)
 
 
@@ -107,7 +125,7 @@ def test_cid_table_lookup_missing_returns_minus_one() raises:
     -1 to gate the Initial-packet path (no slot -> potentially
     new connection)."""
     var table = ConnectionIdTable()
-    assert_equal(table.lookup(String("ffffffff")), -1)
+    assert_equal(table.lookup(_k("ffffffff")), -1)
 
 
 def test_cid_table_register_overwrites() raises:
@@ -115,9 +133,9 @@ def test_cid_table_register_overwrites() raises:
     allowed and overwrites; the server may reissue CIDs after
     migration (RFC 9000 §9)."""
     var table = ConnectionIdTable()
-    table.register(String("11223344"), 1)
-    table.register(String("11223344"), 5)
-    assert_equal(table.lookup(String("11223344")), 5)
+    table.register(_k("11223344"), 1)
+    table.register(_k("11223344"), 5)
+    assert_equal(table.lookup(_k("11223344")), 5)
     assert_equal(len(table), 1)
 
 
@@ -126,6 +144,7 @@ def main() raises:
     test_config_carries_overrides()
     test_quic_connection_starts_alive_in_handshake()
     test_quic_connection_records_cids()
+    test_cid_keys_differ_by_length()
     test_cid_table_register_lookup_retire()
     test_cid_table_lookup_missing_returns_minus_one()
     test_cid_table_register_overwrites()

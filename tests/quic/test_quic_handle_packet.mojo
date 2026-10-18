@@ -46,6 +46,7 @@ from flare.quic import (
     QuicListener,
     QuicServerConfig,
     StreamFrame,
+    CidKey,
     cid_to_hex,
     decode_packet_number,
     encode_long_header,
@@ -338,7 +339,7 @@ def test_listener_dispatch_routes_into_handle_packet() raises:
     var slot = listener.dispatch_datagram(Span[UInt8, _](protected), peer)
     assert_equal(slot, 0)
     assert_equal(listener.connection_count(), 1)
-    assert_equal(listener.cid_table.lookup(cid_to_hex(dcid)), 0)
+    assert_equal(listener.cid_table.lookup(CidKey(dcid)), 0)
     var qc = listener.connections[0].copy()
     assert_equal(
         qc.conn.largest_received_packet,

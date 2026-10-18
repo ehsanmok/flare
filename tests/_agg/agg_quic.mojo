@@ -935,6 +935,9 @@ from test_server_scaffold import (
     test_quic_connection_records_cids as test_server_scaffold__test_quic_connection_records_cids,
 )
 from test_server_scaffold import (
+    test_cid_keys_differ_by_length as test_server_scaffold__test_cid_keys_differ_by_length,
+)
+from test_server_scaffold import (
     test_cid_table_register_lookup_retire as test_server_scaffold__test_cid_table_register_lookup_retire,
 )
 from test_server_scaffold import (
@@ -1723,6 +1726,7 @@ def main() raises:
         test_server_scaffold__test_quic_connection_starts_alive_in_handshake
     ]()
     suite.test[test_server_scaffold__test_quic_connection_records_cids]()
+    suite.test[test_server_scaffold__test_cid_keys_differ_by_length]()
     suite.test[test_server_scaffold__test_cid_table_register_lookup_retire]()
     suite.test[
         test_server_scaffold__test_cid_table_lookup_missing_returns_minus_one
