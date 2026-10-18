@@ -9,6 +9,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 flare is a networking library for Mojo: HTTP/1.1, HTTP/2 and HTTP/3 (over QUIC) server and client, WebSocket, gRPC, TLS, TCP/UDP/UDS and DNS, all running on one non-blocking reactor. The Mojo code is mirrored by Lean 4 models under `formal/`, which are proved against the RFCs.
 
+## Constraints
+
+Every feature, fix and optimization must meet all of these:
+
+1. **Least code for the full outcome.** Write the smallest change that delivers the whole result. Reuse what exists before adding anything, don't add speculative knobs or abstractions, and don't stop short of the outcome just to keep the change small.
+2. **Security + correctness + performance, together.** Each change accounts for all three, and none is traded away for another without the user's sign-off. An optimization must keep every limit, bounds check, sanitized error and RFC behaviour (see `docs/security.md` and `docs/threat-model.md`). A security or correctness fix states what it costs on the hot path. Back each claim with evidence: tests for correctness, the fuzz and formal checks where they apply, and benchmark numbers from one run for performance.
+3. **Minimal allocation, reuse what is allocated.** Avoid allocating on the hot path. Reuse buffers through the existing patterns: caller-owned `mut out: List[UInt8]` encoders, per-connection buffers, and the pools in `flare/runtime/buffer_pool.mojo`. Reuse must not weaken constraint 2. A reused buffer never exposes the previous connection's or request's bytes. Pooled and retained buffers have caps, so a peer cannot pin memory with one large request. Every slot is returned exactly once.
+4. **No README changes unless explicitly requested.** Leave `README.md` untouched even when a change makes it stale. Mention the stale part to the user instead.
+5. **No new dependencies without sign-off.** Adding a conda, pypi or cargo package or a new FFI library needs the user's approval. Each one adds supply-chain and threat-model surface.
+6. **Every change ships its proof.** A bug fix includes a regression test that fails without the fix. A new test file needs `pixi run tests-gen`, a new example needs an `example-*` task, and a new parser or codec gets a fuzz harness in `fuzz/`.
+7. **Fail closed.** Untrusted input that is malformed or over a limit is rejected with a sanitized 4xx/5xx or a protocol error. It is never accepted leniently by default, and internal details never reach the peer.
+
 ## Commands
 
 Everything runs through pixi. Every task is defined in `pixi.toml`, and the environments and task table are documented in `docs/development.md`.
