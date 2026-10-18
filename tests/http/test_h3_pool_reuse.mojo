@@ -37,7 +37,7 @@ def _h3_alpn() -> List[String]:
     return a^
 
 
-def _bind_server() raises -> QuicListener:
+def _bind_server(validate: Bool = False) raises -> QuicListener:
     var cert = _read_file(_FIXDIR + "cert.pem")
     var key = _read_file(_FIXDIR + "key.pem")
     var cfg = QuicServerConfig()
@@ -46,6 +46,7 @@ def _bind_server() raises -> QuicListener:
     cfg.rustls_config.cert_chain_pem = cert^
     cfg.rustls_config.private_key_pem = key^
     cfg.rustls_config.alpn_protocols = _h3_alpn()
+    cfg.require_address_validation = validate
     return QuicListener.bind(cfg^)
 
 
@@ -110,6 +111,44 @@ def test_two_gets_reuse_one_connection() raises:
     assert_equal(idle, 1)  # connection returned to the pool for reuse
 
 
+def test_a_redial_presents_the_servers_token() raises:
+    """With address validation on, the first dial pays a Retry; the
+    client keeps the server's NEW_TOKEN token, so a later dial does not."""
+    var server = _bind_server(validate=True)
+    var port = UInt16(server.local_addr().port)
+    var pid = fork()
+    if pid == 0:
+        _serve_forever(server)
+        exit()
+    usleep(300000)
+    var base = String("https://localhost:") + String(Int(port))
+    var key = String("localhost:") + String(Int(port))
+    var token_len = 0
+    var retried = True
+    var status = -1
+    try:
+        var cfg = TlsConfig(ca_bundle=_FIXDIR + "ca.pem")
+        with HttpClient(cfg).with_prefer_http3() as c:
+            _ = c.get(base + String("/one"))
+            token_len = len(c._quic_pool.token(key))
+            var first = c._quic_pool.acquire(key)
+            var old = first.take()
+            old.close()  # force a fresh dial
+            status = c.get(base + String("/two")).status
+            var second = c._quic_pool.acquire(key)
+            var h3 = second.take()
+            retried = h3.quic.retried
+            h3.close()
+    except:
+        pass
+    _ = kill(pid, SIGKILL)
+    waitpid(pid)
+    assert_equal(token_len, 41)
+    assert_equal(status, 200)
+    assert_true(not retried, "the remembered token spared the Retry")
+
+
 def main() raises:
     test_two_gets_reuse_one_connection()
-    print("test_h3_pool_reuse: 1 passed")
+    test_a_redial_presents_the_servers_token()
+    print("test_h3_pool_reuse: 2 passed")

@@ -50,6 +50,9 @@ comptime _CLOCK_MONOTONIC: c_int = c_int(
 ) if CompilationTarget.is_macos() else c_int(1)
 
 
+comptime _MAX_TOKENS: Int = 256
+
+
 @fieldwise_init
 struct _PoolState(Movable):
     """Mutable state behind a :class:`QuicConnectionPool` handle.
@@ -77,6 +80,10 @@ struct _PoolState(Movable):
     var dials: Int
     """Count of pool-miss dials the owner reported via
     :meth:`note_dial` -- observability + reuse assertions."""
+
+    var tokens: Dict[String, List[UInt8]]
+    """``host:port -> `` the server's latest NEW_TOKEN token, presented
+    on the next dial to skip a Retry (RFC 9000 sec 8.1.3)."""
 
 
 struct IdleConnPool[T: PoolableConn](Copyable):
@@ -110,6 +117,7 @@ struct IdleConnPool[T: PoolableConn](Copyable):
                 max_idle_per_host,
                 idle_timeout_ms,
                 0,
+                Dict[String, List[UInt8]](),
             )
         )
         return Self(Int(p))
@@ -205,6 +213,21 @@ struct IdleConnPool[T: PoolableConn](Copyable):
         deque.append(addr)
         sp[].entries[key] = deque^
         sp[].ts_ms[addr] = _monotonic_ms()
+
+    def remember_token(imm self, key: String, token: List[UInt8]) raises:
+        """Keep ``token`` for ``key``; at most :data:`_MAX_TOKENS`
+        origins are remembered."""
+        if not self.enabled() or len(token) == 0:
+            return
+        var sp = self._state()
+        if key in sp[].tokens or len(sp[].tokens) < _MAX_TOKENS:
+            sp[].tokens[key] = token.copy()
+
+    def token(imm self, key: String) -> List[UInt8]:
+        """The token remembered for ``key``, or empty."""
+        if not self.enabled():
+            return List[UInt8]()
+        return self._state()[].tokens.get(key, List[UInt8]()).copy()
 
     def idle_count(imm self) -> Int:
         """Total idle connections across all origins."""

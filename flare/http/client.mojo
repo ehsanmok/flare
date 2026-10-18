@@ -1011,7 +1011,14 @@ struct HttpClient(Movable):
                 # SNI and certificate checks stay on the *origin* host:
                 # RFC 7838 sec 2.1 requires the alternative to be
                 # authoritative for the origin, not for itself.
-                var quic = QuicClientConnection.connect(peer, connector, u.host)
+                var quic = QuicClientConnection.connect(
+                    peer,
+                    connector,
+                    u.host,
+                    token=self._quic_pool.token(
+                        QuicConnectionPool.build_key(u.host, Int(u.port))
+                    ),
+                )
                 self._quic_pool.note_dial()
                 return Http3ClientConnection(quic^)
             except e:
@@ -1069,6 +1076,10 @@ struct HttpClient(Movable):
             authority = authority + ":" + String(Int(u.port))
         var hr = h3.fetch(
             method, "https", authority, u.request_target(), headers, body
+        )
+        self._quic_pool.remember_token(
+            QuicConnectionPool.build_key(u.host, Int(u.port)),
+            h3.quic.address_token(),
         )
         var resp = Response(hr.status, "", hr.body.copy())
         for i in range(len(hr.headers)):
