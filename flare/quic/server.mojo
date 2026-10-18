@@ -2227,9 +2227,13 @@ struct QuicListener(Movable):
         if got <= 0:
             _ = self.drain_all_egress()
             return False
+        # Drain each touched slot once, after the whole burst: draining
+        # after every datagram sent one ACK packet per packet received
+        # (RFC 9000 sec 13.2.1 asks for one per two ack-eliciting).
+        var dirty = List[Int]()
         var slot = self.dispatch_datagram(Span[UInt8, _](buf[:got]), sender)
         if slot >= 0:
-            _ = self._drain_and_send(slot)
+            dirty.append(slot)
         # Drain the rest of the socket queue without blocking so a
         # high-rate sender's burst is handled in one tick. On Linux a
         # single ``recvmmsg`` pulls the whole burst across the
@@ -2243,8 +2247,9 @@ struct QuicListener(Movable):
                     var nslot = self.dispatch_datagram(
                         self._rx_batch.message(i), self._rx_batch.sender(i)
                     )
-                    if nslot >= 0:
-                        _ = self._drain_and_send(nslot)
+                    if nslot >= 0 and nslot not in dirty:
+                        dirty.append(nslot)
+                self._drain_slots(dirty)
                 return True
             except e:
                 # ENOSYS: latch off and fall through to the per-datagram
@@ -2252,6 +2257,7 @@ struct QuicListener(Movable):
                 if String(e).startswith("UdpBatchUnsupported"):
                     self._rx_batch_ok = False
                 else:
+                    self._drain_slots(dirty)
                     raise e^
         for _ in range(_RX_BATCH - 1):
             var nb_got: Int
@@ -2267,9 +2273,15 @@ struct QuicListener(Movable):
             var nslot = self.dispatch_datagram(
                 Span[UInt8, _](buf[:nb_got]), nb_sender
             )
-            if nslot >= 0:
-                _ = self._drain_and_send(nslot)
+            if nslot >= 0 and nslot not in dirty:
+                dirty.append(nslot)
+        self._drain_slots(dirty)
         return True
+
+    def _drain_slots(mut self, slots: List[Int]) raises:
+        """Flush the egress of every slot a receive burst touched."""
+        for i in range(len(slots)):
+            _ = self._drain_and_send(slots[i])
 
     def poll_timeout_ms(self, max_ms: Int = 100) -> Int:
         """How long :meth:`tick` may block: until the next timer (PTO,
