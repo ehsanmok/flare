@@ -23,7 +23,9 @@ from .frame import (
     WsOpcode,
     WsCloseCode,
     WsProtocolError,
+    _DecodeResult,
     _is_valid_utf8,
+    ws_frame_length,
 )
 from .client import WsMessage
 from ..crypto.base64 import base64_decode as _b64_decode_srv
@@ -848,62 +850,56 @@ struct WsConnection(Movable):
             pass  # the peer may be gone already
 
     def _recv_one(mut self) raises -> WsFrame:
-        """Read bytes from stream and decode one complete frame."""
-        var buf = List[UInt8](capacity=4096)
-        # Drain the carry-over before touching the socket: bytes the
-        # HTTP reactor pre-buffered past the handshake on the
-        # shared-listener path, and, on every later call, whatever the
-        # previous decode left behind. Empty throughout for the
-        # standalone WsServer path.
-        if len(self._prebuf) > 0:
-            for i in range(len(self._prebuf)):
-                buf.append(self._prebuf[i])
-            self._prebuf.clear()
-        var tmp = List[UInt8](capacity=4096)
-        tmp.resize(4096, 0)
+        """Read bytes from stream and decode one complete frame.
 
+        ``_prebuf`` is the connection's receive buffer: bytes the HTTP
+        reactor pre-buffered past the handshake on the shared-listener
+        path, and whatever followed the previous frame. Reads append to
+        it until :func:`ws_frame_length` says the frame is whole, or the
+        declared length is already past the cap, which ``decode_one``
+        then rejects without waiting for the payload.
+        """
         while True:
-            try:
-                var result = WsFrame.decode_one(
-                    Span[UInt8, _](buf), max_payload=self.max_frame_size
-                )
-                # RFC 6455 §5.1: server MUST close conn if client sends unmasked frame
-                if not result.frame.masked:
-                    # RFC 6455 sec 7.4.1: say why (1002), best effort.
-                    self._fail_connection(WsCloseCode.PROTOCOL_ERROR)
-                    raise WsProtocolError(
-                        "client sent unmasked frame (RFC 6455 §5.1)"
-                    )
-                # `buf` dies with this call, so anything past the frame
-                # has to be handed back to the connection or it is lost.
-                # Two frames in one segment used to mean the second was
-                # dropped and the next recv() blocked on a socket with
-                # nothing left to send -- a hang, with no error. Reached
-                # by a client that pipelines frames behind the
-                # handshake, and by recv()'s own PING loop.
-                for i in range(result.consumed, len(buf)):
-                    self._prebuf.append(buf[i])
-                return result^.take_frame()
-            except e:
-                var msg = String(e)
-                if (
-                    "need at least" in msg
-                    or "need " in msg
-                    or "truncated" in msg
-                ):
-                    var n = self._stream.read(tmp.unsafe_ptr(), len(tmp))
-                    if n == 0:
-                        raise NetworkError(
-                            "WebSocket connection closed unexpectedly"
-                        )
-                    for i in range(n):
-                        buf.append(tmp[i])
-                else:
-                    if WS_TOO_BIG_MARKER in msg:
-                        # RFC 6455 sec 7.4.1: 1009 tells the client why.
-                        # Best effort: the raise below is what matters.
-                        self._fail_connection(WsCloseCode.MESSAGE_TOO_BIG)
-                    raise e^
+            var need = ws_frame_length(Span[UInt8, _](self._prebuf))
+            if need >= 0 and (
+                len(self._prebuf) >= need or need > self.max_frame_size + 14
+            ):
+                break
+            var have = len(self._prebuf)
+            self._prebuf.reserve(have + 4096)
+            self._prebuf.resize(unsafe_uninit_length=have + 4096)
+            var n = self._stream.read(
+                self._prebuf.unsafe_ptr().unsafe_offset(have), 4096
+            )
+            self._prebuf.resize(unsafe_uninit_length=have + max(n, 0))
+            if n <= 0:
+                raise NetworkError("WebSocket connection closed unexpectedly")
+        var result: _DecodeResult
+        try:
+            result = WsFrame.decode_one(
+                Span[UInt8, _](self._prebuf), max_payload=self.max_frame_size
+            )
+        except e:
+            if WS_TOO_BIG_MARKER in String(e):
+                # RFC 6455 sec 7.4.1: 1009 tells the client why.
+                # Best effort: the raise below is what matters.
+                self._fail_connection(WsCloseCode.MESSAGE_TOO_BIG)
+            raise e^
+        # RFC 6455 §5.1: server MUST close conn if client sends unmasked frame
+        if not result.frame.masked:
+            # RFC 6455 sec 7.4.1: say why (1002), best effort.
+            self._fail_connection(WsCloseCode.PROTOCOL_ERROR)
+            raise WsProtocolError("client sent unmasked frame (RFC 6455 §5.1)")
+        # Whatever followed the frame stays for the next call: two frames
+        # in one segment used to lose the second and hang the next recv().
+        var used = result.consumed
+        if used >= len(self._prebuf):
+            self._prebuf.clear()
+        else:
+            var rest = List[UInt8](capacity=len(self._prebuf) - used)
+            rest.extend(Span[UInt8, _](self._prebuf)[used : len(self._prebuf)])
+            self._prebuf = rest^
+        return result^.take_frame()
 
     def close(
         mut self,

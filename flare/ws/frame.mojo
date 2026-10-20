@@ -27,7 +27,7 @@ Masking (§5.3):
 
 from flare.crypto.random import random_bytes
 from std.format import Writable, Writer
-from std.memory import Pointer
+from std.memory import Pointer, unsafe_memcpy
 
 # SIMD chunk width for XOR masking (matches bench_ws_mask.mojo)
 comptime _SIMD_W: Int = 32
@@ -499,12 +499,24 @@ struct WsFrame(Movable, Writable):
 
         # ── Extract and unmask payload ────────────────────────────────────────
         var payload = List[UInt8](capacity=plen)
+        payload.resize(unsafe_uninit_length=plen)
+        var src = data.unsafe_ptr().unsafe_offset(pos)
+        var dst = payload.unsafe_ptr()
         if is_masked:
-            for i in range(plen):
-                payload.append(data[pos + i] ^ key[i & 3])
-        else:
-            for i in range(plen):
-                payload.append(data[pos + i])
+            var tiled = SIMD[DType.uint8, _SIMD_W]()
+            comptime for t in range(_SIMD_W):
+                tiled[t] = key[t & 3]
+            var i = 0
+            while i + _SIMD_W <= plen:
+                dst.unsafe_offset(i).unsafe_store(
+                    src.unsafe_offset(i).unsafe_load[width=_SIMD_W]() ^ tiled
+                )
+                i += _SIMD_W
+            while i < plen:
+                dst[unsafe_offset=i] = src[unsafe_offset=i] ^ key[i & 3]
+                i += 1
+        elif plen > 0:
+            unsafe_memcpy(dest=dst, src=src, count=plen)
 
         var consumed = pos + plen
         var frame = WsFrame(
@@ -613,6 +625,35 @@ def _is_valid_utf8(data: List[UInt8]) -> Bool:
         else:
             return False
     return True
+
+
+def ws_frame_length(data: Span[UInt8, _]) -> Int:
+    """Total length of the frame starting at ``data[0]`` once its header
+    is in ``data``, or -1 while the header is still incomplete.
+
+    Reads only the length fields; :meth:`WsFrame.decode_one` validates
+    the frame. A receive loop reads until this many bytes are buffered
+    instead of attempting a decode that raises on every short read.
+    """
+    var n = len(data)
+    if n < 2:
+        return -1
+    var plen7 = Int(data[1] & 0x7F)
+    var mask = 4 if (data[1] & 0x80) != 0 else 0
+    if plen7 < 126:
+        return 2 + mask + plen7
+    if plen7 == 126:
+        if n < 4:
+            return -1
+        return 4 + mask + ((Int(data[2]) << 8) | Int(data[3]))
+    if n < 10:
+        return -1
+    var plen = 0
+    for i in range(2, 10):
+        plen = (plen << 8) | Int(data[i])
+        if plen > (1 << 40):
+            return Int.MAX
+    return 10 + mask + plen
 
 
 # ── SIMD masking helper ───────────────────────────────────────────────────────

@@ -121,6 +121,12 @@ from test_ws import (
 from test_ws import (
     test_client_keeps_frames_that_share_a_segment as test_ws__test_client_keeps_frames_that_share_a_segment,
 )
+from test_ws import (
+    test_ws_frame_length_needs_the_whole_header as test_ws__test_ws_frame_length_needs_the_whole_header,
+)
+from test_ws import (
+    test_masked_payload_past_the_simd_width_unmasks as test_ws__test_masked_payload_past_the_simd_width_unmasks,
+)
 from test_ws_autoclient import (
     test_wire_choice_codepoints as test_ws_autoclient__test_wire_choice_codepoints,
 )
@@ -459,6 +465,8 @@ def main() raises:
     ]()
     suite.test[test_ws__test_server_answers_an_oversized_frame_with_1009]()
     suite.test[test_ws__test_client_keeps_frames_that_share_a_segment]()
+    suite.test[test_ws__test_ws_frame_length_needs_the_whole_header]()
+    suite.test[test_ws__test_masked_payload_past_the_simd_width_unmasks]()
     # tests/ws/test_ws_autoclient.mojo
     suite.test[test_ws_autoclient__test_wire_choice_codepoints]()
     suite.test[test_ws_autoclient__test_config_defaults]()

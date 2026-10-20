@@ -19,6 +19,7 @@ from std.testing import (
     assert_raises,
     TestSuite,
 )
+from flare.ws.frame import ws_frame_length
 from flare.ws import (
     WsFrame,
     WsOpcode,
@@ -885,6 +886,32 @@ def test_client_keeps_frames_that_share_a_segment() raises:
     assert_equal(ws.recv().text_payload(), "two")
     s.close()
     ln.close()
+
+
+def test_ws_frame_length_needs_the_whole_header() raises:
+    var short = List[UInt8]()
+    short.append(0x81)
+    assert_equal(ws_frame_length(Span[UInt8, _](short)), -1)
+    short.append(0x80 | 5)
+    assert_equal(ws_frame_length(Span[UInt8, _](short)), 2 + 4 + 5)
+    var ext16: List[UInt8] = [UInt8(0x82), UInt8(0x80 | 126), UInt8(0x01)]
+    assert_equal(ws_frame_length(Span[UInt8, _](ext16)), -1)
+    ext16.append(0x00)
+    assert_equal(ws_frame_length(Span[UInt8, _](ext16)), 4 + 4 + 256)
+    var ext64: List[UInt8] = [UInt8(0x82), UInt8(127), UInt8(0), UInt8(0)]
+    assert_equal(ws_frame_length(Span[UInt8, _](ext64)), -1)
+
+
+def test_masked_payload_past_the_simd_width_unmasks() raises:
+    var payload = List[UInt8]()
+    for i in range(70):
+        payload.append(UInt8((i * 7) % 256))
+    var f = WsFrame.binary(payload.copy())
+    var wire = f.encode(mask=True)
+    var got = WsFrame.decode_one(Span[UInt8, _](wire)).take_frame()
+    assert_equal(len(got.payload), 70)
+    for i in range(70):
+        assert_equal(Int(got.payload[i]), Int(payload[i]))
 
 
 def main() raises:
