@@ -137,18 +137,26 @@ struct StreamSlab[S: Copyable & Deinitable & SlabEntry](
             return Bool(self.fast[sid])
         return sid in self.overflow
 
-    def __getitem__(self, sid: Int) raises -> Self.S:
-        """Copy out the value at ``sid``.
+    def __getitem__(self, sid: Int) raises -> ref[self] Self.S:
+        """Read-only view of the value at ``sid``.
 
         Raises if ``sid`` is not present, matching
         ``Dict.__getitem__`` semantics so existing call sites
         that gate on a prior ``sid in slab`` check don't change.
+        Writes go through ``__setitem__`` / ``pop`` so the tracked
+        count and ready list stay exact.
         """
+        # Both tiers are fields of ``self``, and any write needs ``mut
+        # self``, so tying the view to ``self`` is what keeps it valid.
         if Self._fits_fast(sid):
             if self.fast[sid]:
-                return self.fast[sid].value().copy()
+                return Pointer(to=self.fast[sid].value()).unsafe_origin_cast[
+                    origin_of(self)
+                ]()[]
             raise Error("StreamSlab: unknown stream id")
-        return self.overflow[sid].copy()
+        return Pointer(to=self.overflow[sid]).unsafe_origin_cast[
+            origin_of(self)
+        ]()[]
 
     def _flags(self, sid: Int) -> Tuple[Bool, Bool]:
         """``(active, ready)`` of the entry at ``sid``, read in place."""

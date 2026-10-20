@@ -76,11 +76,11 @@ def test_fast_tier_roundtrip() raises:
     assert_true(5 in slab)
     assert_true(not (7 in slab))
 
-    var s1 = slab[1]
+    ref s1 = slab[1]
     assert_equal(s1.id, 1)
     assert_equal(s1.payload, 42)
 
-    var s3 = slab[3]
+    ref s3 = slab[3]
     assert_equal(s3.payload, 43)
 
 
@@ -93,7 +93,7 @@ def test_overflow_tier_roundtrip() raises:
     assert_true(big in slab)
     assert_true(not (big - 1 in slab))
 
-    var got = slab[big]
+    ref got = slab[big]
     assert_equal(got.id, big)
     assert_equal(got.payload, 99)
 
@@ -104,9 +104,9 @@ def test_both_tiers_coexist() raises:
     slab[FAST_CAPACITY + 7] = StreamLike(id=FAST_CAPACITY + 7, payload=20)
 
     assert_equal(len(slab), 2)
-    var fast = slab[1]
+    ref fast = slab[1]
     assert_equal(fast.payload, 10)
-    var slow = slab[FAST_CAPACITY + 7]
+    ref slow = slab[FAST_CAPACITY + 7]
     assert_equal(slow.payload, 20)
 
 
@@ -117,7 +117,7 @@ def test_overwrite_does_not_double_count() raises:
 
     slab[3] = StreamLike(id=3, payload=2)
     assert_equal(len(slab), 1)
-    var got = slab[3]
+    ref got = slab[3]
     assert_equal(got.payload, 2)
 
     var big = FAST_CAPACITY + 5
@@ -125,7 +125,7 @@ def test_overwrite_does_not_double_count() raises:
     assert_equal(len(slab), 2)
     slab[big] = StreamLike(id=big, payload=20)
     assert_equal(len(slab), 2)
-    var got_big = slab[big]
+    ref got_big = slab[big]
     assert_equal(got_big.payload, 20)
 
 
@@ -197,7 +197,7 @@ def test_stress_roundtrip() raises:
     assert_equal(len(slab), n)
     for i in range(n):
         assert_true(i in slab)
-        var got = slab[i]
+        ref got = slab[i]
         assert_equal(got.payload, i * 7)
 
     for i in range(n):
