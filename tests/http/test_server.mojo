@@ -343,7 +343,7 @@ def test_server_config_defaults() raises:
     assert_equal(cfg.max_body_size, 10 * 1024 * 1024)
     assert_equal(cfg.max_uri_length, 8192)
     assert_true(cfg.keep_alive)
-    assert_equal(cfg.max_keepalive_requests, 100)
+    assert_equal(cfg.max_keepalive_requests, 1000)
     assert_equal(cfg.idle_timeout_ms, 500)
     assert_equal(cfg.write_timeout_ms, 5000)
 

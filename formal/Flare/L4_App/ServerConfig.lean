@@ -48,14 +48,14 @@ structure Cfg where
   deriving DecidableEq, Repr
 
 /-- Defaults of `ServerConfig.__init__`.
-mirrors flare/http/_server/config.mojo#ServerConfig.__init__ sha=7b376366d39e at=59bda50f -/
+mirrors flare/http/_server/config.mojo#ServerConfig.__init__ sha=4478b7f311e1 at=0a1ed796 -/
 def default : Cfg where
   readBufferSize := 8192
   maxHeaderSize := 8192
   maxBodySize := 10 * 1024 * 1024
   maxUriLength := 8192
   keepAlive := true
-  maxKeepaliveRequests := 100
+  maxKeepaliveRequests := 1000
   idleTimeoutMs := 500
   writeTimeoutMs := 5000
   readBodyTimeoutMs := 30000

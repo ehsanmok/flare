@@ -830,7 +830,7 @@ their `libflare_tls.so`. A bare checkout run outside pixi now needs
 `FLARE_LIB_DIR=$PWD/build`.
 
 `ServerConfig` defaults (override per-server): `max_header_size` (8192 B),
-`max_body_size` (10 MiB), `max_keepalive_requests` (100), `idle_timeout_ms`
+`max_body_size` (10 MiB), `max_keepalive_requests` (1000), `idle_timeout_ms`
 (500), `read_body_timeout_ms` (30_000), `request_timeout_ms` (60_000),
 and `handler_timeout_ms`.
 

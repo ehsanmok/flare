@@ -78,7 +78,7 @@ struct ServerConfig(Copyable):
         max_body_size: Maximum bytes for the request body (default 10MB).
         max_uri_length: Maximum bytes for the request URI (default 8192).
         keep_alive: Enable HTTP/1.1 keep-alive (default True).
-        max_keepalive_requests: Max requests per connection before forcing close (default 100).
+        max_keepalive_requests: Max requests per connection before forcing close (default 1000).
         idle_timeout_ms: Max ms a connection may stay idle before the
             reactor closes it (default 500), including a connection
             that has not sent its first byte yet. 0 disables.
@@ -208,7 +208,7 @@ struct ServerConfig(Copyable):
         max_body_size: Int = 10 * 1024 * 1024,
         max_uri_length: Int = 8192,
         keep_alive: Bool = True,
-        max_keepalive_requests: Int = 100,
+        max_keepalive_requests: Int = 1000,
         idle_timeout_ms: Int = 500,
         write_timeout_ms: Int = 5000,
         shutdown_timeout_ms: Int = 5000,
