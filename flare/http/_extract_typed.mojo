@@ -192,7 +192,7 @@ struct JsonAs[T: FromJson](Copyable, Defaultable, Extractor):
     def apply(mut self, req: Request) raises:
         if len(req.body) == 0:
             raise Error("missing JSON body")
-        self.value.parse_json(loads(req.text()))
+        self.value.parse_json(loads[target="cpu-simdjson"](req.text()))
 
     @staticmethod
     def extract(req: Request) raises -> Self:

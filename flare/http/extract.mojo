@@ -819,7 +819,7 @@ struct Json(Copyable, Defaultable, Extractor):
     def apply(mut self, req: Request) raises:
         if len(req.body) == 0:
             raise Error("missing JSON body")
-        self.value = loads(req.text())
+        self.value = loads[target="cpu-simdjson"](req.text())
 
     @staticmethod
     def extract(req: Request) raises -> Self:

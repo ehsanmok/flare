@@ -199,7 +199,7 @@ struct ResponseImpl[B: Body = InlineBody](Movable):
             print(data["slideshow"]["title"].string_value())
             ```
         """
-        return loads(self.text())
+        return loads[target="cpu-simdjson"](self.text())
 
     def raise_for_status(self) raises:
         """Raise ``HttpError`` if the status code is not 2xx.

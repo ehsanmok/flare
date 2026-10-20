@@ -452,7 +452,7 @@ struct Request(Movable):
         Raises:
             Error: If the body is not valid JSON.
         """
-        return loads(self.text())
+        return loads[target="cpu-simdjson"](self.text())
 
     def content_length(self) -> Int:
         """Return the Content-Length header value, or 0 if absent or not
