@@ -28,6 +28,7 @@ from .frame import (
     ws_frame_length,
 )
 from .client import WsMessage
+from .protocol import _close_reply_payload
 from ..crypto.base64 import base64_decode as _b64_decode_srv
 from ..crypto.base64 import base64_encode as _b64_encode_srv
 from ..http.response import Status
@@ -454,49 +455,6 @@ def _send_upgrade_response(mut stream: TcpStream, accept: String) raises:
 
 
 # ── WsConnection ──────────────────────────────────────────────────────────────
-
-
-def _valid_close_code(code: Int) -> Bool:
-    """Whether ``code`` may appear in a received CLOSE frame.
-
-    RFC 6455 sec 7.4.1 defines 1000-1003 and 1007-1011, the IANA registry
-    adds 1012-1014, and 3000-4999 are for libraries and applications. The
-    reserved 1004, 1005, 1006 and 1015 must never be sent on the wire.
-    """
-    return (
-        (code >= 1000 and code <= 1003)
-        or (code >= 1007 and code <= 1014)
-        or (code >= 3000 and code <= 4999)
-    )
-
-
-def _close_reply_payload(body: List[UInt8]) -> List[UInt8]:
-    """The body of the CLOSE that answers a received CLOSE with ``body``.
-
-    An empty body is echoed empty and a valid one echoes its status code
-    (RFC 6455 sec 5.5.1). A 1-byte body, an invalid code or a reason that
-    is not UTF-8 is a protocol error (sec 7.1.7, 7.4.1) and is answered
-    with 1002.
-    """
-    var out = List[UInt8]()
-    if len(body) == 0:
-        return out^
-    var valid = len(body) >= 2
-    if valid:
-        valid = _valid_close_code(Int(body[0]) * 256 + Int(body[1]))
-    if valid:
-        var reason = List[UInt8]()
-        for i in range(2, len(body)):
-            reason.append(body[i])
-        valid = _is_valid_utf8(reason)
-    if valid:
-        out.append(body[0])
-        out.append(body[1])
-    else:
-        var code = Int(WsCloseCode.PROTOCOL_ERROR)
-        out.append(UInt8(code >> 8))
-        out.append(UInt8(code & 0xFF))
-    return out^
 
 
 struct WsConnection(Movable):
