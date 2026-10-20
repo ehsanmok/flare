@@ -9,7 +9,9 @@ re-exports every name here, so the public ``flare.http`` /
 
 from std.memory import unsafe_memcpy
 
-from json import dumps, Value as JsonValue
+from json import JsonWriter, Value as JsonValue
+from json.reflection import serialize_json_into
+from json.value.value import write_value
 
 from ..response import Response, Status
 
@@ -89,8 +91,8 @@ def ok_json_value(value: JsonValue) raises -> Response:
 
     Args:
         value: A :class:`json.Value` (object / array / string /
-               number / bool / null). Serialised via
-               :func:`json.dumps` and emitted with
+               number / bool / null). Serialised straight into the
+               body and emitted with
                ``Content-Type: application/json``.
 
     Returns:
@@ -100,10 +102,33 @@ def ok_json_value(value: JsonValue) raises -> Response:
         Error: When :func:`json.dumps` rejects the value (cyclic
                reference, etc.).
     """
-    var serialised = dumps(value)
-    var resp = Response(
-        status=Status.OK, reason="OK", body=_string_to_bytes(serialised)
-    )
+    var w = JsonWriter(capacity=256)
+    write_value(w, value)
+    return _json_response(w^.finish())
+
+
+def ok_json_of[T: AnyType](value: T) raises -> Response:
+    """Create a 200 OK response by serialising ``value`` by reflection.
+
+    Struct fields are written straight into the response body, with no
+    intermediate :class:`json.Value` tree or ``String``.
+
+    Args:
+        value: Any value :func:`json.serialize_json` accepts.
+
+    Returns:
+        A ``Response`` with status 200 and ``Content-Type: application/json``.
+
+    Raises:
+        Error: When a custom ``to_json_value`` hook raises.
+    """
+    var w = JsonWriter(capacity=256)
+    serialize_json_into(w, value)
+    return _json_response(w^.finish())
+
+
+def _json_response(var body: List[UInt8]) -> Response:
+    var resp = Response(status=Status.OK, reason="OK", body=body^)
     try:
         resp.headers.set("Content-Type", "application/json")
     except:

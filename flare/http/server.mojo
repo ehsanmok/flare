@@ -1475,6 +1475,7 @@ from ._server.responses import (
     ok,
     ok_json,
     ok_json_value,
+    ok_json_of,
     redirect,
     unauthorized,
 )
