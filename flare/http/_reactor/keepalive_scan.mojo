@@ -101,6 +101,7 @@ struct StepResult(Copyable, ImplicitlyCopyable):
     var done: Bool
     var idle_timeout_ms: Int
     var h2c_upgrade: Bool
+    var ws_upgrade: Bool
 
     def __init__(
         out self,
@@ -109,6 +110,7 @@ struct StepResult(Copyable, ImplicitlyCopyable):
         done: Bool = False,
         idle_timeout_ms: Int = -1,
         h2c_upgrade: Bool = False,
+        ws_upgrade: Bool = False,
     ):
         """Construct a StepResult.
 
@@ -121,12 +123,14 @@ struct StepResult(Copyable, ImplicitlyCopyable):
             h2c_upgrade: True when the unified reactor should migrate
                 this fd from ``KIND_H1`` to ``KIND_H2`` after the 101
                 Switching Protocols response has been flushed.
+            ws_upgrade: Likewise, to ``KIND_WS`` after a WebSocket 101.
         """
         self.want_read = want_read
         self.want_write = want_write
         self.done = done
         self.idle_timeout_ms = idle_timeout_ms
         self.h2c_upgrade = h2c_upgrade
+        self.ws_upgrade = ws_upgrade
 
 
 # ── Monotonic clock + small ASCII helpers ─────────────────────────────────────

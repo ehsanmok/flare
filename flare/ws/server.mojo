@@ -435,14 +435,9 @@ def _read_upgrade_request(mut stream: TcpStream) raises -> _WsUpgradeRequest:
     return fields.finish()
 
 
-def _send_upgrade_response(mut stream: TcpStream, accept: String) raises:
-    """Send the 101 Switching Protocols response.
-
-    Args:
-        stream: TCP stream for the client connection.
-        accept: The computed ``Sec-WebSocket-Accept`` value.
-    """
-    var resp = (
+def _upgrade_response(accept: String) -> String:
+    """The 101 Switching Protocols response for ``accept``."""
+    return (
         "HTTP/1.1 101 Switching Protocols\r\n"
         + "Upgrade: websocket\r\n"
         + "Connection: Upgrade\r\n"
@@ -451,8 +446,17 @@ def _send_upgrade_response(mut stream: TcpStream, accept: String) raises:
         + "\r\n"
         + "\r\n"
     )
-    var resp_bytes = resp.as_bytes()
-    stream.write_all(Span[UInt8, _](resp_bytes))
+
+
+def _send_upgrade_response(mut stream: TcpStream, accept: String) raises:
+    """Send the 101 Switching Protocols response.
+
+    Args:
+        stream: TCP stream for the client connection.
+        accept: The computed ``Sec-WebSocket-Accept`` value.
+    """
+    var resp = _upgrade_response(accept)
+    stream.write_all(Span[UInt8, _](resp.as_bytes()))
 
 
 # ── WsConnection ──────────────────────────────────────────────────────────────

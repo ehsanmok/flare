@@ -21,6 +21,11 @@ from ..proto.h2_config import Http2Config
 # for ``flare.http.response`` (a leaf) -- never for the server or this
 # package.
 from ...ws.server import DEFAULT_MAX_OFFLOADED_WS, WsConnection
+from ...ws.server_reactor import (
+    WsReactorHandler,
+    WsReactorHooks,
+    make_ws_reactor_hooks,
+)
 
 comptime WsHandlerFn = def(mut WsConnection) raises thin -> None
 """The opt-in WebSocket handler signature. Identical to
@@ -53,11 +58,39 @@ struct WsUpgrade(Copyable, Defaultable):
     """Detached threads the process runs at once. An upgrade past it is
     answered 503, so clients cannot open threads without bound."""
 
+    var reactor: Optional[WsReactorHooks]
+    """Event-driven handler run on the reactor, set by :meth:`on_reactor`.
+    Takes precedence over ``handler``."""
+
     def __init__(out self):
         """No WebSocket handling."""
         self.handler = None
         self.offload = False
         self.max_offloaded = DEFAULT_MAX_OFFLOADED_WS
+        self.reactor = None
+
+    @staticmethod
+    def on_reactor[
+        W: WsReactorHandler
+    ](
+        var handler: W,
+        max_message: Int = 16 * 1024 * 1024,
+        max_outbox: Int = 4 * 1024 * 1024,
+        idle_timeout_ms: Int = 60_000,
+    ) raises -> WsUpgrade:
+        """Handle upgrades with an event-driven ``handler`` on the reactor
+        worker: no thread per connection, the RFC 6455 rules enforced for
+        the handler, a client that stops reading closed with 1008 once
+        ``max_outbox`` bytes wait for it, and a connection idle for
+        ``idle_timeout_ms`` dropped.
+
+        Each connection gets its own copy of ``handler``.
+        """
+        var out = WsUpgrade()
+        out.reactor = make_ws_reactor_hooks(
+            handler^, max_message, max_outbox, idle_timeout_ms
+        )
+        return out^
 
     def __init__(
         out self,
@@ -80,6 +113,7 @@ struct WsUpgrade(Copyable, Defaultable):
         self.handler = Optional[WsHandlerFn](handler)
         self.offload = offload
         self.max_offloaded = max_offloaded
+        self.reactor = None
 
 
 struct ServerConfig(Copyable):

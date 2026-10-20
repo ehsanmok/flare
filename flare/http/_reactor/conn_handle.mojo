@@ -141,6 +141,7 @@ ceiling, after which the connection re-arms and yields to its peers."""
 comptime _WS_NOT_HANDSHAKE: Int = 0
 comptime _WS_UPGRADED: Int = 1
 comptime _WS_REFUSED: Int = 2
+comptime _WS_ON_REACTOR: Int = 3
 
 comptime PIPELINE_BATCH_REQUESTS: Int = 32
 """Pipelined requests already in ``read_buf`` served before one flush."""
@@ -294,6 +295,11 @@ struct ConnHandle(Movable):
     ``on_writable``)."""
 
     var _h2c_upgrade_pending: Bool
+    var _ws_upgrade_pending: Bool
+    """A WebSocket 101 is queued; once it flushes the unified reactor
+    moves the connection to a ``WsConnHandle``."""
+    var _ws_prebuf: List[UInt8]
+    var _ws_origin: String
     """``True`` iff this h1 connection has received a valid
     ``Upgrade: h2c`` request (RFC 7540 §3.2), queued the
     ``101 Switching Protocols`` response into ``write_buf``, and
@@ -434,6 +440,9 @@ struct ConnHandle(Movable):
         self.last_interest = 1  # INTEREST_READ
         self.send_in_flight = False
         self._h2c_upgrade_pending = False
+        self._ws_upgrade_pending = False
+        self._ws_prebuf = List[UInt8]()
+        self._ws_origin = String("")
         self._h2c_upgrade_request = Optional[Request]()
         self._h2c_upgrade_settings = List[UInt8]()
         self._date_cache = DateCache()
@@ -969,7 +978,9 @@ struct ConnHandle(Movable):
             # the raw fd and writes the 101 and every frame in cleartext,
             # and a TLS connection has no upgrade seam (a ``wss://``
             # handshake is served as plain HTTP/1.1 inside TLS instead).
-            var ws_here = config.ws.handler and not self.tls
+            var ws_here = (
+                config.ws.handler or config.ws.reactor
+            ) and not self.tls
             if ws_here and _is_ws_version_mismatch(req):
                 # RFC 6455 sec 4.4: a handshake for a version we do not
                 # speak gets 426 with the version we do, rather than
@@ -997,6 +1008,8 @@ struct ConnHandle(Movable):
                     return StepResult(
                         want_read=False, want_write=False, done=True
                     )
+                if upgraded == _WS_ON_REACTOR:
+                    return self._transition_to_writing()
                 if upgraded == _WS_REFUSED:
                     self.should_close = True
                     return self._finalise_response(
@@ -1447,6 +1460,7 @@ struct ConnHandle(Movable):
             or self.should_close
             or self.body_src
             or self._h2c_upgrade_pending
+            or self._ws_upgrade_pending
             or len(self.continue_pending) > 0
             or len(self.batch_out) + len(self.write_buf) > PIPELINE_BATCH_BYTES
         ):
@@ -1475,6 +1489,13 @@ struct ConnHandle(Movable):
         swap(self.write_buf, self.batch_out)
         self.write_pos = 0
         self.batch_out.clear()
+
+    def take_ws_upgrade(mut self, mut prebuf: List[UInt8], mut origin: String):
+        """Hand the bytes past the handshake and its ``Origin`` to the
+        ``WsConnHandle`` that takes over the connection."""
+        self._ws_upgrade_pending = False
+        swap(prebuf, self._ws_prebuf)
+        swap(origin, self._ws_origin)
 
     def has_buffered_request(self) -> Bool:
         """True when ``read_buf`` already holds a whole request that has
@@ -1586,6 +1607,9 @@ struct ConnHandle(Movable):
                     want_write=True,
                     idle_timeout_ms=config.write_timeout_ms,
                 )
+
+        if self._ws_upgrade_pending:
+            return StepResult(idle_timeout_ms=0, ws_upgrade=True)
 
         # h2c upgrade migration cue: the 101 Switching Protocols response
         # has just flushed. Tell the unified reactor to swap the conn-dict
@@ -1766,6 +1790,7 @@ struct ConnHandle(Movable):
             _compute_accept_srv,
             _send_upgrade_response,
             _spawn_ws_offload,
+            _upgrade_response,
             _ws_handshake_problem,
             ws_offload_try_acquire,
         )
@@ -1787,6 +1812,32 @@ struct ConnHandle(Movable):
             ).byte_length()
             != 0
         ):
+            return _WS_NOT_HANDSHAKE
+        if config.ws.reactor and self.h2c_upgrade_allowed:
+            self._ws_prebuf = List[UInt8]()
+            if self.body_total >= 0 and self.body_total < len(self.read_buf):
+                self._ws_prebuf.extend(
+                    Span[UInt8, _](self.read_buf)[
+                        self.body_total : len(self.read_buf)
+                    ]
+                )
+            self.read_buf.clear()
+            var reactor_origins = req.headers.get_all("origin")
+            self._ws_origin = String("")
+            if len(reactor_origins) > 0:
+                self._ws_origin = reactor_origins[
+                    len(reactor_origins) - 1
+                ].copy()
+            self.write_buf.clear()
+            self.write_buf.extend(
+                _upgrade_response(
+                    _compute_accept_srv(req.headers.get("sec-websocket-key"))
+                ).as_bytes()
+            )
+            self.write_pos = 0
+            self._ws_upgrade_pending = True
+            return _WS_ON_REACTOR
+        if not config.ws.handler:
             return _WS_NOT_HANDSHAKE
         if config.ws.offload and not ws_offload_try_acquire(
             config.ws.max_offloaded

@@ -48,6 +48,9 @@ handshake. Terminal for at most a few edges -- once ALPN is known the
 entry is replaced by a ``KIND_H1`` / ``KIND_H2`` one that has adopted
 the session's ``SSL*``."""
 
+comptime KIND_WS: Int = 4
+"""Tag: addr points at a :class:`flare.http._ws_conn_handle.WsConnHandle`."""
+
 
 @always_inline
 def _pack(kind: Int, addr: Int) -> Int:

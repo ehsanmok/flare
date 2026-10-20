@@ -872,6 +872,19 @@ TLS-terminated listener (`bind_tls`) the `WsUpgrade` hook is ignored and a
 because the upgrade path writes on the raw socket. Use a separate
 `WsServer` for `wss://`.
 
+Offloaded handlers are capped process-wide by `WsUpgrade.max_offloaded`
+(4096): an upgrade past the cap is answered 503 before anything is
+detached. `WsUpgrade.on_reactor(handler)` instead keeps each upgraded
+connection on the reactor worker, with no thread per connection: the
+handler implements `WsReactorHandler` (`on_open`, `on_message` per
+reassembled message, `on_close` once with the closing code, or 1006 if
+the connection dropped), each connection gets its own copy of it, and
+the RFC 6455 rules (masking, fragment sequencing, UTF-8, message cap,
+PING, one CLOSE reply) are enforced before the handler sees anything. A
+client that stops reading is closed with 1008 once `max_outbox` bytes
+wait for it, and a connection idle for `idle_timeout_ms` is dropped.
+WebSocket-over-HTTP/2 and -HTTP/3 tunnels apply the same rules.
+
 **Changed in v0.11 (breaking).** `offload` defaults to `True`; it was
 `False`, so one WebSocket client stalled its whole worker by default. A
 handshake whose `Sec-WebSocket-Version` is not 13 is answered 426 with

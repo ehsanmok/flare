@@ -86,6 +86,7 @@ from flare.runtime.scheduler import (
 )
 from flare.tcp import TcpListener, TcpStream, accept_fd
 from flare.ws.server_h2 import WsH2Hooks
+from ._ws_conn_handle import _drive_ws, _migrate_h1_to_ws, _ws_conn_free_addr
 
 from ._h2_conn_handle import (
     Http2ConnHandle,
@@ -134,6 +135,7 @@ from ._reactor.tagged_dispatch import (
     KIND_H1,
     KIND_H2,
     KIND_TLS,
+    KIND_WS,
     _pack,
     _kind,
     _addr,
@@ -187,7 +189,7 @@ def _drive_h1[
         var cycles = 0
         while (not step_done) and cycles < 3:
             cycles += 1
-            if last_step.h2c_upgrade:
+            if last_step.h2c_upgrade or last_step.ws_upgrade:
                 break
             if (
                 last_step.want_write
@@ -204,6 +206,10 @@ def _drive_h1[
                 step_done = last_step.done
             else:
                 break
+        if last_step.ws_upgrade and not step_done:
+            return _migrate_h1_to_ws(
+                fd, config.ws.reactor.value(), conns, reactor, wheel, timers
+            )
         if last_step.h2c_upgrade and not step_done:
             # The h1 ConnHandle has flushed the 101 response. Migrate
             # to the h2 handle in place; the conn-dict entry swaps
@@ -400,6 +406,8 @@ def _cleanup_conn_unified(
             _h2_conn_free_addr(a)
         elif k == KIND_TLS:
             _tls_conn_free_addr(a)
+        elif k == KIND_WS:
+            _ws_conn_free_addr(a)
     except:
         pass
 
@@ -881,6 +889,7 @@ def _unified_handle_conn_event[
             is_readable
             or (tls_cross and is_writable)
             or h1_ptr[]._h2c_upgrade_pending
+            or h1_ptr[]._ws_upgrade_pending
         ):
             h1_ptr[].short_read_ok = not peer_hup
             done3 = _drive_h1(
@@ -928,6 +937,11 @@ def _unified_handle_conn_event[
                     ws_hooks.copy(),
                 )
         if done3:
+            _cleanup_conn_unified(fd, conns, timers, reactor, wheel)
+        return
+
+    if k == KIND_WS:
+        if _drive_ws(fd, _addr(packed), is_readable, reactor, wheel, timers):
             _cleanup_conn_unified(fd, conns, timers, reactor, wheel)
         return
 
