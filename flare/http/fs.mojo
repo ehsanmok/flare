@@ -29,7 +29,7 @@ from std.os import getenv
 from .handler import Handler
 from .request import Request
 from .response import Response
-from ..utils.dylib import find_flare_lib, dl_sym
+from ..utils.dylib import dl_sym, pinned_flare_lib
 
 
 # ── libflare_fs.so bindings ────────────────────────────────────────────
@@ -38,16 +38,6 @@ from ..utils.dylib import find_flare_lib, dl_sym
 # them again from user code with a slightly different signature causes
 # LLVM lowering errors. We therefore route through a tiny C wrapper
 # (``flare/http/ffi/fs_wrapper.c``) compiled to ``libflare_fs.so``.
-
-
-def _find_flare_fs_lib() -> String:
-    """Return the path to ``libflare_fs.so``.
-
-    Thin wrapper over :func:`flare.utils.dylib.find_flare_lib`
-    pinned to the ``"fs"`` shim name (the canonical resolver is
-    :mod:`flare.utils.dylib`).
-    """
-    return find_flare_lib("fs")
 
 
 def _cstr(path: String) -> List[UInt8]:
@@ -362,7 +352,7 @@ struct FileServer(Copyable, Defaultable, Handler):
         if path.byte_length() == 0:
             return Response(status=404)
 
-        var lib = OwnedDLHandle(_find_flare_fs_lib())
+        ref lib = pinned_flare_lib["fs"]()[]
         # One open that also checks the file is regular and, after
         # resolving every symlink, still under root.
         var opened = _fs_open_regular(lib, path, self.root)
@@ -401,7 +391,10 @@ struct FileServer(Copyable, Defaultable, Handler):
         var body = List[UInt8]()
         var body_len = slice_len
         if req.method == "GET" and slice_len > 0:
-            body = List[UInt8](length=slice_len, fill=UInt8(0))
+            # Uninitialised, then cut to what pread returned: no byte the
+            # read did not write is ever part of the body.
+            body = List[UInt8](capacity=slice_len)
+            body.resize(unsafe_uninit_length=slice_len)
             var got = _fs_pread(
                 lib, fd, Int(body.unsafe_ptr()), slice_len, start
             )
@@ -409,7 +402,7 @@ struct FileServer(Copyable, Defaultable, Handler):
                 _fs_close(lib, fd)
                 return Response(status=500)
             if got < slice_len:
-                body.resize(got, 0)
+                body.resize(unsafe_uninit_length=got)
             body_len = len(body)
         _fs_close(lib, fd)
 
