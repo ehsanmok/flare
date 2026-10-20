@@ -39,6 +39,7 @@ SANS_IO_FILES=(
     "flare/http/headers.mojo"
     "flare/http/header_view.mojo"
     "flare/http/header_phf.mojo"
+    "flare/ws/protocol.mojo"
     "flare/http/intern.mojo"
     "flare/http/simd_parsers.mojo"
     "flare/http/hpack_huffman.mojo"
