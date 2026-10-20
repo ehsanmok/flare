@@ -427,6 +427,30 @@ def _compute_close_after(req_headers: HeaderMap, req_version: String) -> Bool:
     return False
 
 
+def _has_header_line(
+    data: List[UInt8], header_end: Int, lower_name: StaticString
+) -> Bool:
+    """Whether a header line in ``data[:header_end]`` starts with
+    ``lower_name`` (which ends in ``:``), compared case-insensitively."""
+    var np = lower_name.unsafe_ptr()
+    var nn = lower_name.byte_length()
+    var i = 1
+    while i + nn <= header_end:
+        if data[i - 1] == 10:
+            var found = True
+            for j in range(nn):
+                var c = data[i + j]
+                if c >= 65 and c <= 90:
+                    c = c + 32
+                if c != np[unsafe_offset=j]:
+                    found = False
+                    break
+            if found:
+                return True
+        i += 1
+    return False
+
+
 def _wants_close(data: List[UInt8], header_end: Int) -> Bool:
     """Scan the raw header block for HTTP/1.0 + ``Connection:`` signals
     that mean this connection should close after the response.

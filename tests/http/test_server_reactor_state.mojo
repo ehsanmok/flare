@@ -19,7 +19,7 @@ from flare.net import SocketAddr
 from flare.tcp import TcpStream, TcpListener
 from flare.http.request import Request
 from flare.http.response import Response
-from flare.http import precompute_response, WsUpgrade
+from flare.http import ok, precompute_response, WsUpgrade
 from flare.http.handler import FnHandler
 from flare.http.server import ServerConfig
 from flare.http._server_reactor_impl import (
@@ -598,6 +598,42 @@ def test_ws_426_closes_connection() raises:
     var step = ch.on_writable(cfg)
     assert_true(step.done)
     assert_false(step.want_read)
+    client.close()
+
+
+def _url_handler(req: Request) raises -> Response:
+    return ok(req.url)
+
+
+def test_pipelined_requests_flush_together_in_order() raises:
+    """Whole requests buffered behind the first are served in the same pass
+    and their responses queued in order, so one flush answers them all. A
+    request carrying Upgrade ends the batch and waits for the flush."""
+    var r = Reactor()
+    var listener = TcpListener.bind(SocketAddr.localhost(0))
+    var port = listener.local_addr().port
+    var client = TcpStream.connect(SocketAddr.localhost(port))
+    var server = listener.accept()
+    server._socket.set_nonblocking(True)
+    listener.close()
+    var ch = ConnHandle(server^)
+    var cfg = _default_config()
+    var req = _bytes_of(
+        "GET /a HTTP/1.1\r\nHost: a\r\n\r\n"
+        "GET /b HTTP/1.1\r\nHost: a\r\n\r\n"
+        "GET /c HTTP/1.1\r\nHost: a\r\n\r\n"
+        "GET /d HTTP/1.1\r\nHost: a\r\nUpgrade: h2c\r\n\r\n"
+    )
+    _ = client.write(Span[UInt8](req))
+    _ = _drive_readable(ch, r, _url_handler, cfg)
+    assert_equal(ch.state, STATE_WRITING)
+    var wire = String(unsafe_from_utf8=Span[UInt8](ch.write_buf))
+    assert_equal(wire.count("HTTP/1.1 200"), 3)
+    var a = wire.find("\r\n\r\n/a")
+    var b = wire.find("\r\n\r\n/b")
+    var c = wire.find("\r\n\r\n/c")
+    assert_true(a >= 0 and a < b and b < c)
+    assert_false("/d" in wire)
     client.close()
 
 

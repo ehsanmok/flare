@@ -3706,6 +3706,9 @@ from test_server_reactor_state import (
     test_ws_426_closes_connection as test_server_reactor_state__test_ws_426_closes_connection,
 )
 from test_server_reactor_state import (
+    test_pipelined_requests_flush_together_in_order as test_server_reactor_state__test_pipelined_requests_flush_together_in_order,
+)
+from test_server_reactor_state import (
     test_handler_error_for_head_has_no_body as test_server_reactor_state__test_handler_error_for_head_has_no_body,
 )
 from test_server_reactor_state import (
@@ -6494,6 +6497,9 @@ def main() raises:
     suite.test[test_server_reactor_state__test_step_result_defaults]()
     suite.test[test_server_reactor_state__test_static_head_queues_head_only]()
     suite.test[test_server_reactor_state__test_ws_426_closes_connection]()
+    suite.test[
+        test_server_reactor_state__test_pipelined_requests_flush_together_in_order
+    ]()
     suite.test[
         test_server_reactor_state__test_handler_error_for_head_has_no_body
     ]()

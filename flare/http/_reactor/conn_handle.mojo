@@ -89,6 +89,7 @@ from .keepalive_scan import (
     _is_connection,
     _is_content_length,
     _is_date,
+    _has_header_line,
     _monotonic_ms,
     _wants_close,
 )
@@ -136,6 +137,11 @@ The batch caps bound bytes per pass; this bounds passes per writable
 edge, so one connection with an endless source cannot hold the worker.
 ``STREAM_EDGE_PASSES x STREAM_BATCH_CHUNKS`` chunks is the per-edge
 ceiling, after which the connection re-arms and yields to its peers."""
+
+comptime PIPELINE_BATCH_REQUESTS: Int = 32
+"""Pipelined requests already in ``read_buf`` served before one flush."""
+comptime PIPELINE_BATCH_BYTES: Int = 64 * 1024
+"""Response bytes a pipelined batch may hold before it is flushed."""
 
 
 # ── Connection handle ─────────────────────────────────────────────────────────
@@ -259,6 +265,9 @@ struct ConnHandle(Movable):
     """Serialised response bytes; drained by successive send calls."""
     var write_pos: Int
     """Number of bytes of ``write_buf`` already sent."""
+    var batch_out: List[UInt8]
+    """Responses to earlier pipelined requests of the current batch, sent
+    ahead of ``write_buf`` in the same flush."""
     var keepalive_count: Int
     """Number of requests already served on this keep-alive connection."""
     var idle_timer_id: UInt64
@@ -413,6 +422,7 @@ struct ConnHandle(Movable):
         self.continue_pending = List[UInt8]()
         self.write_buf = List[UInt8]()
         self.write_pos = 0
+        self.batch_out = List[UInt8]()
         self.keepalive_count = 0
         self.idle_timer_id = UInt64(0)
         self.should_close = False
@@ -842,6 +852,25 @@ struct ConnHandle(Movable):
     ](mut self, ref handler: H, config: ServerConfig,) raises -> StepResult:
         """Drive the state machine on a readable event.
 
+        Serves the request just read, then every further whole request
+        already buffered behind it (HTTP/1.1 pipelining), up to the batch
+        caps, so the responses leave in one flush.
+        """
+        var step = self._serve_next(handler, config, True)
+        var served = 1
+        while served < PIPELINE_BATCH_REQUESTS and self._batch_continues():
+            step = self._serve_next(handler, config, False)
+            served += 1
+        self._merge_batch()
+        return step
+
+    def _serve_next[
+        H: Handler
+    ](
+        mut self, ref handler: H, config: ServerConfig, drain: Bool
+    ) raises -> StepResult:
+        """Read (when ``drain``), parse and serve one request.
+
         Consumes as much as the non-blocking socket makes available per
         call. Transitions to ``STATE_WRITING`` when the full request is
         parsed and the handler has returned.
@@ -849,6 +878,8 @@ struct ConnHandle(Movable):
         Args:
             handler: Request -> Response callback.
             config: Server configuration (limits + timeouts).
+            drain: Read from the socket first; False for a request
+                already buffered behind the previous one.
 
         Returns:
             A ``StepResult`` describing the new reactor-interest state.
@@ -858,9 +889,10 @@ struct ConnHandle(Movable):
                 want_read=False, want_write=self.state == STATE_WRITING
             )
 
-        var drained = self._drain_recv[flips_cancel_on_close=False](config)
-        if drained:
-            return drained.value()
+        if drain:
+            var drained = self._drain_recv[flips_cancel_on_close=False](config)
+            if drained:
+                return drained.value()
         var pending = self._check_request_complete(
             config, body_timeout_ms=config.read_body_timeout_ms
         )
@@ -1292,16 +1324,30 @@ struct ConnHandle(Movable):
         call, scans for the end-of-headers marker, discards the
         declared body bytes (if any), and queues the pre-encoded
         ``StaticResponse`` bytes into ``write_buf``. The parser never
-        constructs a ``Request``; no handler is called.
+        constructs a ``Request``; no handler is called. Pipelined
+        requests already buffered are answered in the same flush, as on
+        the handler path.
         """
+        var step = self._serve_static_next(resp, config, True)
+        var served = 1
+        while served < PIPELINE_BATCH_REQUESTS and self._batch_continues():
+            step = self._serve_static_next(resp, config, False)
+            served += 1
+        self._merge_batch()
+        return step
+
+    def _serve_static_next(
+        mut self, resp: StaticResponse, config: ServerConfig, drain: Bool
+    ) raises -> StepResult:
         if self.state != STATE_READING:
             return StepResult(
                 want_read=False, want_write=self.state == STATE_WRITING
             )
 
-        var drained = self._drain_recv[flips_cancel_on_close=False](config)
-        if drained:
-            return drained.value()
+        if drain:
+            var drained = self._drain_recv[flips_cancel_on_close=False](config)
+            if drained:
+                return drained.value()
         var pending = self._check_request_complete(config)
         if pending:
             return pending.value()
@@ -1375,6 +1421,51 @@ struct ConnHandle(Movable):
                 StepResult(want_read=False, want_write=False, done=True)
             )
         return Optional[StepResult]()
+
+    def _batch_continues(mut self) -> Bool:
+        """Whether the response just queued may wait for the next buffered
+        request's, and if so set it aside in ``batch_out``.
+
+        Only a plain buffered response qualifies: not one that closes the
+        connection, streams, or is still to finish an interim write, and
+        the next request must be whole and carry no ``Upgrade`` (a
+        WebSocket handshake writes on the socket itself, ahead of anything
+        still queued here).
+        """
+        if (
+            self.state != STATE_WRITING
+            or self.write_pos != 0
+            or self.should_close
+            or self.body_src
+            or self._h2c_upgrade_pending
+            or len(self.continue_pending) > 0
+            or len(self.batch_out) + len(self.write_buf) > PIPELINE_BATCH_BYTES
+        ):
+            return False
+        self.state = STATE_READING
+        if not self.has_buffered_request():
+            self.state = STATE_WRITING
+            return False
+        var end = self.headers_end
+        if end < 0:
+            end = _find_crlfcrlf(self.read_buf, 0)
+        if _has_header_line(self.read_buf, end, "upgrade:"):
+            self.state = STATE_WRITING
+            return False
+        self.batch_out.extend(Span[UInt8, _](self.write_buf))
+        self.write_buf.clear()
+        return True
+
+    def _merge_batch(mut self):
+        """Put the batch's earlier responses ahead of the last one."""
+        if len(self.batch_out) == 0:
+            return
+        self.batch_out.extend(
+            Span[UInt8, _](self.write_buf)[self.write_pos : len(self.write_buf)]
+        )
+        swap(self.write_buf, self.batch_out)
+        self.write_pos = 0
+        self.batch_out.clear()
 
     def has_buffered_request(self) -> Bool:
         """True when ``read_buf`` already holds a whole request that has
