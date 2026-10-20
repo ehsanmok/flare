@@ -6,6 +6,7 @@ import Flare.L1_Encoding.Huffman
 import Flare.Kernels.BufLedger
 import Flare.L3_Protocol.H1.Chunked
 import Oracle.H2
+import Oracle.Ws
 /-!
 # Oracle targets
 
@@ -133,7 +134,8 @@ def targets : List Target := [
     spec := some fun b => s!"OK:{(Huffman.encode b).length}", specMax := 24 },
   { name := "bufring_ledger.trace", impl := ledgerTrace false, spec := some (ledgerTrace true) },
   { name := "h1_chunked.resume", impl := chunkedResume },
-  { name := "h2_conn.frames", impl := Oracle.H2.frames }
+  { name := "h2_conn.frames", impl := Oracle.H2.frames },
+  { name := "ws_protocol.trace", impl := Oracle.Ws.trace }
 ]
 
 def find? (name : String) : Option Target := targets.find? (·.name == name)

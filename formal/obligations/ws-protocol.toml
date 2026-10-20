@@ -1,0 +1,26 @@
+# Verified kernel: the RFC 6455 rules every WebSocket server carrier enforces.
+id = "ws-protocol"
+summary = "Client frames on HTTP/1.1, HTTP/2 and HTTP/3 WebSocket connections are held to RFC 6455 by one sans-I/O core, and a peer that does not read cannot grow the send queue past its bound."
+
+kernel = [
+    "flare/ws/protocol.mojo#WsProtocol.next_event+WsProtocol._on_frame+WsProtocol._message+WsProtocol._fail+WsProtocol.close+WsProtocol._send+_close_reply_payload+_valid_close_code",
+]
+call_sites = [
+    "flare/http/_ws_conn_handle.mojo#WsConnHandle._pump",
+    "flare/ws/server_h2.mojo#WsOverH2ServerStream.try_pull_frame",
+    "flare/ws/server_h3.mojo#WsOverH3ServerStream.try_pull_frame",
+]
+
+model = "Flare/Kernels/WsProtocol.lean"
+specs = ["SafeRun", "MaskRule", "SequenceRule", "CapRule", "Utf8Rule", "CloseReplyRule", "OutboxBound", "specCloseReply"]
+theorems = ["run_safe", "mask_rule", "sequence_rule", "cap_rule", "utf8_rule", "close_reply_rule", "replyBody_code", "outbox_bound"]
+difftest = ["ws_protocol.trace"]
+tests = ["tests/ws/test_ws_protocol.mojo", "tests/ws/test_ws_reactor.mojo", "tests/ws/test_ws_h2_roundtrip.mojo", "tests/h3/test_h3_websocket.mojo"]
+
+status = "proved"
+
+out_of_scope = [
+    "The frame decoder (WsFrame.decode_one): the model takes its output, with the guarantees it makes stated as the WF hypothesis (payload within max_message, control payloads within 125 bytes and unfragmented). Its own model is Flare.L3.Ws.",
+    "Application sends (send_text / send_binary) and close(): they go through the same _send check, so the outbox bound becomes max_outbox plus the largest application frame plus the 4-byte CLOSE; the theorem covers frames the core queues itself.",
+    "consumed(): the carriers drain the outbox, which only lowers the queued length the bound is about.",
+]

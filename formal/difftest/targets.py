@@ -99,6 +99,16 @@ TARGETS = {
         gen="bytes",
         max_len=48,
     ),
+    "ws_protocol.trace": dict(
+        driver="dt_ws",
+        symbols=[
+            "flare/ws/protocol.mojo#WsProtocol.next_event+WsProtocol._on_frame+WsProtocol._message+WsProtocol._fail+WsProtocol.close+WsProtocol._send+_close_reply_payload+_valid_close_code",
+        ],
+        models=["Flare/Kernels/WsProtocol.lean"],
+        fuzz=["fuzz_ws_protocol.mojo"],
+        gen="bytes",
+        max_len=32,
+    ),
     "h1_chunked.resume": dict(
         driver="dt_h1",
         symbols=["flare/http/proto/chunked.mojo#scan_chunked_resume+_hex_val+_has_lf+CHUNK_LINE_MAX"],
