@@ -564,6 +564,9 @@ from test_stream_slab import (
 from test_stream_slab import (
     test_stress_roundtrip as test_stream_slab__test_stress_roundtrip,
 )
+from test_stream_slab import (
+    test_active_and_ready_track_every_write as test_stream_slab__test_active_and_ready_track_every_write,
+)
 
 
 def main() raises:
@@ -950,4 +953,5 @@ def main() raises:
     suite.test[test_stream_slab__test_pop_clears_slot]()
     suite.test[test_stream_slab__test_items_lists_everything]()
     suite.test[test_stream_slab__test_stress_roundtrip]()
+    suite.test[test_stream_slab__test_active_and_ready_track_every_write]()
     suite^.run()

@@ -2351,6 +2351,12 @@ from test_ok_json_typed import (
 from test_ok_json_typed import (
     test_ok_json_value_sets_content_type as test_ok_json_typed__test_ok_json_value_sets_content_type,
 )
+from test_ok_json_typed import (
+    test_ok_json_of_struct as test_ok_json_typed__test_ok_json_of_struct,
+)
+from test_ok_json_typed import (
+    test_ok_json_value_parsed_with_escapes as test_ok_json_typed__test_ok_json_value_parsed_with_escapes,
+)
 from test_parse_minimal import (
     test_parses_bench_shape_get_request as test_parse_minimal__test_parses_bench_shape_get_request,
 )
@@ -5798,6 +5804,8 @@ def main() raises:
     suite.test[test_ok_json_typed__test_ok_json_value_primitive_bool]()
     suite.test[test_ok_json_typed__test_ok_json_string_overload_still_works]()
     suite.test[test_ok_json_typed__test_ok_json_value_sets_content_type]()
+    suite.test[test_ok_json_typed__test_ok_json_of_struct]()
+    suite.test[test_ok_json_typed__test_ok_json_value_parsed_with_escapes]()
     # tests/http/test_parse_minimal.mojo
     suite.test[test_parse_minimal__test_parses_bench_shape_get_request]()
     suite.test[test_parse_minimal__test_parses_post_with_body]()
