@@ -40,6 +40,7 @@ from flare.runtime._thread import (
     _OpaquePtr,
     _null_ptr,
     current_thread_id,
+    pin_target_cpu,
     restore_thread_affinity,
     save_thread_affinity,
 )
@@ -181,7 +182,39 @@ def _pin_then_restore(arg: _OpaquePtr) -> _OpaquePtr:
     return _null_ptr()
 
 
+def _pin_target_follows_mask(arg: _OpaquePtr) -> _OpaquePtr:
+    """Narrow this thread to one allowed CPU; every worker index must then
+    map to it. cells[0] = 1 when it does (or the OS has no masks), 2 if not.
+    """
+    var a = Int(arg)
+    var saved = save_thread_affinity()
+    if saved == 0:
+        _store(a, 0, 1)
+        return _null_ptr()
+    var only = pin_target_cpu(1)
+    var ok = True
+    try:
+        ThreadHandle(_thread_id=current_thread_id()).pin_to_cpu(only)
+    except:
+        ok = False
+    for idx in range(4):
+        ok = ok and pin_target_cpu(idx) == only
+    restore_thread_affinity(saved)
+    _store(a, 0, Int64(1 if ok else 2))
+    return _null_ptr()
+
+
 # ── Tests ───────────────────────────────────────────────────────────────────
+
+
+def test_pin_target_stays_inside_the_allowed_cpus() raises:
+    var cells = _new_cells(1)
+    var h = ThreadHandle.spawn[_pin_target_follows_mask](
+        _OpaquePtr(unsafe_from_address=cells)
+    )
+    h.join()
+    assert_equal(Int(_load(cells, 0)), 1)
+    _free_cells(cells)
 
 
 def test_pinned_worker_gets_its_mask_back() raises:

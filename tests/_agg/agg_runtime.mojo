@@ -578,6 +578,9 @@ from test_syscall_ffi import (
     test_set_nonblocking_toggle_does_not_raise as test_syscall_ffi__test_set_nonblocking_toggle_does_not_raise,
 )
 from test_thread_engine import (
+    test_pin_target_stays_inside_the_allowed_cpus as test_thread_engine__test_pin_target_stays_inside_the_allowed_cpus,
+)
+from test_thread_engine import (
     test_pinned_worker_gets_its_mask_back as test_thread_engine__test_pinned_worker_gets_its_mask_back,
 )
 from test_thread_engine import (
@@ -1099,6 +1102,9 @@ def main() raises:
     suite.test[test_syscall_ffi__test_kevent_on_invalid_fd_returns_negative]()
     suite.test[test_syscall_ffi__test_set_nonblocking_toggle_does_not_raise]()
     # tests/runtime/test_thread_engine.mojo
+    suite.test[
+        test_thread_engine__test_pin_target_stays_inside_the_allowed_cpus
+    ]()
     suite.test[test_thread_engine__test_pinned_worker_gets_its_mask_back]()
     suite.test[test_thread_engine__test_spawn_is_asyncrt_task]()
     suite.test[test_thread_engine__test_spawn_os_is_always_os_thread]()

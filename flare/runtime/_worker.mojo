@@ -14,7 +14,7 @@ from ..net import SocketAddr
 
 from ._thread import (
     ThreadHandle,
-    num_cpus,
+    pin_target_cpu,
     restore_thread_affinity,
     save_thread_affinity,
     _OpaquePtr,
@@ -132,7 +132,7 @@ def _worker_entry[F: Frontend](arg: _OpaquePtr) -> _OpaquePtr:
     if ctx_ptr[].pin_cores:
         saved_mask = save_thread_affinity()
         try:
-            var cpu = ctx_ptr[].worker_idx % num_cpus()
+            var cpu = pin_target_cpu(ctx_ptr[].worker_idx)
             var self_handle = ThreadHandle(
                 _thread_id=external_call["pthread_self", UInt64]()
             )

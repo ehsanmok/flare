@@ -424,6 +424,31 @@ def restore_thread_affinity(saved: Int):
     buf.unsafe_free()
 
 
+def pin_target_cpu(worker_idx: Int) -> Int:
+    """The CPU worker ``worker_idx`` pins to: the ``worker_idx``-th CPU of
+    the calling thread's allowed set, wrapping round it.
+
+    ``worker_idx % num_cpus()`` ignored the allowed set, so a server
+    started under ``taskset`` pinned workers to CPUs outside it, and one
+    in a cgroup cpuset had those pins fail and run unpinned.
+    """
+    comptime if CompilationTarget.is_linux():
+        var buf = alloc(Layout[UInt8](count=_CPUSET_BYTES)).unsafe_leak()
+        unsafe_memset_zero(buf, _CPUSET_BYTES)
+        var rc = external_call[
+            "sched_getaffinity", c_int, c_int, c_size_t, _OpaquePtr
+        ](c_int(0), c_size_t(_CPUSET_BYTES), buf)
+        var allowed = List[Int]()
+        if rc == c_int(0):
+            for cpu in range(_CPUSET_BYTES * 8):
+                if (Int(buf[unsafe_offset=cpu // 8]) >> (cpu % 8)) & 1:
+                    allowed.append(cpu)
+        buf.unsafe_free()
+        if len(allowed) > 0:
+            return allowed[worker_idx % len(allowed)]
+    return worker_idx % num_cpus()
+
+
 # ── pthread_self convenience ─────────────────────────────────────────────────
 
 
