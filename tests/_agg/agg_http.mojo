@@ -882,6 +882,9 @@ from test_encoding_decode import (
 from test_encoding_decode import (
     test_garbage_deflate_is_an_error as test_encoding_decode__test_garbage_deflate_is_an_error,
 )
+from test_encoding_decode import (
+    test_codec_libraries_are_opened_once as test_encoding_decode__test_codec_libraries_are_opened_once,
+)
 from test_ergonomics import (
     test_b64_encode_empty as test_ergonomics__test_b64_encode_empty,
 )
@@ -5054,6 +5057,7 @@ def main() raises:
         test_encoding_decode__test_output_exactly_at_the_cap_is_allowed
     ]()
     suite.test[test_encoding_decode__test_garbage_deflate_is_an_error]()
+    suite.test[test_encoding_decode__test_codec_libraries_are_opened_once]()
     # tests/http/test_ergonomics.mojo
     suite.test[test_ergonomics__test_b64_encode_empty]()
     suite.test[test_ergonomics__test_b64_encode_short]()

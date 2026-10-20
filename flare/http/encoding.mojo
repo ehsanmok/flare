@@ -35,7 +35,7 @@ from std.os import getenv
 from std.ffi import OwnedDLHandle, c_int
 from std.memory import Pointer, unsafe_memcpy
 
-from ..utils.dylib import find_flare_lib, dl_sym
+from ..utils.dylib import find_flare_lib, dl_sym, pinned_flare_lib
 
 
 comptime DEFAULT_MAX_DECOMPRESSED_BYTES: Int = 16 * 1024 * 1024
@@ -175,7 +175,7 @@ def _decompress_impl(
     """
     if len(data) == 0:
         return List[UInt8]()
-    var lib = OwnedDLHandle(_find_flare_zlib_lib())
+    ref lib = pinned_flare_lib["zlib"]()[]
     return _do_decompress(lib, data, window_bits, max_out)
 
 
@@ -227,7 +227,7 @@ def _decompress_deflate_impl(
     """
     if len(data) == 0:
         return List[UInt8]()
-    var lib = OwnedDLHandle(_find_flare_zlib_lib())
+    ref lib = pinned_flare_lib["zlib"]()[]
     return _do_decompress_deflate(lib, data, max_out)
 
 
@@ -338,7 +338,7 @@ def compress_gzip(data: Span[UInt8, _], level: Int = 6) raises -> List[UInt8]:
     """
     if len(data) == 0:
         return List[UInt8]()
-    var lib = OwnedDLHandle(_find_flare_zlib_lib())
+    ref lib = pinned_flare_lib["zlib"]()[]
     return _do_compress(lib, data, c_int(level))
 
 
@@ -447,7 +447,7 @@ def compress_brotli(
     """
     if len(data) == 0:
         return List[UInt8]()
-    var lib = OwnedDLHandle(_find_flare_brotli_lib())
+    ref lib = pinned_flare_lib["brotli"]()[]
     return _do_compress_brotli(lib, data, c_int(quality))
 
 
@@ -522,5 +522,5 @@ def decompress_brotli(
     """
     if len(data) == 0:
         return List[UInt8]()
-    var lib = OwnedDLHandle(_find_flare_brotli_lib())
+    ref lib = pinned_flare_lib["brotli"]()[]
     return _do_decompress_brotli(lib, data, max_out)

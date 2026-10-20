@@ -8,9 +8,12 @@ input once, grows its own buffer, and requires Z_STREAM_END.
 """
 
 from std.testing import assert_equal, assert_true, TestSuite
+from flare.utils.dylib import pinned_flare_lib
 
 from flare.http.encoding import (
+    compress_brotli,
     compress_gzip,
+    decode_content,
     decompress_deflate,
     decompress_gzip,
 )
@@ -73,6 +76,24 @@ def test_garbage_deflate_is_an_error() raises:
     except:
         raised = True
     assert_true(raised)
+
+
+def test_codec_libraries_are_opened_once() raises:
+    """Every call shares one handle per shim instead of a dlopen each."""
+    var data = List[UInt8](length=4096, fill=UInt8(97))
+    _ = compress_gzip(Span[UInt8, _](data))
+    _ = compress_brotli(Span[UInt8, _](data))
+    var z = Int(pinned_flare_lib["zlib"]())
+    var b = Int(pinned_flare_lib["brotli"]())
+    _ = compress_gzip(Span[UInt8, _](data))
+    _ = compress_brotli(Span[UInt8, _](data))
+    assert_equal(Int(pinned_flare_lib["zlib"]()), z)
+    assert_equal(Int(pinned_flare_lib["brotli"]()), b)
+    assert_true(z != b)
+    var round = decode_content(
+        Span[UInt8, _](compress_brotli(Span[UInt8, _](data))), "br"
+    )
+    assert_equal(len(round), 4096)
 
 
 def main() raises:

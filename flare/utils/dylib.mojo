@@ -30,8 +30,7 @@ flare bundles four FFI shims under ``$CONDA_PREFIX/lib/``:
   br``.
 * ``libflare_fs.so`` -- ``access(2)`` + ``open(2)`` +
   ``read(2)`` + ``close(2)`` thin wrappers consumed by
-  :mod:`flare.http.fs` (``FileServer`` static-file path) and
-  :mod:`flare.http.middleware._file_exists`.
+  :mod:`flare.http.fs` (``FileServer`` static-file path).
 
 Search order (used by every call site):
 1. ``$FLARE_LIB_DIR/libflare_<name>.so`` -- when ``FLARE_LIB_DIR`` is
@@ -64,8 +63,8 @@ Public API
 """
 
 from std.os import getenv
-from std.ffi import OwnedDLHandle
-from std.memory import Pointer
+from std.ffi import OwnedDLHandle, _get_global
+from std.memory import Layout, OptionalPointer, Pointer, alloc
 
 
 def dl_sym[
@@ -137,3 +136,44 @@ def find_flare_lib(name: String) -> String:
     bare += name
     bare += ".so"
     return bare^
+
+
+def _pinned_init[
+    name: StaticString
+]() -> OptionalPointer[NoneType, UntrackedOrigin[mut=True]]:
+    try:
+        var lib = OwnedDLHandle(find_flare_lib(name))
+        var cell = alloc(Layout[OwnedDLHandle](count=1)).unsafe_leak()
+        cell.unsafe_write(lib^)
+        return Pointer[NoneType, UntrackedOrigin[mut=True]](
+            unsafe_from_address=Int(cell)
+        )
+    except:
+        return OptionalPointer[NoneType, UntrackedOrigin[mut=True]]()
+
+
+def _pinned_keep(p: OptionalPointer[NoneType, UntrackedOrigin[mut=True]]):
+    pass
+
+
+def pinned_flare_lib[
+    name: StaticString
+]() raises -> Pointer[OwnedDLHandle, MutUntrackedOrigin]:
+    """The process-wide handle to ``libflare_<name>.so``, opened once.
+
+    A per-call ``OwnedDLHandle`` costs a dlopen, symbol lookups and a
+    dlclose under the loader lock every worker shares, and unmaps the
+    library between calls when nothing else holds it. This one is opened
+    on first use and never closed.
+
+    Raises:
+        Error: If the library cannot be loaded.
+    """
+    var p = _get_global[
+        "flare_dylib_" + name, _pinned_init[name], _pinned_keep
+    ]()
+    if not p:
+        raise Error("flare: cannot load libflare_" + String(name) + ".so")
+    return Pointer[OwnedDLHandle, MutUntrackedOrigin](
+        unsafe_from_address=Int(p.value())
+    )

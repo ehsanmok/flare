@@ -22,7 +22,6 @@ stays monomorphised — no virtual dispatch, no allocation per
 request.
 """
 
-from std.ffi import OwnedDLHandle, c_int
 from std.os import getenv
 from std.time import perf_counter_ns
 
@@ -34,7 +33,7 @@ from .encoding import (
 from .handler import Handler
 from .request import Request
 from .response import Response
-from ..utils.dylib import find_flare_lib, dl_sym
+from ..utils.dylib import pinned_flare_lib
 
 
 # ── Logger ─────────────────────────────────────────────────────────────────
@@ -301,52 +300,17 @@ def negotiate_encoding(accept: String, brotli_ok: Bool) -> _AcceptEncodingPick:
 
 
 def _brotli_available() -> Bool:
-    """Best-effort check that ``libflare_brotli.so`` is loadable.
+    """Whether ``libflare_brotli.so`` loads.
 
-    Probes the canonical path resolved by
-    :func:`flare.utils.dylib.find_flare_lib` (``CONDA_PREFIX``
-    ↦ ``build/`` fallback). Pure-syscall (``access(2)``) -- no
-    Mojo OwnedDLHandle hot path, so it's safe to call once per
-    request.
-    """
-    return _file_exists(find_flare_lib("brotli"))
-
-
-def _flare_fs_access(imm lib: OwnedDLHandle, addr: Int) raises -> c_int:
-    """Invoke ``flare_fs_access`` while ``lib`` is borrowed by the caller.
-
-    Taking ``lib`` as ``read`` ties the dylib's lifetime to the caller's
-    frame, so Mojo's ASAP destructor cannot drop the handle (and thus
-    ``dlclose`` it) before the resolved function pointer is invoked.
-    Without this, ``_file_exists`` segfaults inside the runtime call
-    helper on macOS arm64: the function-local ``OwnedDLHandle`` is
-    reclaimed after ``get_function`` and the cached pointer dangles
-    into unmapped memory by the time we call it.
-    """
-    var fn_access = dl_sym[def(Int) thin abi("C") -> c_int](
-        lib, "flare_fs_access"
-    )
-    return fn_access(addr)
-
-
-def _file_exists(path: String) -> Bool:
-    """Return whether ``path`` exists.
-
-    Routes through ``libflare_fs.so`` (``flare_fs_access``) so the
-    middleware does not register conflicting ``access(2)`` external_call
-    signatures with the stdlib.
+    The answer comes from the pinned process-wide handle, so after the
+    first call it costs a global-table lookup, not a syscall. It also
+    finds the library wherever the loader would, where the old
+    ``access(2)`` probe of the resolved path missed a library found on
+    the loader's search path.
     """
     try:
-        var lib = OwnedDLHandle(find_flare_lib("fs"))
-        var n = path.byte_length()
-        var c = List[UInt8](length=n + 1, fill=UInt8(0))
-        var src = path.unsafe_ptr()
-        for i in range(n):
-            c[i] = src[unsafe_offset=i]
-        var addr = Int(c.unsafe_ptr())
-        var rc = Int(_flare_fs_access(lib, addr))
-        _ = c^
-        return rc == 0
+        _ = pinned_flare_lib["brotli"]()
+        return True
     except:
         return False
 
