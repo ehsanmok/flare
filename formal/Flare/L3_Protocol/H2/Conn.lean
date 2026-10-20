@@ -309,7 +309,7 @@ def isDigitB (b : UInt8) : Bool := 48 ≤ b && b ≤ 57
 def digitsVal (v : Bytes) : Nat := v.foldl (fun a b => a * 10 + (b.toNat - 48)) 0
 
 /-- Loop state: `(bad, status, regular)`.
-mirrors flare/http2/state.mojo#Connection._commit_header_block sha=f70ec5a60a35 at=ea1b9282 -/
+mirrors flare/http2/state.mojo#Connection._commit_header_block sha=df796e7762c8 at=7ae5abc2 -/
 def cliLoop1 (isTr : Bool) : List Header → Nat → Bool → Bool × Nat
   | [], st, _ => (false, st)
   | h :: t, st, reg =>
@@ -323,7 +323,7 @@ def cliLoop1 (isTr : Bool) : List Header → Nat → Bool → Bool × Nat
     else cliLoop1 isTr t st true
 
 /-- The client's own content-length scan (904-928): `true` = bad.
-mirrors flare/http2/state.mojo#Connection._commit_header_block sha=f70ec5a60a35 at=ea1b9282 -/
+mirrors flare/http2/state.mojo#Connection._commit_header_block sha=df796e7762c8 at=7ae5abc2 -/
 def cliCLBad : List Header → Int → Bool
   | [], _ => false
   | h :: t, d =>
@@ -336,7 +336,7 @@ def cliCLBad : List Header → Int → Bool
 
 inductive CRes | bad | info | ok (bodyAllowed : Bool)
 
-/-- mirrors flare/http2/state.mojo#Connection._commit_header_block sha=f70ec5a60a35 at=ea1b9282 (lowercase test on
+/-- mirrors flare/http2/state.mojo#Connection._commit_header_block sha=df796e7762c8 at=7ae5abc2 (lowercase test on
 ASCII letters only; Mojo's `String.lower` also folds non-ASCII letters). -/
 def clientCheck (hs : List Header) (isTr es bodyAllowed : Bool) : CRes :=
   let (bad, st) := cliLoop1 isTr hs 0 false
@@ -356,7 +356,7 @@ def hlSize (hs : List Header) : Nat := (hs.map (fun h => h.name.length + h.value
 /-- The tail of `_commit_header_block` after validation (958-1003). A
 malformed content-length (-2) is answered with RST_STREAM
 (PROTOCOL_ERROR) and closes the stream.
-mirrors flare/http2/state.mojo#Connection._commit_header_block+Connection.handle_frame sha=8b0f6cc11f78 at=268ccb85 -/
+mirrors flare/http2/state.mojo#Connection._commit_header_block+Connection.handle_frame sha=a8cbd317463b at=7ae5abc2 -/
 def commitTail (c : Conn) (k : Nat) (s : Stream) (isTr es : Bool) (hdrs : List Header) :
     Conn × List Out :=
   let cl := if isTr then s.contentLength
@@ -373,7 +373,7 @@ def commitTail (c : Conn) (k : Nat) (s : Stream) (isTr es : Bool) (hdrs : List H
     let st := if c.isClient && s.state == .hcl then s.state else .open_
     (put c k { s with state := st }, [])
 
-/-- mirrors flare/http2/state.mojo#Connection._commit_header_block sha=f70ec5a60a35 at=ea1b9282 -/
+/-- mirrors flare/http2/state.mojo#Connection._commit_header_block sha=df796e7762c8 at=7ae5abc2 -/
 def commit (dec : Dec) (c : Conn) (k : Nat) : Conn × List Out :=
   let block := c.block
   let es := c.blockES
@@ -784,7 +784,7 @@ def send (c : Conn) (k n : Nat) : Conn × List Out :=
 
 /-- One-shot response: only when the body fits both windows, otherwise
 flare takes the `queue_stream_data` path (modelled by `send`).
-mirrors flare/http2/server.mojo#Http2Connection.emit_response sha=58edf26bbad4 at=59bda50f -/
+mirrors flare/http2/server.mojo#Http2Connection.emit_response sha=203ddd952dca at=7ae5abc2 -/
 def respond (c : Conn) (k n : Nat) : Conn × List Out :=
   match get c k with
   | none => (c, [])

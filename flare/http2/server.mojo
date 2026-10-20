@@ -532,6 +532,7 @@ struct Http2Connection(Defaultable, Movable):
             raise Error("h2: take_request on unknown stream")
         var s = self.conn.streams[sid].copy()
         var req = Request(method="GET", url="/", version="HTTP/2")
+        req.headers.reserve(s.initial_header_count)
         # Fields are appended, not set: a repeated field keeps every
         # value, as on HTTP/1.1. ``set`` kept only the last, and browsers
         # send cookies as one field per crumb (RFC 9113 sec 8.2.3), so a
@@ -633,7 +634,7 @@ struct Http2Connection(Defaultable, Movable):
         # Build HpackHeader list from the response's HeaderMap.
         # HTTP/2 forbids ``Connection`` / ``Transfer-Encoding`` / ``Keep-Alive``
         # / ``Proxy-Connection`` / ``Upgrade`` per RFC 9113 §8.2.2.
-        var hdrs = List[HpackHeader]()
+        var hdrs = List[HpackHeader](capacity=len(resp.headers._keys))
         for i in range(len(resp.headers._keys)):
             var k = resp.headers._keys[i]
             var v = resp.headers._values[i]

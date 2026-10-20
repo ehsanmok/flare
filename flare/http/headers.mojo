@@ -131,6 +131,11 @@ struct HeaderMap(Movable, Writable):
         self._keys = List[String]()
         self._values = List[String]()
 
+    def reserve(mut self, n: Int):
+        """Make room for ``n`` fields without regrowing."""
+        self._keys.reserve(n)
+        self._values.reserve(n)
+
     def set_unchecked(mut self, key: String, lk: String, value: String):
         """Set a header without injection checks.
 

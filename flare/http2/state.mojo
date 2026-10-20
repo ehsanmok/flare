@@ -1025,6 +1025,7 @@ struct Connection(Copyable, Defaultable):
                 self._put_stream(s^)
                 return out^
 
+        s.headers.reserve(len(s.headers) + len(hdrs))
         for j in range(len(hdrs)):
             s.headers.append(hdrs[j].copy())
             # RFC 8441 sec 4: capture ``:protocol`` on Extended CONNECT

@@ -383,7 +383,7 @@ struct HpackDecoder(Copyable, Defaultable):
                 dynamic table out of step with the peer, so the caller
                 must end the connection.
         """
-        var headers = List[HpackHeader]()
+        var headers = List[HpackHeader](capacity=16)
         var off = 0
         var decoded = 0
         # Fields [0, charged) are already counted against the budget. A
@@ -521,7 +521,14 @@ struct HpackEncoder(Copyable, Defaultable):
             out_buf.append(src[unsafe_offset=i])
 
     def encode(self, headers: Span[HpackHeader, _]) -> List[UInt8]:
-        var out = List[UInt8]()
+        var need = 0
+        for i in range(len(headers)):
+            need += (
+                headers[i].name.byte_length()
+                + headers[i].value.byte_length()
+                + 4
+            )
+        var out = List[UInt8](capacity=need)
         ref static = self.static
         for i in range(len(headers)):
             var h = headers[i].copy()
