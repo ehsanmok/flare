@@ -319,6 +319,9 @@ from test_h2_per_stream_cancel import (
     test_on_readable_cancel_dispatches_through_cancel_handler as test_h2_per_stream_cancel__test_on_readable_cancel_dispatches_through_cancel_handler,
 )
 from test_h2_server import (
+    test_long_lived_connection_keeps_a_bounded_stream_table as test_h2_server__test_long_lived_connection_keeps_a_bounded_stream_table,
+)
+from test_h2_server import (
     test_alpn_dispatch as test_h2_server__test_alpn_dispatch,
 )
 from test_h2_server import (
@@ -568,6 +571,9 @@ from test_stream_slab import (
     test_items_lists_everything as test_stream_slab__test_items_lists_everything,
 )
 from test_stream_slab import (
+    test_ids_lists_both_tiers as test_stream_slab__test_ids_lists_both_tiers,
+)
+from test_stream_slab import (
     test_stress_roundtrip as test_stream_slab__test_stress_roundtrip,
 )
 from test_stream_slab import (
@@ -797,6 +803,9 @@ def main() raises:
         test_h2_per_stream_cancel__test_on_readable_cancel_dispatches_through_cancel_handler
     ]()
     # tests/http2/test_h2_server.mojo
+    suite.test[
+        test_h2_server__test_long_lived_connection_keeps_a_bounded_stream_table
+    ]()
     suite.test[test_h2_server__test_alpn_dispatch]()
     suite.test[test_h2_server__test_h2c_upgrade_detection]()
     suite.test[test_h2_server__test_preface_only_emits_settings]()
@@ -964,6 +973,7 @@ def main() raises:
     suite.test[test_stream_slab__test_get_returns_optional]()
     suite.test[test_stream_slab__test_pop_clears_slot]()
     suite.test[test_stream_slab__test_items_lists_everything]()
+    suite.test[test_stream_slab__test_ids_lists_both_tiers]()
     suite.test[test_stream_slab__test_stress_roundtrip]()
     suite.test[test_stream_slab__test_active_and_ready_track_every_write]()
     suite^.run()

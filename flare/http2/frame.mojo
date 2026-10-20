@@ -238,8 +238,14 @@ def parse_frame(buf: Span[UInt8, _]) raises -> Optional[Frame]:
 
 def encode_frame(f: Frame) -> List[UInt8]:
     """Emit the wire bytes for ``f`` (header + payload)."""
+    var out = List[UInt8](capacity=9 + len(f.payload))
+    encode_frame_into(f, out)
+    return out^
+
+
+def encode_frame_into(f: Frame, mut out: List[UInt8]):
+    """Append the wire bytes for ``f`` (header + payload) to ``out``."""
     var n = len(f.payload)
-    var out = List[UInt8](capacity=9 + n)
     out.append(UInt8((n >> 16) & 0xFF))
     out.append(UInt8((n >> 8) & 0xFF))
     out.append(UInt8(n & 0xFF))
@@ -254,4 +260,3 @@ def encode_frame(f: Frame) -> List[UInt8]:
     # large response is nothing but these, so a byte at a time here is a scalar
     # pass over everything the connection sends.
     out.extend(Span(f.payload))
-    return out^

@@ -46,6 +46,7 @@ from .frame import (
     H2_DEFAULT_FRAME_SIZE,
     H2_PREFACE,
     encode_frame,
+    encode_frame_into,
     parse_frame,
 )
 from .hpack import HpackHeader
@@ -530,20 +531,27 @@ struct Http2Connection(Defaultable, Movable):
         """Convert stream ``sid`` into a :class:`flare.http.Request`."""
         if sid not in self.conn.streams:
             raise Error("h2: take_request on unknown stream")
-        var s = self.conn.streams[sid].copy()
+        # The request takes the stream's header list and body, which the
+        # stream no longer needs once dispatched.
+        var s = self.conn.streams.pop(sid)
+        var fields = List[HpackHeader]()
+        swap(fields, s.headers)
         var req = Request(method="GET", url="/", version="HTTP/2")
-        req.headers.reserve(s.initial_header_count)
+        swap(req.body, s.data)
+        var initial = s.initial_header_count
+        self.conn.streams[sid] = s^
+        req.headers.reserve(initial)
         # Fields are appended, not set: a repeated field keeps every
         # value, as on HTTP/1.1. ``set`` kept only the last, and browsers
         # send cookies as one field per crumb (RFC 9113 sec 8.2.3), so a
         # handler behind h2 saw only the last cookie.
         var cookie = String("")
-        for i in range(s.initial_header_count, len(s.headers)):
-            if trailer_field_allowed(s.headers[i].name):
-                req.trailers.append(s.headers[i].name, s.headers[i].value)
-        for i in range(s.initial_header_count):
-            var n = s.headers[i].name
-            var v = s.headers[i].value
+        for i in range(initial, len(fields)):
+            if trailer_field_allowed(fields[i].name):
+                req.trailers.append(fields[i].name, fields[i].value)
+        for i in range(initial):
+            ref n = fields[i].name
+            ref v = fields[i].value
             if n == ":method":
                 req.method = v
             elif n == ":path":
@@ -564,13 +572,9 @@ struct Http2Connection(Defaultable, Movable):
                 req.headers.append(n, v)
         if cookie.byte_length() > 0:
             req.headers.append("cookie", cookie)
-        req.body = s.data.copy()
-        # Hand the buffer over: the stream no longer needs it, and it
-        # counted against the connection's buffered-request budget.
-        var released = len(s.data)
-        s.data = List[UInt8]()
-        self.conn.streams[sid] = s^
-        var credit = self.conn.release_request_credit(released)
+        # The body counted against the connection's buffered-request
+        # budget.
+        var credit = self.conn.release_request_credit(len(req.body))
         for i in range(len(credit)):
             self.outbox.extend(Span(encode_frame(credit[i])))
         return req^
@@ -680,9 +684,7 @@ struct Http2Connection(Defaultable, Movable):
             Span[HpackHeader, _](trailers),
         )
         for i in range(len(frames)):
-            var bytes = encode_frame(frames[i])
-            for j in range(len(bytes)):
-                self.outbox.append(bytes[j])
+            encode_frame_into(frames[i], self.outbox)
         var s = self.conn.streams[sid].copy()
         s.state = StreamState.CLOSED()
         # The body fit the window, and it still spends it: without this
@@ -746,22 +748,22 @@ struct Http2Connection(Defaultable, Movable):
 
     # ── WebSocket-over-HTTP/2 bridge (RFC 8441) ────────────────────────────
 
-    def take_extended_connect_streams(self) -> List[Int]:
+    def take_extended_connect_streams(self) raises -> List[Int]:
         """Return stream ids of open Extended CONNECT tunnels awaiting
         acceptance: ``:method=CONNECT`` + ``:protocol=websocket``, headers
         complete, not yet END_STREAM'd, still OPEN (RFC 8441). The
         ``:protocol`` marker is cleared by :meth:`accept_ws_over_h2`, so an
         accepted tunnel is not re-returned."""
         var ids = List[Int]()
-        for entry in self.conn.streams.items():
-            var s = entry[1].copy()
+        for sid in self.conn.streams.ids():
+            ref s = self.conn.streams[sid]
             if (
                 s.headers_complete
                 and not s.data_complete
                 and s.extended_connect_protocol == "websocket"
                 and s.state.value == StreamState.OPEN().value
             ):
-                ids.append(s.id)
+                ids.append(sid)
         return ids^
 
     def accept_ws_over_h2(mut self, sid: Int) raises:

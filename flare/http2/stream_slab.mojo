@@ -247,6 +247,16 @@ struct StreamSlab[S: Copyable & Deinitable & SlabEntry](
         """Ids whose ``slab_ready()`` holds, ascending."""
         return self.ready.copy()
 
+    def ids(self) -> List[Int]:
+        """Every id present, fast tier ascending, then the overflow tier."""
+        var out = List[Int](capacity=len(self))
+        for sid in range(FAST_CAPACITY):
+            if self.fast[sid]:
+                out.append(sid)
+        for entry in self.overflow.items():
+            out.append(entry.key)
+        return out^
+
     def items(self) -> List[Tuple[Int, Self.S]]:
         """Eager copy of every ``(sid, value)`` pair.
 

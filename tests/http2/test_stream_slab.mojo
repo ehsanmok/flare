@@ -185,6 +185,18 @@ def test_items_lists_everything() raises:
     assert_equal(seen_payload_sum, 10)
 
 
+def test_ids_lists_both_tiers() raises:
+    var slab = StreamSlab[StreamLike]()
+    slab[5] = StreamLike(id=5, payload=0)
+    slab[1] = StreamLike(id=1, payload=0)
+    slab[FAST_CAPACITY + 1] = StreamLike(id=FAST_CAPACITY + 1, payload=0)
+    _ = slab.pop(5)
+    var ids = slab.ids()
+    assert_equal(len(ids), 2)
+    assert_equal(ids[0], 1)
+    assert_equal(ids[1], FAST_CAPACITY + 1)
+
+
 def test_stress_roundtrip() raises:
     # 200 ids straddling the fast / overflow boundary. Insert and
     # then pop; the slab must return to empty without leaking the
@@ -242,6 +254,7 @@ def main() raises:
     test_get_returns_optional()
     test_pop_clears_slot()
     test_items_lists_everything()
+    test_ids_lists_both_tiers()
     test_stress_roundtrip()
     test_active_and_ready_track_every_write()
-    print("test_stream_slab: 11 passed")
+    print("test_stream_slab: 12 passed")

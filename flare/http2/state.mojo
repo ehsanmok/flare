@@ -611,12 +611,9 @@ struct Connection(Copyable, Defaultable):
         return t if t > 256 else 256
 
     def _prune_closed_streams(mut self) raises:
-        var dead = List[Int]()
-        for entry in self.streams.items():
-            if entry[1].state.value == StreamState.CLOSED().value:
-                dead.append(entry[0])
-        for k in range(len(dead)):
-            _ = self.streams.pop(dead[k])
+        for sid in self.streams.ids():
+            if self.streams[sid].state.value == StreamState.CLOSED().value:
+                _ = self.streams.pop(sid)
 
     def _put_stream(mut self, var s: Stream):
         self.streams[s.id] = s^
@@ -759,7 +756,7 @@ struct Connection(Copyable, Defaultable):
 
         Raises when the declared pad length does not leave room for
         itself, which sec 6.1 makes a connection error."""
-        var p = f.payload.copy()
+        ref p = f.payload
         var start = 0
         var end = len(p)
         if f.header.flags.has(FrameFlags.PADDED()):
@@ -774,10 +771,7 @@ struct Connection(Copyable, Defaultable):
             if end - start < 5:
                 raise Error("h2: PRIORITY prefix truncated")
             start += 5
-        var out = List[UInt8](capacity=end - start)
-        for i in range(start, end):
-            out.append(p[i])
-        return out^
+        return List[UInt8](Span(p)[start:end])
 
     @staticmethod
     def _is_connection_specific(name: String) -> Bool:

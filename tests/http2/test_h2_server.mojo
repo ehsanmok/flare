@@ -59,6 +59,39 @@ def _build_get_request_frame() raises -> List[UInt8]:
     return encode_frame(f)
 
 
+def test_long_lived_connection_keeps_a_bounded_stream_table() raises:
+    """Closed streams are pruned as new ones open, so a connection that
+    serves many requests does not keep every stream it ever saw."""
+    var c = Http2Connection()
+    c.feed(Span[UInt8, _](_preface_bytes()))
+    _ = c.drain()
+    var enc = HpackEncoder()
+    var served = 0
+    for i in range(600):
+        var sid = 2 * i + 1
+        var hdrs = List[HpackHeader]()
+        hdrs.append(HpackHeader(":method", "GET"))
+        hdrs.append(HpackHeader(":scheme", "http"))
+        hdrs.append(HpackHeader(":path", "/" + String(i)))
+        hdrs.append(HpackHeader(":authority", "example.com"))
+        var f = Frame()
+        f.header.type = FrameType.HEADERS()
+        f.header.stream_id = sid
+        f.header.flags = FrameFlags(
+            FrameFlags.END_HEADERS() | FrameFlags.END_STREAM()
+        )
+        f.payload = enc.encode(Span[HpackHeader, _](hdrs))
+        c.feed(Span[UInt8, _](encode_frame(f)))
+        for id in c.take_completed_streams():
+            var req = c.take_request(id)
+            if req.url == "/" + String(i):
+                served += 1
+            c.emit_response(id, Response(status=204))
+        _ = c.drain()
+    assert_equal(served, 600)
+    assert_true(len(c.conn.streams) <= 256)
+
+
 def test_alpn_dispatch() raises:
     assert_true(is_h2_alpn("h2"))
     assert_false(is_h2_alpn("http/1.1"))
@@ -523,4 +556,5 @@ def main() raises:
     test_first_frame_after_the_preface_must_be_settings()
     test_settings_first_then_other_frames_are_served()
     test_egress_frames_follow_the_peers_max_frame_size()
-    print("test_h2_server: 15 passed")
+    test_long_lived_connection_keeps_a_bounded_stream_table()
+    print("test_h2_server: 16 passed")

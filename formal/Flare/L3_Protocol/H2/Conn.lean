@@ -260,7 +260,7 @@ def wu0If (n : Nat) : List Out := if n > 0 then [.wu 0 n] else []
 /-! ## Payload helpers -/
 
 /-- Length of the payload left by `_strip_pad_and_priority`; `none` is the
-raise. mirrors flare/http2/state.mojo#Connection._strip_pad_and_priority sha=a9c082ce816a at=59bda50f -/
+raise. mirrors flare/http2/state.mojo#Connection._strip_pad_and_priority sha=66bb060d6b9c at=24f7670c -/
 def stripLen (f : Fr) (prioField : Bool) : Option Nat :=
   let r : Option (Nat × Nat) :=
     if f.padded then
@@ -784,7 +784,7 @@ def send (c : Conn) (k n : Nat) : Conn × List Out :=
 
 /-- One-shot response: only when the body fits both windows, otherwise
 flare takes the `queue_stream_data` path (modelled by `send`).
-mirrors flare/http2/server.mojo#Http2Connection.emit_response sha=203ddd952dca at=7ae5abc2 -/
+mirrors flare/http2/server.mojo#Http2Connection.emit_response sha=891fb6d427c7 at=24f7670c -/
 def respond (c : Conn) (k n : Nat) : Conn × List Out :=
   match get c k with
   | none => (c, [])
