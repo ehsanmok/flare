@@ -51,7 +51,7 @@ from .hpack import (
     HpackEncoder,
     HpackHeader,
 )
-from .stream_slab import StreamSlab
+from .stream_slab import SlabEntry, StreamSlab
 
 
 # ── H2 error codes (RFC 9113 §7) ────────────────────────────────────────
@@ -231,7 +231,7 @@ struct StreamState(Copyable, Defaultable):
 comptime StreamId = Int
 
 
-struct Stream(Copyable, Defaultable):
+struct Stream(Copyable, Defaultable, SlabEntry):
     """Per-stream record."""
 
     var id: StreamId
@@ -296,6 +296,24 @@ struct Stream(Copyable, Defaultable):
         self.content_length = -1
         self.response_started = False
         self.extended_connect_protocol = ""
+
+    def slab_active(self) -> Bool:
+        var st = self.state.value
+        return (
+            st == StreamState.OPEN().value
+            or st == StreamState.HALF_CLOSED_LOCAL().value
+            or st == StreamState.HALF_CLOSED_REMOTE().value
+        )
+
+    def slab_ready(self) -> Bool:
+        """A request fully buffered and not yet dispatched; see
+        ``Http2Connection.take_completed_streams``."""
+        return (
+            self.headers_complete
+            and self.data_complete
+            and not self.response_started
+            and self.state.value != StreamState.CLOSED().value
+        )
 
 
 # ── Connection ──────────────────────────────────────────────────────────
@@ -825,17 +843,10 @@ struct Connection(Copyable, Defaultable):
 
     def _active_stream_count(self) -> Int:
         """Streams that count against SETTINGS_MAX_CONCURRENT_STREAMS
-        (RFC 9113 sec 5.1.2: open plus either half-closed state)."""
-        var n = 0
-        for entry in self.streams.items():
-            var st = entry[1].state.value
-            if (
-                st == StreamState.OPEN().value
-                or st == StreamState.HALF_CLOSED_LOCAL().value
-                or st == StreamState.HALF_CLOSED_REMOTE().value
-            ):
-                n += 1
-        return n
+        (RFC 9113 sec 5.1.2: open plus either half-closed state).
+        ``Stream.slab_active`` is the predicate; the slab keeps the
+        count exact on every write."""
+        return self.streams.active_count()
 
     def _commit_header_block(mut self, sid: StreamId) raises -> List[Frame]:
         """Decode the accumulated header block for ``sid``, validate it,

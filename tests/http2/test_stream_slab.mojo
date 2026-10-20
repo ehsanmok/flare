@@ -28,10 +28,10 @@ parametric ``S`` boundary without depending on the heavy
 
 from std.testing import assert_equal, assert_raises, assert_true
 
-from flare.http2.stream_slab import StreamSlab, FAST_CAPACITY
+from flare.http2.stream_slab import SlabEntry, StreamSlab, FAST_CAPACITY
 
 
-struct StreamLike(Copyable, Defaultable):
+struct StreamLike(Copyable, Defaultable, SlabEntry):
     """Minimal stand-in for ``Stream`` so the slab tests don't have
     to construct full ``HpackHeader`` lists or flow-control state.
     """
@@ -46,6 +46,12 @@ struct StreamLike(Copyable, Defaultable):
     def __init__(out self, id: Int, payload: Int):
         self.id = id
         self.payload = payload
+
+    def slab_active(self) -> Bool:
+        return self.payload % 2 == 1
+
+    def slab_ready(self) -> Bool:
+        return self.payload >= 10
 
 
 def test_empty_slab_is_empty() raises:
@@ -200,6 +206,32 @@ def test_stress_roundtrip() raises:
     assert_equal(len(slab), 0)
 
 
+def test_active_and_ready_track_every_write() raises:
+    """The tracked count and ready list equal a full recount after
+    inserts, overwrites and pops in both tiers."""
+    var slab = StreamSlab[StreamLike]()
+    var ids = [3, 1, FAST_CAPACITY + 5, 7, FAST_CAPACITY + 1]
+    for i in range(len(ids)):
+        slab[ids[i]] = StreamLike(ids[i], 11)
+    slab[7] = StreamLike(7, 2)
+    slab[FAST_CAPACITY + 5] = StreamLike(FAST_CAPACITY + 5, 13)
+    _ = slab.pop(3)
+    _ = slab.pop(FAST_CAPACITY + 1)
+    var active = 0
+    var ready = List[Int]()
+    for entry in slab.items():
+        if entry[1].slab_active():
+            active += 1
+        if entry[1].slab_ready():
+            ready.append(entry[0])
+    assert_equal(slab.active_count(), active)
+    assert_equal(slab.active_count(), 2)
+    var got = slab.ready_ids()
+    assert_equal(len(got), len(ready))
+    assert_equal(got[0], 1)
+    assert_equal(got[1], FAST_CAPACITY + 5)
+
+
 def main() raises:
     test_empty_slab_is_empty()
     test_fast_tier_roundtrip()
@@ -211,4 +243,5 @@ def main() raises:
     test_pop_clears_slot()
     test_items_lists_everything()
     test_stress_roundtrip()
-    print("test_stream_slab: 10 passed")
+    test_active_and_ready_track_every_write()
+    print("test_stream_slab: 11 passed")

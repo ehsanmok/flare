@@ -100,7 +100,7 @@ structure Fr where
 inductive St | idle | open_ | hcl | hcr | closed
   deriving DecidableEq, Repr
 
-/-- mirrors flare/http2/state.mojo#Stream+Stream.__init__ sha=8206527cecbe at=59bda50f -/
+/-- mirrors flare/http2/state.mojo#Stream+Stream.__init__ sha=ab318179c863 at=df9ed82b -/
 structure Stream where
   state : St := .idle
   sendW : Int := 65535
@@ -212,7 +212,7 @@ def ensure (c : Conn) (k : Nat) : Conn × Stream :=
       { c with streams := c.streams.filter (fun p => p.2.state != .closed) } else c
     (c, { state := .idle, sendW := c.peerInitW, recvW := c.initW })
 
-/-- mirrors flare/http2/state.mojo#Connection._active_stream_count sha=98c0e06aa750 at=59bda50f -/
+/-- mirrors flare/http2/state.mojo#Connection._active_stream_count sha=0d9b36adaf9c at=df9ed82b -/
 def isActive (s : Stream) : Bool := s.state == .open_ || s.state == .hcl || s.state == .hcr
 
 def activeCount (c : Conn) : Nat := c.streams.countP (fun p => isActive p.2)

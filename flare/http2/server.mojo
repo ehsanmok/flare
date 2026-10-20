@@ -494,41 +494,15 @@ struct Http2Connection(Defaultable, Movable):
         self.conn.streams[sid] = s^
 
     def take_completed_streams(self) -> List[Int]:
-        """Return stream ids whose request is fully buffered."""
-        var ids = List[Int]()
-        for entry in self.conn.streams.items():
-            # ``StreamSlab.items()`` returns ``List[Tuple[Int, Stream]]``;
-            # ``entry[1]`` is the per-stream record. Stream is copied
-            # eagerly inside ``items()`` so this loop never aliases the
-            # slab's owned storage.
-            var s = entry[1].copy()
-            # Skip streams already dispatched. Two things can mark a
-            # stream as served. ``emit_response`` moves a fully written
-            # one to ``CLOSED`` while ``headers_complete`` /
-            # ``data_complete`` stay set, so without the state check a
-            # second ``on_readable`` (an EAGAIN re-pump on macOS
-            # loopback, or any later readable event in the live reactor)
-            # re-returns the id and double-dispatches the handler.
-            #
-            # ``response_started`` covers the case the state check
-            # cannot: a response whose body is larger than the peer's
-            # send window is parked in ``pending_body`` and its stream
-            # stays open until the remainder drains. Every WINDOW_UPDATE
-            # from that peer arrives as a readable event, so a
-            # state-only guard re-ran the handler and re-sent the
-            # response head on each one -- which the peer is right to
-            # reject, a second HEADERS block without END_STREAM being a
-            # protocol error (RFC 9113 sec 8.1). Any client advertising
-            # the default 65535-byte window hit this on the first
-            # response larger than that.
-            if (
-                s.headers_complete
-                and s.data_complete
-                and not s.response_started
-                and s.state.value != StreamState.CLOSED().value
-            ):
-                ids.append(s.id)
-        return ids^
+        """Return stream ids whose request is fully buffered.
+
+        A stream already dispatched is excluded by ``Stream.slab_ready``:
+        ``emit_response`` moves a fully written one to ``CLOSED``, and
+        ``response_started`` covers a response parked in ``pending_body``
+        whose stream stays open until the window drains, so a
+        WINDOW_UPDATE never re-runs the handler (RFC 9113 sec 8.1).
+        """
+        return self.conn.streams.ready_ids()
 
     def take_reset_streams(mut self) -> List[Int]:
         """Pop the list of stream ids reset by the peer since the
