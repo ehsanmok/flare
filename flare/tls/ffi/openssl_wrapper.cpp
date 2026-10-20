@@ -15,6 +15,7 @@
 #include <openssl/x509_vfy.h>
 #include <openssl/x509v3.h>
 #include <openssl/pem.h>
+#include <pthread.h>
 #include <string.h>
 #include <string>
 #include <map>
@@ -37,8 +38,28 @@
 #error "flare requires OpenSSL 3.x or later (OPENSSL_VERSION_NUMBER < 0x30000000L)"
 #endif
 
-/* Thread-local error buffer — no global mutable state */
-static thread_local std::string last_error_msg;
+/* Per-thread error buffer — no global mutable state. A pthread key rather
+ * than thread_local: a TLS segment in a library loaded with dlopen bumps
+ * glibc's TLS generation, and that leaves every other library's dynamic
+ * TLS access (the allocator's included) on __tls_get_addr's slow path. */
+static pthread_key_t last_error_key;
+static pthread_once_t last_error_once = PTHREAD_ONCE_INIT;
+
+static void last_error_key_init() {
+    pthread_key_create(&last_error_key, [](void* p) {
+        delete static_cast<std::string*>(p);
+    });
+}
+
+static std::string& last_error() {
+    pthread_once(&last_error_once, last_error_key_init);
+    auto* s = static_cast<std::string*>(pthread_getspecific(last_error_key));
+    if (!s) {
+        s = new std::string();
+        pthread_setspecific(last_error_key, s);
+    }
+    return *s;
+}
 
 static void capture_openssl_errors() {
     char buf[512] = {0};
@@ -49,11 +70,11 @@ static void capture_openssl_errors() {
         if (!msg.empty()) msg += "; ";
         msg += buf;
     }
-    last_error_msg = msg;
+    last_error() = msg;
 }
 
 static void set_error(const char* msg) {
-    last_error_msg = msg;
+    last_error() = msg;
 }
 
 /* Cipher list providing forward secrecy + AEAD authentication for TLS 1.2 */
@@ -189,7 +210,7 @@ void flare_ssl_free(flare_ssl_t ssl) {
 }
 
 /* Set SNI and the name the certificate is checked against. Returns 0,
- * or -1 with last_error_msg set.
+ * or -1 with last_error() set.
  *
  * Both return values used to be ignored. A failed SSL_set1_host left the
  * handshake verifying the chain but no name, so any trusted certificate
@@ -229,7 +250,7 @@ static int flare_ssl_connect_raw(SSL* s) {
     return SSL_connect(s);
 }
 
-/* Stash why a handshake failed into last_error_msg. This drains the
+/* Stash why a handshake failed into last_error(). This drains the
  * error queue, so SSL_get_error must run before it, never after. */
 static void flare_ssl_connect_capture(SSL* s) {
     capture_openssl_errors();
@@ -237,7 +258,7 @@ static void flare_ssl_connect_capture(SSL* s) {
     long verify_err = SSL_get_verify_result(s);
     if (verify_err != X509_V_OK) {
         const char* v = X509_verify_cert_error_string(verify_err);
-        last_error_msg = std::string("verify:") + v;
+        last_error() = std::string("verify:") + v;
     }
 }
 
@@ -264,7 +285,7 @@ int flare_ssl_connect_ex(flare_ssl_t ssl, const char* server_name) {
      * SSL_get_error reads. A blocking fd with SO_RCVTIMEO armed reports
      * the expiry as WANT_READ (recv returned EAGAIN), which
      * flare_ssl_connect cannot separate from a protocol failure --
-     * both leave the error queue empty and last_error_msg blank. */
+     * both leave the error queue empty and last_error() blank. */
     int err = SSL_get_error(s, ret);
     if (err == SSL_ERROR_WANT_READ)  return FLARE_SSL_IO_WANT_READ;
     if (err == SSL_ERROR_WANT_WRITE) return FLARE_SSL_IO_WANT_WRITE;
@@ -553,7 +574,7 @@ int flare_ssl_ctx_set_min_proto(flare_ssl_ctx_t ctx, int version) {
 // ── Error ────────────────────────────────────────────────────────────────────
 
 const char* flare_ssl_last_error(void) {
-    return last_error_msg.c_str();
+    return last_error().c_str();
 }
 
 // ── Server-side context lifecycle ─────────────────────────────────────────
