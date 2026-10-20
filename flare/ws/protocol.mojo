@@ -85,7 +85,7 @@ def _close_reply_payload(body: List[UInt8]) -> List[UInt8]:
     return out^
 
 
-struct WsEvent(Movable):
+struct WsEvent(Copyable, Movable):
     """A complete message, or the end of the session."""
 
     var kind: Int
@@ -107,7 +107,7 @@ struct WsEvent(Movable):
         self.code = code
 
 
-struct WsProtocol(Movable):
+struct WsProtocol(Copyable, Movable):
     """One server-side WebSocket session, without I/O."""
 
     var inbox: List[UInt8]
@@ -163,6 +163,33 @@ struct WsProtocol(Movable):
 
     def send_binary(mut self, data: List[UInt8]) raises:
         self._send(WsFrame.binary(data))
+
+    def send_frame(mut self, frame: WsFrame) raises:
+        """Queue any server frame; a CLOSE goes through :meth:`close` so at
+        most one is ever sent."""
+        if frame.opcode == WsOpcode.CLOSE:
+            var code = WsCloseCode.NORMAL
+            if len(frame.payload) >= 2:
+                code = UInt16(
+                    Int(frame.payload[0]) * 256 + Int(frame.payload[1])
+                )
+            self.close(code)
+            return
+        self._send(frame)
+
+    def event_frame(self, ev: WsEvent) -> WsFrame:
+        """``ev`` as the frame a frame-level handler expects: a whole TEXT
+        or BINARY message, or a CLOSE carrying the code the session ended
+        with."""
+        if ev.kind == WS_EVENT_MESSAGE:
+            return WsFrame(
+                opcode=WsOpcode.TEXT if ev.is_text else WsOpcode.BINARY,
+                payload=ev.payload.copy(),
+            )
+        var body = List[UInt8]()
+        body.append(UInt8(ev.code >> 8))
+        body.append(UInt8(ev.code & 0xFF))
+        return WsFrame(opcode=WsOpcode.CLOSE, payload=body^)
 
     def close(mut self, code: UInt16 = WsCloseCode.NORMAL):
         """Start the closing handshake; a no-op once a CLOSE was sent."""

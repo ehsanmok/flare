@@ -286,6 +286,9 @@ from test_ws_h2_roundtrip import (
 from test_ws_h2_roundtrip import (
     test_ws_h2_oversized_frame_is_closed_with_1009 as test_ws_h2_roundtrip__test_ws_h2_oversized_frame_is_closed_with_1009,
 )
+from test_ws_h2_roundtrip import (
+    test_ws_h2_rfc6455_rules as test_ws_h2_roundtrip__test_ws_h2_rfc6455_rules,
+)
 from test_ws_handshake_request import (
     test_rfc_example_request_is_accepted as test_ws_handshake_request__test_rfc_example_request_is_accepted,
 )
@@ -626,6 +629,7 @@ def main() raises:
     suite.test[
         test_ws_h2_roundtrip__test_ws_h2_oversized_frame_is_closed_with_1009
     ]()
+    suite.test[test_ws_h2_roundtrip__test_ws_h2_rfc6455_rules]()
     # tests/ws/test_ws_handshake_request.mojo
     suite.test[
         test_ws_handshake_request__test_rfc_example_request_is_accepted

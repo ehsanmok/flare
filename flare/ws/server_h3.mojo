@@ -16,29 +16,36 @@ from .frame import (
     WsFrame,
     WsOpcode,
 )
-from .server_h2 import pull_client_frame
+from .protocol import WS_EVENT_MESSAGE, WsProtocol
 from ..http.response import Response
 from ..quic.server import Http3Tunnel, QuicListener
 from ..runtime.pool import Pool
 
 
 struct WsOverH3ServerStream(Copyable):
-    """One WebSocket tunnel on an HTTP/3 stream. Outbound frames are
-    unmasked (RFC 6455 sec 5.3) and queued on the stream; inbound ones
-    must be masked."""
+    """One WebSocket tunnel on an HTTP/3 stream. The RFC 6455 rules live
+    in :class:`flare.ws.protocol.WsProtocol`; outbound frames are unmasked
+    (RFC 6455 sec 5.3) and queued on the stream."""
 
     var tunnel: Http3Tunnel
-    var read_buffer: List[UInt8]
+    var proto: WsProtocol
     var closed: Bool
-    var max_frame_size: Int
-    """Largest frame payload accepted; a larger one is answered with
-    CLOSE 1009 and ends the tunnel."""
 
     def __init__(out self, tunnel: Http3Tunnel, var initial: List[UInt8]):
         self.tunnel = tunnel
-        self.read_buffer = initial^
+        self.proto = WsProtocol()
+        self.proto.inbox = initial^
         self.closed = False
-        self.max_frame_size = DEFAULT_MAX_FRAME_BYTES
+
+    def _flush(mut self, mut listener: QuicListener) raises:
+        if len(self.proto.outbox) == 0:
+            return
+        if not listener.send_http3_tunnel(
+            self.tunnel, Span[UInt8, _](self.proto.outbox)
+        ):
+            self.closed = True
+            raise Error("WsOverH3ServerStream: tunnel closed")
+        self.proto.consumed(len(self.proto.outbox))
 
     def send_frame(
         mut self, mut listener: QuicListener, frame: WsFrame
@@ -46,36 +53,35 @@ struct WsOverH3ServerStream(Copyable):
         """Queue ``frame`` on the tunnel; a CLOSE frame ends it."""
         if self.closed:
             raise Error("WsOverH3ServerStream: send on closed stream")
-        var zero = SIMD[DType.uint8, 4](0, 0, 0, 0)
-        var wire = frame.encode_with_key(False, zero)
-        if not listener.send_http3_tunnel(self.tunnel, Span[UInt8, _](wire)):
+        try:
+            self.proto.send_frame(frame)
+        except e:
             self.closed = True
-            raise Error("WsOverH3ServerStream: tunnel closed")
-        if frame.opcode == WsOpcode.CLOSE:
+            self._flush(listener)
+            raise e^
+        self._flush(listener)
+        if self.proto.close_sent:
             self.closed = True
 
     def try_pull_frame(
         mut self, mut listener: QuicListener
     ) raises -> Optional[WsFrame]:
-        """Decode at most one client frame from what has arrived;
-        ``None`` until a whole frame is buffered. A CLOSE is answered
-        with a CLOSE (RFC 6455 sec 5.5.1) before it is returned."""
-        self.read_buffer.extend(
+        """The next complete message as one TEXT or BINARY frame, a CLOSE
+        frame once the session has ended (its reply already sent), or
+        ``None`` until more data arrives."""
+        self.proto.inbox.extend(
             Span[UInt8, _](listener.take_http3_tunnel(self.tunnel))
         )
+        var ev = self.proto.next_event()
         try:
-            var got = pull_client_frame(self.read_buffer, self.max_frame_size)
-            if got and got.value().opcode == WsOpcode.CLOSE:
-                self.close(listener)
-            return got^
-        except e:
-            if WS_TOO_BIG_MARKER in String(e):
-                try:
-                    self.close(listener, WsCloseCode.MESSAGE_TOO_BIG)
-                except:
-                    pass
+            self._flush(listener)
+        except:
+            pass
+        if not ev:
+            return None
+        if ev.value().kind != WS_EVENT_MESSAGE:
             self.closed = True
-            raise e^
+        return self.proto.event_frame(ev.value())
 
     def is_closed(imm self) -> Bool:
         return self.closed

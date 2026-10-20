@@ -350,6 +350,9 @@ from test_h3_websocket import (
     test_a_close_with_fin_is_still_answered as test_h3_websocket__test_a_close_with_fin_is_still_answered,
 )
 from test_h3_websocket import (
+    test_invalid_utf8_text_is_closed_with_1007 as test_h3_websocket__test_invalid_utf8_text_is_closed_with_1007,
+)
+from test_h3_websocket import (
     test_websocket_over_h3_on_several_workers as test_h3_websocket__test_websocket_over_h3_on_several_workers,
 )
 from test_h3_websocket import (
@@ -705,6 +708,7 @@ def main() raises:
     # tests/h3/test_h3_websocket.mojo
     suite.test[test_h3_websocket__test_websocket_over_h3_echoes_and_closes]()
     suite.test[test_h3_websocket__test_a_close_with_fin_is_still_answered]()
+    suite.test[test_h3_websocket__test_invalid_utf8_text_is_closed_with_1007]()
     suite.test[test_h3_websocket__test_websocket_over_h3_on_several_workers]()
     suite.test[test_h3_websocket__test_the_client_side_echoes_and_closes]()
     suite.test[test_h3_websocket__test_another_protocol_gets_501]()

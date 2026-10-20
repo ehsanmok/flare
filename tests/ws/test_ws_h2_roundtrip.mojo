@@ -8,7 +8,7 @@ opens an Extended CONNECT tunnel, the server surfaces + accepts it with a
 server-side, and an unmasked server reply is read client-side.
 """
 
-from std.testing import assert_equal, assert_true
+from std.testing import assert_equal, assert_false, assert_true
 
 from flare.http2 import Http2Connection, Http2Config
 from flare.http2.client import Http2ClientConfig, Http2ClientConnection
@@ -160,12 +160,8 @@ def test_ws_h2_unmasked_client_frame_is_refused() raises:
     client.send_data(sid, Span[UInt8, _](raw), False)
     _shuttle(client, server)
     var server_ws = WsOverH2ServerStream(sid)
-    var raised = False
-    try:
-        _ = server_ws.try_pull_frame(server)
-    except:
-        raised = True
-    assert_true(raised, "an unmasked client frame was accepted")
+    assert_equal(_ended_with(server_ws, server), 1002)
+    assert_equal(_close_seen_by_client(client, server, sid), 1002)
     print("test_ws_h2_unmasked_client_frame_is_refused: passed")
 
 
@@ -214,21 +210,79 @@ def test_ws_h2_oversized_frame_is_closed_with_1009() raises:
     client.send_data(sid, Span[UInt8, _](h), False)
     _shuttle(client, server)
     var server_ws = WsOverH2ServerStream(sid)
-    var raised = False
-    try:
-        _ = server_ws.try_pull_frame(server)
-    except:
-        raised = True
-    assert_true(raised, "a 20 MiB frame header was accepted")
+    assert_equal(_ended_with(server_ws, server), 1009)
     assert_true(server_ws.is_closed())
-    _shuttle(client, server)
-    var client_ws = WsOverH2Stream(sid)
-    var f = client_ws.try_pull_frame(client)
-    assert_true(Bool(f), "no CLOSE reached the client")
+    assert_equal(_close_seen_by_client(client, server, sid), 1009)
+    print("test_ws_h2_oversized_frame_is_closed_with_1009: passed")
+
+
+def _ended_with(
+    mut server_ws: WsOverH2ServerStream, mut server: Http2Connection
+) raises -> Int:
+    """The CLOSE code the server-side session ended with."""
+    var f = server_ws.try_pull_frame(server)
+    assert_true(Bool(f), "the session did not end")
     var close = f.take()
     assert_equal(close.opcode, WsOpcode.CLOSE)
-    assert_equal((Int(close.payload[0]) << 8) | Int(close.payload[1]), 1009)
-    print("test_ws_h2_oversized_frame_is_closed_with_1009: passed")
+    return (Int(close.payload[0]) << 8) | Int(close.payload[1])
+
+
+def _close_seen_by_client(
+    mut client: Http2ClientConnection, mut server: Http2Connection, sid: Int
+) raises -> Int:
+    _shuttle(client, server)
+    var client_ws = WsOverH2Stream(sid)
+    while True:
+        var f = client_ws.try_pull_frame(client)
+        assert_true(Bool(f), "no CLOSE reached the client")
+        var got = f.take()
+        if got.opcode == WsOpcode.CLOSE:
+            if len(got.payload) < 2:
+                return 0
+            return (Int(got.payload[0]) << 8) | Int(got.payload[1])
+
+
+def _server_ends_with(op: UInt8, var payload: List[UInt8], code: Int) raises:
+    var ccfg = Http2ClientConfig()
+    ccfg.enable_connect_protocol = True
+    var client = Http2ClientConnection.with_config(ccfg^)
+    var scfg = Http2Config()
+    scfg.enable_connect_protocol = True
+    var server = Http2Connection.with_config(scfg^)
+    var sid = _open_tunnel(client, server)
+    var client_ws = WsOverH2Stream(sid)
+    client_ws.send_frame(client, WsFrame(opcode=op, payload=payload^))
+    _shuttle(client, server)
+    var server_ws = WsOverH2ServerStream(sid)
+    assert_equal(_ended_with(server_ws, server), code)
+    assert_equal(_close_seen_by_client(client, server, sid), code)
+
+
+def test_ws_h2_rfc6455_rules() raises:
+    """The tunnel enforces what the HTTP/1.1 server does: bad UTF-8 is
+    1007, an orphan CONTINUATION is 1002, a CLOSE from the client is
+    echoed, and a PING is answered."""
+    print("test_ws_h2_rfc6455_rules")
+    _server_ends_with(WsOpcode.TEXT, [UInt8(0xC3), UInt8(0x28)], 1007)
+    _server_ends_with(WsOpcode.CONTINUATION, [UInt8(0x61)], 1002)
+    _server_ends_with(WsOpcode.CLOSE, [UInt8(0x0B), UInt8(0xB8)], 3000)
+    var ccfg = Http2ClientConfig()
+    ccfg.enable_connect_protocol = True
+    var client = Http2ClientConnection.with_config(ccfg^)
+    var scfg = Http2Config()
+    scfg.enable_connect_protocol = True
+    var server = Http2Connection.with_config(scfg^)
+    var sid = _open_tunnel(client, server)
+    var client_ws = WsOverH2Stream(sid)
+    client_ws.send_frame(client, WsFrame.ping(List[UInt8]("p".as_bytes())))
+    _shuttle(client, server)
+    var server_ws = WsOverH2ServerStream(sid)
+    assert_false(Bool(server_ws.try_pull_frame(server)))
+    _shuttle(client, server)
+    var pong = client_ws.try_pull_frame(client)
+    assert_true(Bool(pong))
+    assert_equal(pong.value().opcode, WsOpcode.PONG)
+    print("test_ws_h2_rfc6455_rules: passed")
 
 
 def main() raises:
@@ -237,3 +291,4 @@ def main() raises:
     test_ws_h2_unmasked_client_frame_is_refused()
     test_ws_h2_client_mask_keys_are_not_a_counter()
     test_ws_h2_oversized_frame_is_closed_with_1009()
+    test_ws_h2_rfc6455_rules()

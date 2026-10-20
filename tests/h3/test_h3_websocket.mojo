@@ -208,6 +208,21 @@ def test_a_close_with_fin_is_still_answered() raises:
     assert_equal(close.opcode, WsOpcode.CLOSE)
 
 
+def test_invalid_utf8_text_is_closed_with_1007() raises:
+    """The tunnel validates text messages like the HTTP/1.1 server does
+    (RFC 6455 sec 8.1): not echoed, answered with CLOSE 1007."""
+    var s = _serve()
+    var c = _Client(s[1], "websocket")
+    c.send_ws(WsFrame(opcode=WsOpcode.TEXT, payload=[UInt8(0xC3), UInt8(0x28)]))
+    c.pump(until_frames=2, until_fin=True)
+    kill_forked_server(s[0])
+    var fs = c.frames()
+    assert_equal(len(fs), 2, "HEADERS, CLOSE DATA")
+    var close = WsFrame.decode_one(Span[UInt8, _](fs[1][1])).take_frame()
+    assert_equal(close.opcode, WsOpcode.CLOSE)
+    assert_equal((Int(close.payload[0]) << 8) | Int(close.payload[1]), 1007)
+
+
 def test_websocket_over_h3_on_several_workers() raises:
     """Every worker serves tunnels with its own copy of the sidecar;
     attach_ws_h3 used to need a single worker."""
