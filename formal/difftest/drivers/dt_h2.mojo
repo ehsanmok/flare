@@ -94,7 +94,7 @@ def _frames(data: List[UInt8]) raises -> String:
     var st = List[String]()
     for k in sids:
         if k in conn.streams:
-            var s = conn.streams[k]
+            var s = conn.streams[k].copy()
             st.append(
                 String(k)
                 + "="
