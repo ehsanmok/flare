@@ -204,10 +204,9 @@ struct Http2Connection(Defaultable, Movable):
         # overrun a peer that advertised the default.
         out.conn.send_window = 65535
         out.conn.recv_window = 65535
-        out.conn.max_frame_size = out.config.max_frame_size
-        # What we advertise is also the largest frame we accept; the
-        # peer's SETTINGS may later move max_frame_size but must not
-        # move this one.
+        # What we advertise is the largest frame we accept. The largest we
+        # send is the peer's to set (RFC 9113 sec 4.2): it stays at 16384
+        # until the peer's SETTINGS_MAX_FRAME_SIZE raises it.
         out.conn.local_max_frame_size = out.config.max_frame_size
         out.conn.max_header_list_size = out.config.max_header_list_size
         # What we advertise is the ceiling for a peer size update

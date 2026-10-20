@@ -237,7 +237,10 @@ def test_with_config_propagates_to_connection_fields() raises:
     # sec 6.9.2): both start at 65535.
     assert_equal(conn.conn.send_window, 65535)
     assert_equal(conn.conn.recv_window, 65535)
-    assert_equal(conn.conn.max_frame_size, 32768)
+    # We accept what we advertise; we send what the peer allows, 16384
+    # until its SETTINGS say otherwise (RFC 9113 sec 4.2).
+    assert_equal(conn.conn.local_max_frame_size, 32768)
+    assert_equal(conn.conn.max_frame_size, 16384)
     # The advertised size is the ceiling for the peer's size update; the
     # decoder itself stays at the 4096 default until that update arrives
     # (RFC 7541 sec 4.2).

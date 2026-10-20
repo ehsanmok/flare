@@ -312,7 +312,9 @@ struct Http2ClientConnection(Defaultable, Movable):
         # Connection windows start at 65535 (RFC 9113 sec 6.9.2).
         out.conn.send_window = 65535
         out.conn.recv_window = 65535
-        out.conn.max_frame_size = out.config.max_frame_size
+        # We accept up to what we advertise; what we send stays at 16384
+        # until the server's SETTINGS raise it (RFC 9113 sec 4.2).
+        out.conn.local_max_frame_size = out.config.max_frame_size
         out.conn.max_header_list_size = out.config.max_header_list_size
         # What we advertise is the ceiling for a peer size update
         # (RFC 7541 sec 6.3). The decoder's *current* size stays at the

@@ -360,6 +360,29 @@ def _stream_has(
     return False
 
 
+def test_egress_frames_follow_the_peers_max_frame_size() raises:
+    """A server that advertises 32 KiB frames still sends no DATA frame
+    over the 16 KiB a peer that never raised SETTINGS_MAX_FRAME_SIZE
+    accepts (RFC 9113 sec 4.2), and still accepts 32 KiB itself."""
+    var cfg = Http2Config()
+    cfg.max_frame_size = 32768
+    var c = Http2Connection.with_config(cfg^)
+    assert_equal(c.conn.local_max_frame_size, 32768)
+    var sid = _drive_get(c)
+    var resp = Response(status=200)
+    resp.body = List[UInt8](length=20000, fill=UInt8(120))
+    c.emit_response(sid, resp^)
+    var data = 0
+    for f in _walk_frames(c.drain()):
+        if f.header.type.value == FrameType.DATA().value:
+            assert_true(f.header.length <= 16384)
+            data += f.header.length
+    var pending = 0
+    if sid in c.pending_body:
+        pending = len(c.pending_body[sid]) - c.pending_pos[sid]
+    assert_equal(data + pending, 20000)
+
+
 def _small_table_server() raises -> Http2Connection:
     var cfg = Http2Config()
     cfg.header_table_size = 0
@@ -499,4 +522,5 @@ def main() raises:
     test_peer_size_update_to_the_advertised_size_is_honoured()
     test_first_frame_after_the_preface_must_be_settings()
     test_settings_first_then_other_frames_are_served()
-    print("test_h2_server: 14 passed")
+    test_egress_frames_follow_the_peers_max_frame_size()
+    print("test_h2_server: 15 passed")

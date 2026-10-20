@@ -96,6 +96,9 @@ from test_h2_client_conn import (
 from test_h2_client_conn import (
     test_data_before_the_response_head_is_a_stream_error as test_h2_client_conn__test_data_before_the_response_head_is_a_stream_error,
 )
+from test_h2_client_conn import (
+    test_client_frame_sizes_follow_rfc_9113_sec_4_2 as test_h2_client_conn__test_client_frame_sizes_follow_rfc_9113_sec_4_2,
+)
 from test_h2_config import (
     test_default_config_matches_rfc_and_v0_6_shape as test_h2_config__test_default_config_matches_rfc_and_v0_6_shape,
 )
@@ -344,6 +347,9 @@ from test_h2_server import (
 )
 from test_h2_server import (
     test_repeated_fields_and_cookie_crumbs_survive as test_h2_server__test_repeated_fields_and_cookie_crumbs_survive,
+)
+from test_h2_server import (
+    test_egress_frames_follow_the_peers_max_frame_size as test_h2_server__test_egress_frames_follow_the_peers_max_frame_size,
 )
 from test_h2_server import (
     test_reduced_table_size_applies_only_after_the_peers_size_update as test_h2_server__test_reduced_table_size_applies_only_after_the_peers_size_update,
@@ -641,6 +647,9 @@ def main() raises:
     suite.test[
         test_h2_client_conn__test_data_before_the_response_head_is_a_stream_error
     ]()
+    suite.test[
+        test_h2_client_conn__test_client_frame_sizes_follow_rfc_9113_sec_4_2
+    ]()
     # tests/http2/test_h2_config.mojo
     suite.test[test_h2_config__test_default_config_matches_rfc_and_v0_6_shape]()
     suite.test[test_h2_config__test_default_config_validates]()
@@ -800,6 +809,9 @@ def main() raises:
     suite.test[test_h2_server__test_stream_data_bounded_by_send_window]()
     suite.test[test_h2_server__test_partial_feed_buffers_frames]()
     suite.test[test_h2_server__test_repeated_fields_and_cookie_crumbs_survive]()
+    suite.test[
+        test_h2_server__test_egress_frames_follow_the_peers_max_frame_size
+    ]()
     suite.test[
         test_h2_server__test_reduced_table_size_applies_only_after_the_peers_size_update
     ]()

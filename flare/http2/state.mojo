@@ -531,8 +531,8 @@ struct Connection(Copyable, Defaultable):
             self._append_setting(p, 0x4, self.initial_window_size)
 
         # SETTINGS_MAX_FRAME_SIZE = 0x5 — only when != RFC default.
-        if self.max_frame_size != H2_DEFAULT_FRAME_SIZE:
-            self._append_setting(p, 0x5, self.max_frame_size)
+        if self.local_max_frame_size != H2_DEFAULT_FRAME_SIZE:
+            self._append_setting(p, 0x5, self.local_max_frame_size)
 
         # SETTINGS_MAX_HEADER_LIST_SIZE = 0x6 — only when set
         # (``0`` = unset, RFC default is "unlimited").

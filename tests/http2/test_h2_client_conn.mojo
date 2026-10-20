@@ -1087,6 +1087,16 @@ def test_data_before_the_response_head_is_a_stream_error() raises:
     )
 
 
+def test_client_frame_sizes_follow_rfc_9113_sec_4_2() raises:
+    """A client that advertises 32 KiB frames accepts them, and sends no
+    more than 16 KiB until the server's SETTINGS allow more."""
+    var cfg = Http2ClientConfig()
+    cfg.max_frame_size = 32768
+    var client = Http2ClientConnection.with_config(cfg^)
+    assert_equal(client.conn.local_max_frame_size, 32768)
+    assert_equal(client.conn.max_frame_size, 16384)
+
+
 def main() raises:
     test_preface_emitted_on_construction()
     test_settings_exchange_roundtrip()
@@ -1117,4 +1127,5 @@ def main() raises:
     test_stream_window_update_is_still_sent_while_the_stream_is_open()
     test_data_on_a_stream_the_server_reset_is_stream_closed()
     test_data_before_the_response_head_is_a_stream_error()
-    print("test_h2_client_conn: 29 passed")
+    test_client_frame_sizes_follow_rfc_9113_sec_4_2()
+    print("test_h2_client_conn: 30 passed")
