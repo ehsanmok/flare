@@ -91,7 +91,7 @@ inductive SizeUpd where
   deriving Repr, DecidableEq
 
 /-- Dynamic table size update (§6.3), `fieldsSoFar` = `len(headers)`.
-mirrors flare/http2/hpack.mojo#HpackDecoder.decode sha=26ef7d2085d5 at=12630564 -/
+mirrors flare/http2/hpack.mojo#HpackDecoder.decode sha=5f6d6cc402ae at=4538e8ec -/
 def sizeUpdate (t : Table) (n : Nat) (fieldsSoFar : Nat) : SizeUpd :=
   if n > t.settingsMax then .exceedsCap
   else if fieldsSoFar > 0 then .afterField
@@ -278,7 +278,7 @@ inductive Look where
   | errRange
   deriving Repr, DecidableEq
 
-/-- mirrors flare/http2/hpack.mojo#HpackDecoder._lookup sha=61c025d3e60b at=59bda50f -/
+/-- mirrors flare/http2/hpack.mojo#HpackDecoder._lookup sha=4b6490457c50 at=4538e8ec -/
 def lookup (t : Table) (idx : Nat) : Look :=
   if idx = 0 then .errZero
   else if idx ≤ STATIC_TABLE_LEN then .static idx

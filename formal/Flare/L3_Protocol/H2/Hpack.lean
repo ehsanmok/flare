@@ -150,7 +150,7 @@ def overBudget (budget : Nat) (hs : List Entry) (d : Nat) : Bool :=
 
 /-- The decode loop, shipped (HPACK-02 fixed): each field is accounted right
 after it is decoded.
-mirrors flare/http2/hpack.mojo#HpackDecoder._decode_string+HpackDecoder.decode sha=a8c434e2f963 at=937e9462 (`decode`; fixed, HPACK-02) -/
+mirrors flare/http2/hpack.mojo#HpackDecoder._decode_string+HpackDecoder.decode sha=28a6ee51261c at=4538e8ec (`decode`; fixed, HPACK-02) -/
 def decodeLoop (C : Codec) (ah : Bool) (budget : Nat) :
     Nat → Table → List Entry → Nat → Bytes → Except DErr (Table × List Entry)
   | _, t, hs, _, [] => .ok (t, hs)
@@ -296,7 +296,7 @@ def findStatic (name : Bytes) : Nat :=
 /-- `_encode_string` with `allow_huffman = False` (`hpack.mojo:480-492`). -/
 def encodeString (C : Codec) (s : Bytes) : Bytes := C.encInt 7 s.length 0 ++ s
 
-/-- mirrors flare/http2/hpack.mojo#HpackEncoder.encode sha=808b595ad5e7 at=59bda50f -/
+/-- mirrors flare/http2/hpack.mojo#HpackEncoder.encode sha=d8266c616d86 at=4538e8ec -/
 def encodeField (C : Codec) (h : Entry) : Bytes :=
   let j := findStatic h.name
   C.encInt 4 j 0 ++ (if j = 0 then encodeString C h.name else []) ++ encodeString C h.value
