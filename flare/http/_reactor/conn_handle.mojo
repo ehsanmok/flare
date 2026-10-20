@@ -138,6 +138,10 @@ edge, so one connection with an endless source cannot hold the worker.
 ``STREAM_EDGE_PASSES x STREAM_BATCH_CHUNKS`` chunks is the per-edge
 ceiling, after which the connection re-arms and yields to its peers."""
 
+comptime _WS_NOT_HANDSHAKE: Int = 0
+comptime _WS_UPGRADED: Int = 1
+comptime _WS_REFUSED: Int = 2
+
 comptime PIPELINE_BATCH_REQUESTS: Int = 32
 """Pipelined requests already in ``read_buf`` served before one flush."""
 comptime PIPELINE_BATCH_BYTES: Int = 64 * 1024
@@ -982,7 +986,7 @@ struct ConnHandle(Movable):
                 self.should_close = True
                 return self._finalise_response(r426^, True)
             if ws_here:
-                var upgraded: Bool
+                var upgraded: Int
                 try:
                     upgraded = self._handle_ws_upgrade(req, config)
                 except:
@@ -993,7 +997,12 @@ struct ConnHandle(Movable):
                     return StepResult(
                         want_read=False, want_write=False, done=True
                     )
-                if upgraded:
+                if upgraded == _WS_REFUSED:
+                    self.should_close = True
+                    return self._finalise_response(
+                        build_error_response(503, "Service Unavailable"), True
+                    )
+                if upgraded == _WS_UPGRADED:
                     return StepResult(
                         want_read=False,
                         want_write=False,
@@ -1719,7 +1728,7 @@ struct ConnHandle(Movable):
 
     def _handle_ws_upgrade(
         mut self, req: Request, config: ServerConfig
-    ) raises -> Bool:
+    ) raises -> Int:
         """Perform an RFC 6455 upgrade on this connection, if it is one.
 
         Returns ``False`` -- cheaply and with no side effects -- when
@@ -1758,6 +1767,7 @@ struct ConnHandle(Movable):
             _send_upgrade_response,
             _spawn_ws_offload,
             _ws_handshake_problem,
+            ws_offload_try_acquire,
         )
         from flare.net.socket import RawSocket
         from flare.net._libc import AF_INET, SOCK_STREAM
@@ -1777,7 +1787,11 @@ struct ConnHandle(Movable):
             ).byte_length()
             != 0
         ):
-            return False
+            return _WS_NOT_HANDSHAKE
+        if config.ws.offload and not ws_offload_try_acquire(
+            config.ws.max_offloaded
+        ):
+            return _WS_REFUSED
         var ws_key = req.headers.get("sec-websocket-key")
 
         var accept = _compute_accept_srv(ws_key)
@@ -1818,9 +1832,9 @@ struct ConnHandle(Movable):
             # fd is already detached from the reactor and back in
             # blocking mode, so that thread owns it end to end.
             _spawn_ws_offload(conn^, config.ws.handler.value())
-            return True
+            return _WS_UPGRADED
         config.ws.handler.value()(conn)
-        return True
+        return _WS_UPGRADED
 
     def _note_head_from_buf(mut self):
         """While the request head has not been fully scanned

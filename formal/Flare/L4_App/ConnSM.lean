@@ -901,7 +901,7 @@ theorem serialize_spec (status : Int) (bodyLen : Nat) (declared : Option Nat)
 the normal handler path passes `self.head_request`
 (conn_handle.mojo:747-754); `_queue_error` → `_serialize_response` passes
 the flag too (fixed, APP-05).
-mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._check_request_complete+ConnHandle._handle_ws_upgrade sha=2b5849b5008a at=2b8d4acb
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._check_request_complete+ConnHandle._handle_ws_upgrade sha=fa3ca96a5581 at=77222e47
 (fixed, APP-05) -/
 inductive Path | handler | errorReply
   deriving DecidableEq, Repr

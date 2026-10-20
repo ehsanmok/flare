@@ -20,7 +20,7 @@ from ..proto.h2_config import Http2Config
 # No import cycle: ``flare.ws.server`` reaches into ``flare.http`` only
 # for ``flare.http.response`` (a leaf) -- never for the server or this
 # package.
-from ...ws.server import WsConnection
+from ...ws.server import DEFAULT_MAX_OFFLOADED_WS, WsConnection
 
 comptime WsHandlerFn = def(mut WsConnection) raises thin -> None
 """The opt-in WebSocket handler signature. Identical to
@@ -49,12 +49,22 @@ struct WsUpgrade(Copyable, Defaultable):
     var offload: Bool
     """Run each upgraded socket on its own detached thread."""
 
+    var max_offloaded: Int
+    """Detached threads the process runs at once. An upgrade past it is
+    answered 503, so clients cannot open threads without bound."""
+
     def __init__(out self):
         """No WebSocket handling."""
         self.handler = None
         self.offload = False
+        self.max_offloaded = DEFAULT_MAX_OFFLOADED_WS
 
-    def __init__(out self, handler: WsHandlerFn, offload: Bool = True):
+    def __init__(
+        out self,
+        handler: WsHandlerFn,
+        offload: Bool = True,
+        max_offloaded: Int = DEFAULT_MAX_OFFLOADED_WS,
+    ):
         """Handle WebSocket upgrades with ``handler``.
 
         Args:
@@ -64,9 +74,12 @@ struct WsUpgrade(Copyable, Defaultable):
                 the reactor thread for the socket's whole lifetime, so
                 one WebSocket client stalls every other connection on
                 that worker.
+            max_offloaded: Detached threads the process runs at once;
+                an upgrade past it gets 503.
         """
         self.handler = Optional[WsHandlerFn](handler)
         self.offload = offload
+        self.max_offloaded = max_offloaded
 
 
 struct ServerConfig(Copyable):

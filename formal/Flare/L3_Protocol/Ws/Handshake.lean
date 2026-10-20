@@ -215,8 +215,8 @@ def versionMismatch (r : Req) : Bool :=
   r.method == GET && lowerB (hdr r UPGRADE) == WEBSOCKET && !(hdr r N_KEY).isEmpty &&
   pyStrip (hdr r N_VERSION) != V13
 
-/-- The shipped reactor: the 426 branch, then `_ws_handshake_problem` (`qual`).
-mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._handle_ws_upgrade sha=81f873a1aa2e at=66d076ef (fixed, WS-07) -/
+/-- The reactor's handshake decision: the 426 branch, then
+`_ws_handshake_problem` (`qual`). `reactorCapped` adds the thread cap. -/
 def reactor (r : Req) : ROut :=
   if versionMismatch r then .reject426
   else match vals r.fields N_KEY with
@@ -237,6 +237,29 @@ theorem reactor_ok {r : Req} {key : Bytes} (h : reactor r = .upgrade key) :
       exact qual_ok hk hq
     · rw [if_neg hq] at h; cases h
   · cases h
+
+/-- What `_handle_ws_upgrade` does with a handshake when every detached
+WebSocket thread is in use (`full`): refused, answered 503.
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._handle_ws_upgrade sha=9803a814d899 at=77222e47 (fixed, WS-07) -/
+def reactorCapped (full : Bool) (r : Req) : Option ROut :=
+  match reactor r with
+  | .upgrade key => if full then none else some (.upgrade key)
+  | o => some o
+
+/-- The cap only ever turns an upgrade into a refusal: whatever is still
+upgraded passed the full handshake check. -/
+theorem reactorCapped_ok {full : Bool} {r : Req} {key : Bytes}
+    (h : reactorCapped full r = some (.upgrade key)) : ServerOK r key := by
+  unfold reactorCapped at h
+  cases hr : reactor r with
+  | http => simp [hr] at h
+  | reject426 => simp [hr] at h
+  | upgrade k =>
+    by_cases hf : full = true
+    · simp [hr, hf] at h
+    · simp [hr, hf] at h
+      subst h
+      exact reactor_ok hr
 
 /-! ## Pairing flare's client with flare's servers -/
 

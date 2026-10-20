@@ -13,8 +13,9 @@ The upgrade handshake (§4.2):
 """
 
 from std.builtin.debug_assert import debug_assert
-from std.ffi import OwnedDLHandle, c_int
-from std.memory import Pointer
+from std.atomic import Atomic
+from std.ffi import OwnedDLHandle, _get_global, c_int
+from std.memory import Layout, OptionalPointer, Pointer, alloc
 
 from .frame import (
     DEFAULT_MAX_FRAME_BYTES,
@@ -1134,6 +1135,55 @@ struct _WsOffloadCtx(Movable):
     var handler: def(mut WsConnection) raises thin -> None
 
 
+comptime DEFAULT_MAX_OFFLOADED_WS: Int = 4096
+"""Detached WebSocket threads a process runs at once by default."""
+
+
+def _offload_cell_init() -> (
+    OptionalPointer[NoneType, UntrackedOrigin[mut=True]]
+):
+    var raw = alloc(Layout[Int64](count=1)).unsafe_leak()
+    raw.unsafe_write(Int64(0))
+    return Pointer[NoneType, UntrackedOrigin[mut=True]](
+        unsafe_from_address=Int(raw)
+    )
+
+
+def _offload_cell_keep(p: OptionalPointer[NoneType, UntrackedOrigin[mut=True]]):
+    pass
+
+
+def _offload_slot() -> Pointer[Scalar[DType.int64], MutUntrackedOrigin]:
+    var p = _get_global[
+        "flare_ws_offloaded", _offload_cell_init, _offload_cell_keep
+    ]()
+    return Pointer[Scalar[DType.int64], MutUntrackedOrigin](
+        unsafe_from_address=Int(p.value())
+    )
+
+
+def ws_offload_try_acquire(limit: Int) -> Bool:
+    """Claim one of ``limit`` detached WebSocket threads, process-wide.
+    False when all are held: the upgrade is then refused rather than
+    letting clients spawn threads until the process hits its limit."""
+    var slot = _offload_slot()
+    var held = Atomic[Int64].load(slot)
+    while held < Int64(limit):
+        if Atomic[Int64].compare_exchange(slot, held, held + 1):
+            return True
+    return False
+
+
+def ws_offload_release():
+    """Give back a thread claimed by ``ws_offload_try_acquire``."""
+    _ = Atomic[Int64].fetch_add(_offload_slot(), -1)
+
+
+def ws_offloaded() -> Int:
+    """Detached WebSocket threads currently running."""
+    return Int(Atomic[Int64].load(_offload_slot()))
+
+
 def _ws_offload_entry(arg: _OpaquePtr) -> _OpaquePtr:
     """``pthread`` start routine for one offloaded WebSocket connection.
 
@@ -1157,6 +1207,7 @@ def _ws_offload_entry(arg: _OpaquePtr) -> _OpaquePtr:
         ctx.handler(ctx.conn)
     except e:
         print("[ws] offloaded connection error: " + String(e))
+    ws_offload_release()
     return _null_ptr()
 
 
@@ -1177,9 +1228,9 @@ def _spawn_ws_offload(
             reactor has already zeroed its own copy of the fd, so this
             function is the only owner left and dropping it on the floor
             would leak a live socket per failed handshake. ``EAGAIN`` at
-            the process thread limit is the reachable case, and it is
-            reachable on demand while there is no cap on offloaded
-            threads.
+            the process thread limit is the reachable case. The caller
+            claimed a slot with ``ws_offload_try_acquire``; it is given
+            back here on failure and by the thread when it ends.
     """
     from std.memory.alloc import unsafe_alloc
 
@@ -1201,6 +1252,7 @@ def _spawn_ws_offload(
     except e:
         ctx_ptr.unsafe_deinit_pointee()
         ctx_ptr.unsafe_free()
+        ws_offload_release()
         raise e
     # No free on this path even if it raises: the thread is already
     # running and owns the context, so a free here would be a double

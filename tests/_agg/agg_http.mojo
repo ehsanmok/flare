@@ -3741,6 +3741,9 @@ from test_server_ws_offload import (
 from test_server_ws_offload import (
     test_two_offloaded_websockets_run_concurrently as test_server_ws_offload__test_two_offloaded_websockets_run_concurrently,
 )
+from test_server_ws_offload import (
+    test_offloaded_threads_are_capped as test_server_ws_offload__test_offloaded_threads_are_capped,
+)
 from test_server_ws_upgrade import (
     test_http_and_ws_on_one_port as test_server_ws_upgrade__test_http_and_ws_on_one_port,
 )
@@ -6535,6 +6538,7 @@ def main() raises:
     suite.test[
         test_server_ws_offload__test_two_offloaded_websockets_run_concurrently
     ]()
+    suite.test[test_server_ws_offload__test_offloaded_threads_are_capped]()
     # tests/http/test_server_ws_upgrade.mojo
     suite.test[test_server_ws_upgrade__test_http_and_ws_on_one_port]()
     suite.test[

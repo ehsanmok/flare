@@ -131,7 +131,7 @@ def upgradeTaken (wsHandler tls isWs : Bool) : Bool :=
 /-- Where the answer goes, given the branch condition: `_handle_ws_upgrade`
 writes on the detached raw fd; every other path goes through the
 connection's (TLS or plain) stream.
-mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._start_h2c_upgrade+ConnHandle._handle_ws_upgrade sha=9774bd2a2578 at=98b092d2 (fixed, APP-48) -/
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._start_h2c_upgrade+ConnHandle._handle_ws_upgrade sha=6983d7a79cfa at=77222e47 (fixed, APP-48) -/
 def wire (wsHandler tls isWs : Bool) : Wire :=
   if upgradeTaken wsHandler tls isWs then .cleartext
   else if tls then .tls else .cleartext
