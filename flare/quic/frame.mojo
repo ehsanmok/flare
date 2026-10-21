@@ -65,7 +65,7 @@ from .varint import (
     Varint,
     VARINT_MAX,
     decode_varint,
-    encode_varint,
+    encode_varint_into,
     varint_encoded_length,
 )
 
@@ -271,14 +271,11 @@ trait FrameHandler(Deinitable, Movable):
 
 
 def _push_varint(mut out: List[UInt8], value: UInt64) raises:
-    var encoded = encode_varint(value)
-    for i in range(len(encoded)):
-        out.append(encoded[i])
+    encode_varint_into(value, out)
 
 
 def _push_bytes(mut out: List[UInt8], data: List[UInt8]):
-    for i in range(len(data)):
-        out.append(data[i])
+    out.extend(Span(data))
 
 
 # ── Per-type encoders ────────────────────────────────────────────────────────

@@ -257,9 +257,9 @@ A peer CONNECTION_CLOSE enters draining from the open state
 (`apply_connection_close`); the slot then ends with its idle timer. While
 closing, `_handle_inbound` processes nothing, so the peer's CONNECTION_CLOSE
 is answered like any other packet and the closing timer ends the slot.
-mirrors flare/quic/server.mojo#QuicListener._build_1rtt_response+QuicListener._build_initial_response+QuicListener._build_handshake_response+QuicListener._drain_and_send sha=4bfd6370e5fd at=c738a911,
-flare/quic/state.mojo#apply_connection_close sha=59dee456aa9d at=c738a911,
-flare/quic/server.mojo#QuicListener._close_for+QuicListener._enter_closing+QuicListener._answer_closing+QuicListener._handle_inbound+QuicListener.advance_timers sha=be199d49b02d at=c738a911 -/
+mirrors flare/quic/server.mojo#QuicListener._build_1rtt_response+QuicListener._build_initial_response+QuicListener._build_handshake_response+QuicListener._drain_and_send sha=0ee3ae3a8a7c at=f52cce73,
+flare/quic/state.mojo#apply_connection_close sha=59dee456aa9d at=f52cce73,
+flare/quic/server.mojo#QuicListener._close_for+QuicListener._enter_closing+QuicListener._answer_closing+QuicListener._handle_inbound+QuicListener.advance_timers sha=be199d49b02d at=f52cce73 -/
 def srvStepNow (pto : Nat) (s : SSt) : CEv → SSt
   | .localClose t => match s.phase with
     | .opened => ⟨.closing (t + 3 * pto), false, .cc :: s.out⟩

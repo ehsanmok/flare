@@ -330,6 +330,20 @@ def encode_short_header(
     (value minus one). Header protection itself is the caller's
     job after this prefix is emitted.
     """
+    var out = List[UInt8](capacity=1 + dcid.length())
+    encode_short_header_into(dcid, spin_bit, key_phase, pn_length, out)
+    return out^
+
+
+def encode_short_header_into(
+    dcid: ConnectionId,
+    spin_bit: Bool,
+    key_phase: Bool,
+    pn_length: Int,
+    mut out: List[UInt8],
+) raises:
+    """Append the short-header public prefix to ``out``; see
+    :func:`encode_short_header`."""
     if dcid.length() > MAX_CID_LENGTH:
         raise Error("quic packet: dcid length exceeds 20")
     if pn_length < 1 or pn_length > 4:
@@ -340,8 +354,6 @@ def encode_short_header(
     if key_phase:
         first |= 0x04
     first |= (pn_length - 1) & 0x3
-    var out = List[UInt8](capacity=1 + dcid.length())
     out.append(UInt8(first))
     for i in range(dcid.length()):
         out.append(dcid.bytes[i])
-    return out^

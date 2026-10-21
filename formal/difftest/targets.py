@@ -41,7 +41,7 @@ TARGETS = {
     ),
     "quic_varint.encode": dict(
         driver="dt_quic_varint",
-        symbols=["flare/quic/varint.mojo#encode_varint+varint_encoded_length+VARINT_MAX"],
+        symbols=["flare/quic/varint.mojo#encode_varint+encode_varint_into+varint_encoded_length+VARINT_MAX"],
         models=["Flare/L1_Encoding/QuicVarint.lean"],
         fuzz=[],
         gen="quic_encode",

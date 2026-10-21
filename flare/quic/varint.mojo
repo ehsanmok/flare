@@ -77,8 +77,15 @@ def encode_varint(value: UInt64) raises -> List[UInt8]:
     pad to a longer form for byte-alignment reasons -- aioquic does
     this for packet-number space).
     """
+    var out = List[UInt8](capacity=8)
+    encode_varint_into(value, out)
+    return out^
+
+
+def encode_varint_into(value: UInt64, mut out: List[UInt8]) raises:
+    """Append the encoding of ``value`` to ``out``; see :func:`encode_varint`.
+    """
     var n = varint_encoded_length(value)
-    var out = List[UInt8](capacity=n)
     if n == 1:
         # 1-byte: 00xxxxxx
         out.append(UInt8(value & UInt64(0x3F)))
@@ -102,7 +109,6 @@ def encode_varint(value: UInt64) raises -> List[UInt8]:
         out.append(UInt8((value >> 16) & UInt64(0xFF)))
         out.append(UInt8((value >> 8) & UInt64(0xFF)))
         out.append(UInt8(value & UInt64(0xFF)))
-    return out^
 
 
 def decode_varint(buf: Span[UInt8, _]) raises -> Varint:

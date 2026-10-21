@@ -176,7 +176,11 @@ from ..tls._rustls_quic_ffi import (
     _do_take_crypto,
 )
 from ._pmtud import split_frames
-from .packet import encode_short_header, packet_number_length
+from .packet import (
+    encode_short_header,
+    encode_short_header_into,
+    packet_number_length,
+)
 from .retry import (
     NEW_TOKEN_VERSION,
     encode_retry_packet,
@@ -233,6 +237,8 @@ def _ip_bytes(peer: SocketAddr) -> List[UInt8]:
     return List[UInt8](String(peer.ip).as_bytes())
 
 
+comptime _AEAD_TAG_BYTES: Int = 16
+"""The AEAD tag every QUIC packet carries (RFC 9001 sec 5.3)."""
 comptime _MAX_CLOSING_MS: UInt64 = 10_000
 """Upper bound on the closing period (RFC 9000 sec 10.2: three PTOs).
 Bounds how long a closed slot is retained when the PTO has backed off."""
@@ -4047,18 +4053,19 @@ struct QuicListener(Movable):
             _ = _do_key_update(self.tls_acceptor._lib, handle)
             kc.key_phase = not kc.key_phase
             kc.phase_first_pn = pn
-        var peer_cid = kc.peer_cid.copy()
-        # 1. Build the unprotected short-header prefix (spin bit 0).
-        var prefix = encode_short_header(
-            peer_cid,
-            spin_bit=False,
-            key_phase=kc.key_phase,
-            pn_length=pn_length,
+        # 1-2. The unprotected header: short-header prefix (spin bit 0)
+        # and pn bytes, in a buffer sized for the whole datagram so the
+        # payload and tag append to it without growing it.
+        var unprotected_header = List[UInt8](
+            capacity=1
+            + kc.peer_cid.length()
+            + pn_length
+            + len(plaintext)
+            + _AEAD_TAG_BYTES
         )
-        # 2. Build unprotected header = prefix + pn bytes.
-        var unprotected_header = List[UInt8](capacity=len(prefix) + pn_length)
-        for i in range(len(prefix)):
-            unprotected_header.append(prefix[i])
+        encode_short_header_into(
+            kc.peer_cid, False, kc.key_phase, pn_length, unprotected_header
+        )
         for i in range(pn_length):
             var shift = (pn_length - 1 - i) * 8
             unprotected_header.append(UInt8((Int(pn) >> shift) & 0xFF))

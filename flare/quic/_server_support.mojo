@@ -28,7 +28,7 @@ from .frame import AckFrame, AckRange, EcnCounts
 comptime _CLOCK_MONOTONIC: c_int = c_int(
     6
 ) if CompilationTarget.is_macos() else c_int(1)
-from .varint import encode_varint
+from .varint import encode_varint, encode_varint_into
 from ..tls.rustls_quic import QuicEncryptionLevel
 
 
@@ -211,15 +211,9 @@ def _encode_h3_stream_frame(
     if fin:
         frame_type |= 0x01
     out.append(UInt8(frame_type))
-    var sid_var = encode_varint(stream_id)
-    for i in range(len(sid_var)):
-        out.append(sid_var[i])
-    var off_var = encode_varint(offset)
-    for i in range(len(off_var)):
-        out.append(off_var[i])
-    var len_var = encode_varint(UInt64(len(stream_bytes)))
-    for i in range(len(len_var)):
-        out.append(len_var[i])
+    encode_varint_into(stream_id, out)
+    encode_varint_into(offset, out)
+    encode_varint_into(UInt64(len(stream_bytes)), out)
     out.extend(stream_bytes)
 
 
