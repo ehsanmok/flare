@@ -55,7 +55,7 @@ def parseFrame (buf : Bytes) : ParseRes :=
                payload := rest.take length } (rest.drop length)
   | _ => .needMore
 
-/-- mirrors flare/http2/frame.mojo#encode_frame+encode_frame_into sha=ef129a80d77b at=24f7670c -/
+/-- mirrors flare/http2/frame.mojo#encode_frame+encode_frame_into+encode_frame_header_into sha=66a5943a6b1c at=e442682a -/
 def encodeFrame (f : Frame) : Bytes :=
   let n := f.payload.length
   let sid := f.sid &&& 0x7FFFFFFF

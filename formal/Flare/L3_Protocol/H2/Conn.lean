@@ -597,7 +597,7 @@ def dataCredit (c : Conn) (f : Fr) (credit : Nat) : Conn × List Out :=
 counts the body in `buffered`, `s` has the stream credit restored. The
 content-length mismatch reset returns the frame's connection credit; no
 stream WINDOW_UPDATE goes out on a stream this frame closes.
-mirrors flare/http2/state.mojo#Connection.handle_frame+Connection.make_response+Connection.make_response_with_trailers sha=23bd5858ca65 at=268ccb85 -/
+mirrors flare/http2/state.mojo#Connection.handle_frame+Connection.make_response+Connection.make_response_with_trailers sha=1f63214e4ebe at=c64f0e0b -/
 def dataFinish (c : Conn) (f : Fr) (s : Stream) (cr : Nat) : Conn × List Out :=
   if f.f1 && (0 : Int) ≤ s.contentLength && (s.received : Int) ≠ s.contentLength then
     rstCloseX c f.sid ePROTOCOL s (wu0If f.plen)
@@ -767,10 +767,10 @@ def release (c : Conn) (n : Nat) : Conn × List Out :=
     ({ c with withheld := 0, recvW := c.recvW + c.withheld }, [.wu 0 c.withheld])
   else (c, [])
 
-/-- mirrors flare/http2/server.mojo#Http2Connection.queue_stream_data sha=c761c5def83b at=59bda50f -/
+/-- mirrors flare/http2/server.mojo#Http2Connection.queue_stream_data sha=7bdf64108236 at=c64f0e0b -/
 def budget (c : Conn) (s : Stream) : Int := if c.sendW < s.sendW then c.sendW else s.sendW
 
-/-- mirrors flare/http2/server.mojo#Http2Connection.queue_stream_data sha=c761c5def83b at=59bda50f -/
+/-- mirrors flare/http2/server.mojo#Http2Connection.queue_stream_data sha=7bdf64108236 at=c64f0e0b -/
 def send (c : Conn) (k n : Nat) : Conn × List Out :=
   match get c k with
   | none => (c, [])
@@ -784,7 +784,7 @@ def send (c : Conn) (k n : Nat) : Conn × List Out :=
 
 /-- One-shot response: only when the body fits both windows, otherwise
 flare takes the `queue_stream_data` path (modelled by `send`).
-mirrors flare/http2/server.mojo#Http2Connection.emit_response sha=891fb6d427c7 at=24f7670c -/
+mirrors flare/http2/server.mojo#Http2Connection.emit_response sha=1c9c08a9782d at=c64f0e0b -/
 def respond (c : Conn) (k n : Nat) : Conn × List Out :=
   match get c k with
   | none => (c, [])

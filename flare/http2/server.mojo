@@ -46,6 +46,7 @@ from .frame import (
     H2_DEFAULT_FRAME_SIZE,
     H2_PREFACE,
     encode_frame,
+    encode_frame_header_into,
     encode_frame_into,
     parse_frame,
 )
@@ -621,7 +622,8 @@ struct Http2Connection(Defaultable, Movable):
                 or len(resp.body) > self.conn.max_frame_size
             )
             if too_big:
-                var body = resp.body.copy()
+                var body = List[UInt8]()
+                swap(body, resp.body)
                 var tk = resp.trailers._keys.copy()
                 var tv = resp.trailers._values.copy()
                 self.begin_stream_response(sid, resp^)
@@ -826,9 +828,7 @@ struct Http2Connection(Defaultable, Movable):
         var hf = self.conn.make_stream_headers(
             sid, resp.status, Span[HpackHeader, _](hdrs)
         )
-        var bytes = encode_frame(hf)
-        for j in range(len(bytes)):
-            self.outbox.append(bytes[j])
+        encode_frame_into(hf, self.outbox)
 
     def _send_budget(self, sid: Int) raises -> Int:
         """How many body bytes may go out on `sid` right now.
@@ -908,19 +908,11 @@ struct Http2Connection(Defaultable, Movable):
                 take = mfs
             if take > budget:
                 take = budget
-            var df = Frame()
-            df.header.type = FrameType.DATA()
-            df.header.stream_id = sid
-            df.header.flags = FrameFlags()
-            # Two copies of the payload, both in one go: `data` into the
-            # frame, and the encoded frame into the outbox. A byte at a time
-            # they are the whole cost of a large response — every byte of it
-            # appended twice, individually.
-            var pl = List[UInt8]()
-            pl.extend(data[sent : sent + take])
-            df.payload = pl^
-            var bytes = encode_frame(df)
-            self.outbox.extend(Span(bytes))
+            # The payload is copied once, straight into the outbox.
+            encode_frame_header_into(
+                FrameType.DATA(), FrameFlags(), sid, take, self.outbox
+            )
+            self.outbox.extend(data[sent : sent + take])
             sent += take
             budget -= take
         self.conn.send_window -= sent
@@ -951,18 +943,15 @@ struct Http2Connection(Defaultable, Movable):
             var tf = self.conn.make_stream_trailers(
                 sid, Span[HpackHeader, _](trailers)
             )
-            var bytes = encode_frame(tf)
-            for j in range(len(bytes)):
-                self.outbox.append(bytes[j])
+            encode_frame_into(tf, self.outbox)
         else:
-            var df = Frame()
-            df.header.type = FrameType.DATA()
-            df.header.stream_id = sid
-            df.header.flags = FrameFlags(FrameFlags.END_STREAM())
-            df.payload = List[UInt8]()
-            var bytes = encode_frame(df)
-            for j in range(len(bytes)):
-                self.outbox.append(bytes[j])
+            encode_frame_header_into(
+                FrameType.DATA(),
+                FrameFlags(FrameFlags.END_STREAM()),
+                sid,
+                0,
+                self.outbox,
+            )
         var s = self.conn.streams[sid].copy()
         s.state = StreamState.CLOSED()
         self.conn.streams[sid] = s^

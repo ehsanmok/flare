@@ -1731,8 +1731,7 @@ struct Connection(Copyable, Defaultable):
             df.header.stream_id = sid
             df.header.flags = FrameFlags(FrameFlags.END_STREAM())
             var pl = List[UInt8](capacity=len(body))
-            for i in range(len(body)):
-                pl.append(body[i])
+            pl.extend(body)
             df.payload = pl^
             frames.append(df^)
         return frames^
@@ -1782,8 +1781,7 @@ struct Connection(Copyable, Defaultable):
             # No END_STREAM: the trailing HEADERS below closes the stream.
             df.header.flags = FrameFlags()
             var pl = List[UInt8](capacity=len(body))
-            for i in range(len(body)):
-                pl.append(body[i])
+            pl.extend(body)
             df.payload = pl^
             frames.append(df^)
         var tl = List[HpackHeader]()

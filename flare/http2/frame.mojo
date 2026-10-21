@@ -236,6 +236,27 @@ def parse_frame(buf: Span[UInt8, _]) raises -> Optional[Frame]:
 # ── encode_frame ────────────────────────────────────────────────────────
 
 
+def encode_frame_header_into(
+    ftype: FrameType,
+    flags: FrameFlags,
+    stream_id: Int,
+    length: Int,
+    mut out: List[UInt8],
+):
+    """Append the 9-octet frame header (RFC 9113 sec 4.1) for a payload of
+    ``length`` bytes; the caller appends the payload itself."""
+    out.append(UInt8((length >> 16) & 0xFF))
+    out.append(UInt8((length >> 8) & 0xFF))
+    out.append(UInt8(length & 0xFF))
+    out.append(ftype.value)
+    out.append(flags.bits)
+    var sid = stream_id & 0x7FFFFFFF
+    out.append(UInt8((sid >> 24) & 0xFF))
+    out.append(UInt8((sid >> 16) & 0xFF))
+    out.append(UInt8((sid >> 8) & 0xFF))
+    out.append(UInt8(sid & 0xFF))
+
+
 def encode_frame(f: Frame) -> List[UInt8]:
     """Emit the wire bytes for ``f`` (header + payload)."""
     var out = List[UInt8](capacity=9 + len(f.payload))
@@ -245,17 +266,9 @@ def encode_frame(f: Frame) -> List[UInt8]:
 
 def encode_frame_into(f: Frame, mut out: List[UInt8]):
     """Append the wire bytes for ``f`` (header + payload) to ``out``."""
-    var n = len(f.payload)
-    out.append(UInt8((n >> 16) & 0xFF))
-    out.append(UInt8((n >> 8) & 0xFF))
-    out.append(UInt8(n & 0xFF))
-    out.append(f.header.type.value)
-    out.append(f.header.flags.bits)
-    var sid = f.header.stream_id & 0x7FFFFFFF
-    out.append(UInt8((sid >> 24) & 0xFF))
-    out.append(UInt8((sid >> 16) & 0xFF))
-    out.append(UInt8((sid >> 8) & 0xFF))
-    out.append(UInt8(sid & 0xFF))
+    encode_frame_header_into(
+        f.header.type, f.header.flags, f.header.stream_id, len(f.payload), out
+    )
     # One copy. A DATA frame's payload is up to SETTINGS_MAX_FRAME_SIZE, and a
     # large response is nothing but these, so a byte at a time here is a scalar
     # pass over everything the connection sends.
