@@ -26,8 +26,10 @@
  *       -2 = output buffer too small (caller must grow + retry).
  */
 
+#include <pthread.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
 
 /* ── Inline brotli ABI declarations (minimal subset) ─────────────────────── */
 
@@ -41,15 +43,25 @@
 #define BROTLI_MODE_TEXT      1
 #define BROTLI_MODE_FONT      2
 
-/* One-shot encoder. Matches the public BrotliEncoderCompress signature. */
-extern int BrotliEncoderCompress(
-    int quality,
-    int lgwin,
-    int mode,
-    size_t input_size,
-    const uint8_t* input_buffer,
-    size_t* encoded_size,
-    uint8_t* encoded_buffer);
+/* Streaming encoder, from <brotli/encode.h>. */
+typedef void* (*brotli_alloc_func)(void* opaque, size_t size);
+typedef void (*brotli_free_func)(void* opaque, void* address);
+typedef struct BrotliEncoderStateStruct BrotliEncoderState;
+#define BROTLI_PARAM_MODE      0
+#define BROTLI_PARAM_QUALITY   1
+#define BROTLI_PARAM_LGWIN     2
+#define BROTLI_PARAM_SIZE_HINT 5
+#define BROTLI_OPERATION_FINISH 2
+extern BrotliEncoderState* BrotliEncoderCreateInstance(
+    brotli_alloc_func alloc_func, brotli_free_func free_func, void* opaque);
+extern void BrotliEncoderDestroyInstance(BrotliEncoderState* state);
+extern int BrotliEncoderSetParameter(
+    BrotliEncoderState* state, int param, uint32_t value);
+extern int BrotliEncoderCompressStream(
+    BrotliEncoderState* state, int op,
+    size_t* available_in, const uint8_t** next_in,
+    size_t* available_out, uint8_t** next_out, size_t* total_out);
+extern int BrotliEncoderIsFinished(BrotliEncoderState* state);
 
 /* From <brotli/decode.h> — decoder one-shot result codes. */
 typedef enum {
@@ -65,6 +77,101 @@ extern BrotliDecoderResult BrotliDecoderDecompress(
     size_t* decoded_size,
     uint8_t* decoded_buffer);
 
+/* ── Encoder scratch cache ───────────────────────────────────────────────────
+ *
+ * The encoder allocates its work buffers per call: at quality 1, over
+ * 600 KiB. Blocks that size come straight from the OS and go back to it
+ * on free, so every response paid for mapping, zero-filling and
+ * unmapping them, more than the compression itself under load. Each
+ * thread keeps a few freed large blocks for the next call instead.
+ *
+ * Bounded: only blocks of 64 KiB to 1 MiB are kept, at most 8 and 4 MiB
+ * per thread, released when the thread exits. A kept block holds the
+ * previous call's scratch, which the encoder overwrites before reading;
+ * its output depends on its input alone.
+ */
+
+#define CACHE_SLOTS 8
+#define CACHE_MIN_BLOCK ((size_t)64 << 10)
+#define CACHE_MAX_BLOCK ((size_t)1 << 20)
+#define CACHE_MAX_BYTES ((size_t)4 << 20)
+#define BLOCK_HEADER 16
+
+typedef struct {
+    int n;
+    size_t bytes;
+    size_t size[CACHE_SLOTS];
+    void* block[CACHE_SLOTS];
+} scratch_cache;
+
+static pthread_key_t cache_key;
+static pthread_once_t cache_once = PTHREAD_ONCE_INIT;
+static int cache_key_ok = 0;
+
+static void cache_release(void* p) {
+    scratch_cache* c = (scratch_cache*)p;
+    for (int i = 0; i < c->n; i++) free(c->block[i]);
+    free(c);
+}
+
+static void cache_key_init(void) {
+    cache_key_ok = pthread_key_create(&cache_key, cache_release) == 0;
+}
+
+static scratch_cache* thread_cache(void) {
+    pthread_once(&cache_once, cache_key_init);
+    if (!cache_key_ok) return NULL;
+    scratch_cache* c = (scratch_cache*)pthread_getspecific(cache_key);
+    if (!c) {
+        c = (scratch_cache*)calloc(1, sizeof(scratch_cache));
+        if (c && pthread_setspecific(cache_key, c) != 0) {
+            free(c);
+            c = NULL;
+        }
+    }
+    return c;
+}
+
+static void* scratch_alloc(void* opaque, size_t size) {
+    (void)opaque;
+    if (size > SIZE_MAX - BLOCK_HEADER) return NULL;
+    scratch_cache* c = size >= CACHE_MIN_BLOCK ? thread_cache() : NULL;
+    if (c) {
+        for (int i = 0; i < c->n; i++) {
+            if (c->size[i] == size) {
+                uint8_t* b = (uint8_t*)c->block[i];
+                c->bytes -= size;
+                c->n--;
+                c->size[i] = c->size[c->n];
+                c->block[i] = c->block[c->n];
+                return b + BLOCK_HEADER;
+            }
+        }
+    }
+    uint8_t* b = (uint8_t*)malloc(size + BLOCK_HEADER);
+    if (!b) return NULL;
+    *(size_t*)b = size;
+    return b + BLOCK_HEADER;
+}
+
+static void scratch_free(void* opaque, void* address) {
+    (void)opaque;
+    if (!address) return;
+    uint8_t* b = (uint8_t*)address - BLOCK_HEADER;
+    size_t size = *(size_t*)b;
+    if (size >= CACHE_MIN_BLOCK && size <= CACHE_MAX_BLOCK) {
+        scratch_cache* c = thread_cache();
+        if (c && c->n < CACHE_SLOTS && c->bytes + size <= CACHE_MAX_BYTES) {
+            c->size[c->n] = size;
+            c->block[c->n] = b;
+            c->n++;
+            c->bytes += size;
+            return;
+        }
+    }
+    free(b);
+}
+
 /* ── Public C API (callable from Mojo via OwnedDLHandle) ─────────────────── */
 
 int flare_brotli_compress(const void* src, size_t src_len,
@@ -73,20 +180,26 @@ int flare_brotli_compress(const void* src, size_t src_len,
     if (!src || !dst) return -1;
     if (quality < 0) quality = 5;
     if (quality > 11) quality = 11;
-    size_t out_len = dst_cap;
-    int rc = BrotliEncoderCompress(
-        quality,
-        BROTLI_DEFAULT_WINDOW,
-        BROTLI_MODE_GENERIC,
-        src_len,
-        (const uint8_t*)src,
-        &out_len,
-        (uint8_t*)dst);
-    if (rc == BROTLI_FALSE) {
-        if (out_len == 0 || out_len == dst_cap) return -2;
-        return -1;
-    }
-    return (int)out_len;
+    BrotliEncoderState* s =
+        BrotliEncoderCreateInstance(scratch_alloc, scratch_free, NULL);
+    if (!s) return -1;
+    BrotliEncoderSetParameter(s, BROTLI_PARAM_QUALITY, (uint32_t)quality);
+    BrotliEncoderSetParameter(s, BROTLI_PARAM_LGWIN, BROTLI_DEFAULT_WINDOW);
+    BrotliEncoderSetParameter(s, BROTLI_PARAM_MODE, BROTLI_MODE_GENERIC);
+    if (src_len < ((size_t)1 << 30))
+        BrotliEncoderSetParameter(s, BROTLI_PARAM_SIZE_HINT, (uint32_t)src_len);
+    size_t avail_in = src_len;
+    const uint8_t* next_in = (const uint8_t*)src;
+    size_t avail_out = dst_cap;
+    uint8_t* next_out = (uint8_t*)dst;
+    int ok = BrotliEncoderCompressStream(s, BROTLI_OPERATION_FINISH,
+                                         &avail_in, &next_in,
+                                         &avail_out, &next_out, NULL);
+    int done = ok && BrotliEncoderIsFinished(s);
+    BrotliEncoderDestroyInstance(s);
+    if (!ok) return -1;
+    if (!done) return -2;
+    return (int)(dst_cap - avail_out);
 }
 
 int flare_brotli_decompress(const void* src, size_t src_len,

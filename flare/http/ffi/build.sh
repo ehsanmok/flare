@@ -126,7 +126,7 @@ if [ -f "$CONDA_PREFIX/lib/libbrotlienc.so" ] \
             -o "$BROTLI_TARGET" \
             "$BROTLI_SOURCE" \
             -L"$CONDA_PREFIX/lib" \
-            -lbrotlienc -lbrotlidec -lbrotlicommon \
+            -lbrotlienc -lbrotlidec -lbrotlicommon -pthread \
             $NODELETE \
             -Wl,-rpath,"$CONDA_PREFIX/lib"; then
             cp "$BROTLI_TARGET" "$BROTLI_INSTALLED"

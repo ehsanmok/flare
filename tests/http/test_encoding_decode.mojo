@@ -15,6 +15,7 @@ from flare.http.encoding import (
     compress_gzip,
     decode_content,
     decompress_deflate,
+    decompress_brotli,
     decompress_gzip,
 )
 
@@ -24,6 +25,37 @@ def _text(n: Int) -> List[UInt8]:
     for i in range(n):
         out.append(UInt8(97 + (i * 7) % 26))
     return out^
+
+
+def _mixed(n: Int, seed: Int) -> List[UInt8]:
+    """Text with enough variety that the encoder builds real tables."""
+    var out = List[UInt8](capacity=n)
+    var x = seed
+    for _ in range(n):
+        x = (x * 1103515245 + 12345) & 0x7FFFFFFF
+        out.append(UInt8(97 + (x >> 16) % 13))
+    return out^
+
+
+def test_brotli_is_deterministic_across_reused_scratch() raises:
+    """The brotli encoder's work buffers are reused between calls on a
+    thread. Output must depend on the input alone: compressing the same
+    bytes again, on buffers that still hold another input's scratch,
+    gives the same stream, and it decodes back to the input."""
+    for q in [0, 1, 5]:
+        for n in [100, 20_000, 300_000]:
+            var src = _mixed(n, n + q)
+            var first = compress_brotli(Span[UInt8, _](src), q)
+            var other = _mixed(n, 7 * n + 1)
+            _ = compress_brotli(Span[UInt8, _](other), q)
+            var again = compress_brotli(Span[UInt8, _](src), q)
+            assert_equal(len(again), len(first))
+            for i in range(len(first)):
+                assert_equal(again[i], first[i])
+            var back = decompress_brotli(Span[UInt8, _](again))
+            assert_equal(len(back), n)
+            for i in range(n):
+                assert_equal(back[i], src[i])
 
 
 def test_round_trip() raises:

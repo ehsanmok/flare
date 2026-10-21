@@ -868,6 +868,9 @@ from test_download_tls_truncation import (
     test_length_framed_tls_body_needs_no_close_notify as test_download_tls_truncation__test_length_framed_tls_body_needs_no_close_notify,
 )
 from test_encoding_decode import (
+    test_brotli_is_deterministic_across_reused_scratch as test_encoding_decode__test_brotli_is_deterministic_across_reused_scratch,
+)
+from test_encoding_decode import (
     test_round_trip as test_encoding_decode__test_round_trip,
 )
 from test_encoding_decode import (
@@ -5065,6 +5068,9 @@ def main() raises:
         test_download_tls_truncation__test_length_framed_tls_body_needs_no_close_notify
     ]()
     # tests/http/test_encoding_decode.mojo
+    suite.test[
+        test_encoding_decode__test_brotli_is_deterministic_across_reused_scratch
+    ]()
     suite.test[test_encoding_decode__test_round_trip]()
     suite.test[test_encoding_decode__test_truncated_gzip_is_an_error]()
     suite.test[test_encoding_decode__test_high_ratio_body_decodes_whole]()
