@@ -384,6 +384,23 @@ struct Http2ConnHandle(Movable):
                 return TLS_FILL_CROSS
             return TLS_FILL_CLOSED
 
+    def _take_outbox(mut self):
+        """Queue the driver's outbound bytes behind ``write_buf``.
+
+        When nothing is pending the two buffers trade places instead, so
+        a response body is not copied a second time; otherwise the bytes
+        are appended. Neither keeps more than ``_RETAINED_BYTES`` of
+        capacity for the next round.
+        """
+        if self.write_pos >= len(self.write_buf):
+            self.write_buf.clear()
+            self.write_pos = 0
+            swap(self.write_buf, self.h2.outbox)
+        else:
+            self.write_buf.extend(Span(self.h2.outbox))
+            self.h2.outbox.clear()
+        _reset_retained(self.h2.outbox)
+
     def _flush_write_buf_tls(mut self) raises -> Optional[StepResult]:
         """TLS twin of the ``on_writable`` send loop; see the h1
         ``ConnHandle._flush_write_buf_tls`` for the contract."""
@@ -422,13 +439,7 @@ struct Http2ConnHandle(Movable):
         initial SETTINGS frame is pre-queued in ``write_buf``.
         """
         self.h2.feed(bytes)
-        var ack = self.h2.drain()
-
-        # One copy: this is every outbound byte of the connection, and
-
-        # for a streaming response it runs once per window's worth.
-
-        self.write_buf.extend(Span(ack))
+        self._take_outbox()
 
     # ── Event handlers ────────────────────────────────────────────────────────
 
@@ -564,14 +575,8 @@ struct Http2ConnHandle(Movable):
                 self._stream_pump()
             except:
                 self.should_close = True
-        # Drain everything the driver wants to send.
-        var out = self.h2.drain()
-
-        # One copy: this is every outbound byte of the connection, and
-
-        # for a streaming response it runs once per window's worth.
-
-        self.write_buf.extend(Span(out))
+        # Everything the driver wants to send.
+        self._take_outbox()
         if self.h2.conn.goaway_received:
             self.should_close = True
         if self.h2.conn.goaway_sent:
@@ -996,13 +1001,7 @@ struct Http2ConnHandle(Movable):
                 self._stream_pump()
             except:
                 self.should_close = True
-        var out = self.h2.drain()
-
-        # One copy: this is every outbound byte of the connection, and
-
-        # for a streaming response it runs once per window's worth.
-
-        self.write_buf.extend(Span(out))
+        self._take_outbox()
         if self.h2.conn.goaway_received:
             self.should_close = True
         if self.h2.conn.goaway_sent:
@@ -1103,7 +1102,7 @@ struct Http2ConnHandle(Movable):
                 idle_timeout_ms=config.write_timeout_ms,
             )
         # write_buf fully drained; reset for the next response.
-        self.write_buf.clear()
+        _reset_retained(self.write_buf)
         self.write_pos = 0
         # Streaming responses (K1 on h2): refill from every active chunk
         # source, window permitting, and stay in STATE_WRITING to flush.
@@ -1116,9 +1115,7 @@ struct Http2ConnHandle(Movable):
             except:
                 self.should_close = True
                 return StepResult(want_read=False, want_write=False, done=True)
-            var out = self.h2.drain()
-            for i in range(len(out)):
-                self.write_buf.append(out[i])
+            self._take_outbox()
             if len(self.write_buf) > self.write_pos:
                 self.state = STATE_WRITING
                 return StepResult(
@@ -1205,6 +1202,19 @@ def _h2_conn_ptr_from_int(
 
 
 # ── Protocol-detection (preface peek) ──────────────────────────────────────
+
+
+comptime _RETAINED_BYTES: Int = 64 * 1024
+"""Largest buffer capacity a connection keeps between responses: one
+large response must not pin its size for the connection's lifetime."""
+
+
+def _reset_retained(mut buf: List[UInt8]):
+    """Empty ``buf``, keeping its allocation only up to ``_RETAINED_BYTES``."""
+    if buf.capacity() > _RETAINED_BYTES:
+        buf = List[UInt8]()
+    else:
+        buf.clear()
 
 
 comptime _H2_PREFACE_BYTES_LEN: Int = 24

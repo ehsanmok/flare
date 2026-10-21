@@ -190,6 +190,57 @@ def test_h2_conn_handle_get_round_trip() raises:
     _ = _close(client_fd)
 
 
+def _big(req: Request) raises -> Response:
+    return Response(200, body=List[UInt8](length=1 << 20, fill=120))
+
+
+def test_large_response_does_not_pin_its_buffers() raises:
+    """A 1 MiB response arrives whole, and afterwards the connection keeps
+    at most 64 KiB of buffer capacity rather than the response's size."""
+    var listener = TcpListener.bind(SocketAddr.localhost(0))
+    var port = UInt16(listener.local_addr().port)
+    var client_stream = TcpStream.connect(SocketAddr.localhost(port))
+    var server = listener.accept()
+    var client_fd = client_stream._socket.fd
+    client_stream._socket.fd = c_int(-1)
+    _ = client_stream^
+    _set_nonblocking(server._socket.fd)
+    _set_nonblocking(client_fd)
+
+    var handle = Http2ConnHandle(server^, Http2Config())
+    var client = Http2ClientConnection()
+    var sid = client.next_stream_id()
+    var no_extra = List[HpackHeader]()
+    var no_body = List[UInt8]()
+    client.send_request(
+        sid, "GET", "http", "127.0.0.1", "/", no_extra, Span[UInt8, _](no_body)
+    )
+    var cfg = ServerConfig()
+    var h = FnHandler(_big)
+    var buf = stack_allocation[65536, UInt8]()
+    for _ in range(2000):
+        if client.response_ready(sid):
+            break
+        var out = client.drain()
+        if len(out) > 0:
+            _ = _send(
+                client_fd,
+                out.unsafe_ptr(),
+                c_size_t(len(out)),
+                c_int(MSG_NOSIGNAL),
+            )
+        _ = handle.on_readable(h, cfg)
+        _ = handle.on_writable(cfg)
+        var n = _recv(client_fd, buf, c_size_t(65536), c_int(0))
+        if Int(n) > 0:
+            client.feed(Span[UInt8, _](unsafe_ptr=buf, length=Int(n)))
+    assert_true(client.response_ready(sid), "1 MiB response did not arrive")
+    assert_equal(len(client.take_response(sid).body), 1 << 20)
+    assert_true(handle.write_buf.capacity() <= 64 * 1024)
+    assert_true(handle.h2.outbox.capacity() <= 64 * 1024)
+    _ = _close(client_fd)
+
+
 def test_h2_conn_handle_concurrent_streaming() raises:
     """Three streaming responses multiplex concurrently on one h2
     connection: the per-stream ``_stream_out`` map pumps each source
@@ -313,4 +364,5 @@ def main() raises:
     test_h2_conn_handle_init_smoke()
     test_h2_conn_handle_get_round_trip()
     test_h2_conn_handle_concurrent_streaming()
-    print("test_h2_conn_handle: 3 passed")
+    test_large_response_does_not_pin_its_buffers()
+    print("test_h2_conn_handle: 4 passed")

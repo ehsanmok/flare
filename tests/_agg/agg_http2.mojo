@@ -160,6 +160,9 @@ from test_h2_conn_handle import (
     test_h2_conn_handle_get_round_trip as test_h2_conn_handle__test_h2_conn_handle_get_round_trip,
 )
 from test_h2_conn_handle import (
+    test_large_response_does_not_pin_its_buffers as test_h2_conn_handle__test_large_response_does_not_pin_its_buffers,
+)
+from test_h2_conn_handle import (
     test_h2_conn_handle_concurrent_streaming as test_h2_conn_handle__test_h2_conn_handle_concurrent_streaming,
 )
 from test_h2_extended_connect import (
@@ -706,6 +709,9 @@ def main() raises:
     # tests/http2/test_h2_conn_handle.mojo
     suite.test[test_h2_conn_handle__test_h2_conn_handle_init_smoke]()
     suite.test[test_h2_conn_handle__test_h2_conn_handle_get_round_trip]()
+    suite.test[
+        test_h2_conn_handle__test_large_response_does_not_pin_its_buffers
+    ]()
     suite.test[test_h2_conn_handle__test_h2_conn_handle_concurrent_streaming]()
     # tests/http2/test_h2_extended_connect.mojo
     suite.test[
