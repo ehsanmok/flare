@@ -108,15 +108,13 @@ def encode_grpc_message(
     var n = len(payload)
     if n > 0xFFFFFFFF:
         raise Error("grpc framing: payload exceeds 2^32 - 1 bytes")
-    out.reserve(len(out) + 5 + n)
     out.append(UInt8(0x01) if compressed else UInt8(0x00))
     # Length: 4 bytes, big-endian.
     out.append(UInt8((n >> 24) & 0xFF))
     out.append(UInt8((n >> 16) & 0xFF))
     out.append(UInt8((n >> 8) & 0xFF))
     out.append(UInt8(n & 0xFF))
-    for i in range(n):
-        out.append(payload[i])
+    out.extend(payload)
 
 
 def decode_grpc_message(buf: Span[UInt8, _]) raises -> GrpcDecodeResult:

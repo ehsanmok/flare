@@ -123,13 +123,9 @@ def encode_http3_frame(
     """
     var type_bytes = encode_varint(frame_type)
     var len_bytes = encode_varint(UInt64(len(payload)))
-    out.reserve(len(out) + len(type_bytes) + len(len_bytes) + len(payload))
-    for i in range(len(type_bytes)):
-        out.append(type_bytes[i])
-    for i in range(len(len_bytes)):
-        out.append(len_bytes[i])
-    for i in range(len(payload)):
-        out.append(payload[i])
+    out.extend(Span(type_bytes))
+    out.extend(Span(len_bytes))
+    out.extend(payload)
 
 
 def decode_http3_frame(buf: Span[UInt8, _]) raises -> Http3Frame:

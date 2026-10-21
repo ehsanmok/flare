@@ -142,7 +142,7 @@ def decodeFrame (buf : Bytes) : Option (Nat × Bytes) :=
   | some (t, l, hs) =>
     if hs + l > buf.length then none else some (t, (buf.drop hs).take l)
 
-/-- mirrors flare/http3/frame.mojo#Http3Frame+encode_http3_frame sha=acf891c9460e at=59bda50f -/
+/-- mirrors flare/http3/frame.mojo#Http3Frame+encode_http3_frame sha=c63dd45bd834 at=dd6340bf -/
 def encodeFrame (enc : Nat → Bytes) (t : Nat) (p : Bytes) : Bytes :=
   enc t ++ enc p.length ++ p
 
