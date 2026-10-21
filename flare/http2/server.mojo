@@ -234,9 +234,7 @@ struct Http2Connection(Defaultable, Movable):
         if self.greeted:
             return
         var f = self.conn.initial_settings()
-        var bytes = encode_frame(f)
-        for i in range(len(bytes)):
-            self.outbox.append(bytes[i])
+        encode_frame_into(f, self.outbox)
         self.greeted = True
 
     @staticmethod
@@ -357,8 +355,7 @@ struct Http2Connection(Defaultable, Movable):
             ):
                 continue
             s.headers.append(HpackHeader(lk, req.headers._values[j]))
-        for j in range(len(req.body)):
-            s.data.append(req.body[j])
+        s.data.extend(Span(req.body))
         s.initial_header_count = len(s.headers)
         s.headers_complete = True
         s.data_complete = True
@@ -374,8 +371,7 @@ struct Http2Connection(Defaultable, Movable):
 
     def feed(mut self, data: Span[UInt8, _]) raises:
         """Push ``data`` (bytes from the socket) into the driver."""
-        for i in range(len(data)):
-            self.inbox.append(data[i])
+        self.inbox.extend(data)
 
         # Strip the 24-byte preface once.
         if not self.conn.preface_seen:
@@ -394,15 +390,12 @@ struct Http2Connection(Defaultable, Movable):
                         var ga = self.conn._goaway_frame(
                             0, Http2ErrorCode.PROTOCOL_ERROR().value
                         )
-                        var gb = encode_frame(ga)
-                        for k in range(len(gb)):
-                            self.outbox.append(gb[k])
+                        encode_frame_into(ga, self.outbox)
                     self.inbox = List[UInt8]()
                     return
             # Drop the preface from the inbox.
             var rest = List[UInt8](capacity=len(self.inbox) - 24)
-            for i in range(24, len(self.inbox)):
-                rest.append(self.inbox[i])
+            rest.extend(Span(self.inbox)[24:])
             self.inbox = rest^
             self.conn.preface_seen = True
             self._emit_initial_settings()
@@ -436,14 +429,14 @@ struct Http2Connection(Defaultable, Movable):
                         Http2ErrorCode.FRAME_SIZE_ERROR().value
                     )
                     for gi in range(len(gerr)):
-                        self.outbox.extend(Span(encode_frame(gerr[gi])))
+                        encode_frame_into(gerr[gi], self.outbox)
                     self.inbox = List[UInt8]()
                     return
             var span = Span[UInt8, _](self.inbox)[off:]
             var got = parse_frame(span)
             if not got:
                 break
-            var frame = got.value().copy()
+            var frame = got.take()
             off += 9 + frame.header.length
             var reply: List[Frame]
             if not self.peer_settings_seen and not (
@@ -460,9 +453,7 @@ struct Http2Connection(Defaultable, Movable):
                 self.peer_settings_seen = True
                 reply = self.conn.handle_frame(frame^)
             for i in range(len(reply)):
-                var rb = encode_frame(reply[i])
-                for j in range(len(rb)):
-                    self.outbox.append(rb[j])
+                encode_frame_into(reply[i], self.outbox)
             # A WINDOW_UPDATE in that frame may have unparked response
             # bytes; nothing else re-drives them.
             self.pump_pending()

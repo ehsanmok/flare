@@ -4,12 +4,12 @@ import Flare.L3_Protocol.H2.Validate
 # HTTP/2 connection state machine (impl)
 
 An executable transliteration of `Connection.handle_frame`
-(`flare/http2/state.mojo#Connection.handle_frame sha=75ac9ea2cd82 at=268ccb85`) and the code it calls:
+(`flare/http2/state.mojo#Connection.handle_frame sha=75ac9ea2cd82 at=fda30c33`) and the code it calls:
 `_commit_header_block` (781-1003), `_ensure_stream` / pruning (538-566),
 `_rst_stream_frame` (587-605), `_conn_error` (676-688),
 `_strip_pad_and_priority` (690-716), `_declared_content_length` (748-765),
 `_active_stream_count` (767-779), `release_request_credit` (619-633),
-plus the server driver's frame loop (`flare/http2/server.mojo#Http2Connection.feed sha=82ec663d0e3d at=268ccb85`)
+plus the server driver's frame loop (`flare/http2/server.mojo#Http2Connection.feed sha=13eaa955fac8 at=fda30c33`)
 and the local actions that change stream or window state
 (`emit_response` 603-681, `queue_stream_data` 870-921, client
 `send_request` 788-798 and `take_response` 1021).
@@ -732,7 +732,7 @@ def handleW (dec : Dec) (c : Conn) (f : Fr) : Res :=
 
 /-- The connection preface rule (RFC 9113 §3.4): until a SETTINGS (non-ACK)
 frame was received (`peer_settings_seen`), any other frame is refused.
-mirrors flare/http2/server.mojo#Http2Connection.feed sha=82ec663d0e3d at=ea1b9282 -/
+mirrors flare/http2/server.mojo#Http2Connection.feed sha=13eaa955fac8 at=fda30c33 -/
 def prefaceGate (dec : Dec) (c : Conn) (f : Fr) : Res :=
   if !c.peerSettingsSeen then
     if f.ty = tSETTINGS && !f.f1 then handleW dec { c with peerSettingsSeen := true } f
@@ -743,7 +743,7 @@ def prefaceGate (dec : Dec) (c : Conn) (f : Fr) : Res :=
 nothing is applied after a GOAWAY was queued, a frame declaring more
 than `local_max_frame_size` is refused from its header, and the first
 frame must be SETTINGS.
-mirrors flare/http2/server.mojo#Http2Connection.feed sha=82ec663d0e3d at=ea1b9282 -/
+mirrors flare/http2/server.mojo#Http2Connection.feed sha=13eaa955fac8 at=fda30c33 -/
 def driveFrame (dec : Dec) (c : Conn) (f : Fr) : Res :=
   if c.goawaySent then .ok (c, [])
   else if f.plen > c.localMaxFrame then .ok (connErr c eFRAME_SIZE)

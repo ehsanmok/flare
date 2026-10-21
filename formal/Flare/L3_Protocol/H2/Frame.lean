@@ -184,7 +184,7 @@ inductive DrainRes where
   | deliver (f : Frame) (rest : Bytes)
   deriving Repr, DecidableEq
 
-/-- mirrors flare/http2/server.mojo#Http2Connection.feed sha=82ec663d0e3d at=12630564 -/
+/-- mirrors flare/http2/server.mojo#Http2Connection.feed sha=13eaa955fac8 at=fda30c33 -/
 def drainOne (localMax : Nat) (inbox : Bytes) : DrainRes :=
   if 9 ≤ inbox.length ∧ declaredLen inbox > localMax then .refuseFrameSize
   else match parseFrame inbox with
