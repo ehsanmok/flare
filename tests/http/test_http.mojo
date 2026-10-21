@@ -189,6 +189,28 @@ def test_header_len() raises:
     assert_equal(h.len(), 3)
 
 
+def test_header_fields_in_order() raises:
+    """Every field is reachable in insertion order, repeats kept apart."""
+    var h = HeaderMap()
+    h.append("Accept", "a")
+    h.append("Cookie", "x=1")
+    h.append("accept", "b")
+    h.append("Cookie", "y=2")
+    var got = String()
+    for i in range(h.len()):
+        got += h.name_at(i) + "=" + h.value_at(i) + ";"
+    assert_equal(got, "Accept=a;Cookie=x=1;accept=b;Cookie=y=2;")
+
+
+def test_header_field_index_out_of_range() raises:
+    var h = HeaderMap()
+    h.append("A", "1")
+    with assert_raises():
+        _ = h.name_at(1)
+    with assert_raises():
+        _ = h.value_at(-1)
+
+
 def test_header_get_absent() raises:
     """HeaderMap.get() on an absent key must return empty string."""
     var h = HeaderMap()

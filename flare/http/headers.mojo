@@ -265,6 +265,32 @@ struct HeaderMap(Movable, Writable):
         """Return the total number of header entries (including duplicates)."""
         return len(self._keys)
 
+    def name_at(self, i: Int) raises -> ref[origin_of(self._keys[0])] String:
+        """The name of field ``i``, in the order the fields were added.
+
+        With :meth:`value_at` and :meth:`len`, this walks every field once,
+        repeated names as separate entries, without copying::
+
+            for i in range(h.len()):
+                use(h.name_at(i), h.value_at(i))
+
+        Raises:
+            Error: If ``i`` is not in ``[0, len())``.
+        """
+        if i < 0 or i >= len(self._keys):
+            raise Error("HeaderMap.name_at: index out of range")
+        return self._keys[i]
+
+    def value_at(self, i: Int) raises -> ref[origin_of(self._values[0])] String:
+        """The value of field ``i``; see :meth:`name_at`.
+
+        Raises:
+            Error: If ``i`` is not in ``[0, len())``.
+        """
+        if i < 0 or i >= len(self._values):
+            raise Error("HeaderMap.value_at: index out of range")
+        return self._values[i]
+
     def write_to[W: Writer](self, mut writer: W):
         for i in range(len(self._keys)):
             writer.write(self._keys[i], ": ", self._values[i], "\r\n")

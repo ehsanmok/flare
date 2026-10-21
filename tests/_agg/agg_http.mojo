@@ -1869,6 +1869,12 @@ from test_http import (
 )
 from test_http import test_header_len as test_http__test_header_len
 from test_http import (
+    test_header_fields_in_order as test_http__test_header_fields_in_order,
+)
+from test_http import (
+    test_header_field_index_out_of_range as test_http__test_header_field_index_out_of_range,
+)
+from test_http import (
     test_header_get_absent as test_http__test_header_get_absent,
 )
 from test_http import (
@@ -5580,6 +5586,8 @@ def main() raises:
     suite.test[test_http__test_header_remove]()
     suite.test[test_http__test_header_remove_missing]()
     suite.test[test_http__test_header_len]()
+    suite.test[test_http__test_header_fields_in_order]()
+    suite.test[test_http__test_header_field_index_out_of_range]()
     suite.test[test_http__test_header_get_absent]()
     suite.test[test_http__test_header_injection_cr]()
     suite.test[test_http__test_header_injection_lf]()

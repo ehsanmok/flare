@@ -104,6 +104,9 @@ because a front end could read the same bytes as a different request:
   value.
 - Repeated fields are all kept: `headers.get(name)` returns the first
   value and `get_all(name)` every one. Previously the last line won.
+  `name_at(i)` / `value_at(i)` for `i` in `range(headers.len())` walk
+  every field in arrival order, repeats as separate entries, without
+  copying.
 
 | Surface | Where |
 |---|---|
