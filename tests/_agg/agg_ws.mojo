@@ -418,6 +418,9 @@ from test_ws_reactor import (
 from test_ws_reactor import (
     test_idle_connection_is_dropped as test_ws_reactor__test_idle_connection_is_dropped,
 )
+from test_ws_reactor import (
+    test_active_connection_outlives_the_idle_timeout as test_ws_reactor__test_active_connection_outlives_the_idle_timeout,
+)
 from test_ws_server_close_handshake import (
     test_close_is_echoed_with_its_code as test_ws_server_close_handshake__test_close_is_echoed_with_its_code,
 )
@@ -749,6 +752,9 @@ def main() raises:
     suite.test[test_ws_reactor__test_http_is_still_served_on_the_port]()
     suite.test[test_ws_reactor__test_several_workers]()
     suite.test[test_ws_reactor__test_idle_connection_is_dropped]()
+    suite.test[
+        test_ws_reactor__test_active_connection_outlives_the_idle_timeout
+    ]()
     # tests/ws/test_ws_server_close_handshake.mojo
     suite.test[
         test_ws_server_close_handshake__test_close_is_echoed_with_its_code

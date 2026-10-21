@@ -44,6 +44,8 @@ struct WsConnHandle(Movable):
     var notified: Bool
     var peer_gone: Bool
     var last_interest: Int
+    var armed_at_ms: UInt64
+    """When the idle timer was last scheduled (wheel time)."""
 
     def __init__(
         out self,
@@ -64,6 +66,7 @@ struct WsConnHandle(Movable):
         self.notified = False
         self.peer_gone = False
         self.last_interest = INTEREST_READ
+        self.armed_at_ms = 0
 
     def fd(self) -> c_int:
         return self._stream._socket.fd
@@ -221,10 +224,20 @@ def _apply_step_ws(
         except:
             pass
     if step.idle_timeout_ms > 0:
+        # Re-armed only once the deadline has moved by an eighth of the
+        # timeout (at most a second): the timer never fires later than
+        # the timeout after the last activity, at most that much
+        # earlier, and a busy connection no longer cancels and
+        # schedules a timer per message.
+        var now = wheel.now_ms()
+        var slack = UInt64(min(step.idle_timeout_ms // 8, 1000))
         var old = timers.get(fd)
+        if old and now - h[].armed_at_ms <= slack:
+            return
         if old:
             _ = wheel.cancel(old.value())
         timers[fd] = wheel.schedule(step.idle_timeout_ms, UInt64(fd))
+        h[].armed_at_ms = now
 
 
 def _drive_ws(
