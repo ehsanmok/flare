@@ -491,38 +491,33 @@ def _do_is_early_data_accepted(
     return Int(f(session))
 
 
-def _do_packet_encrypt(
+def _packet_encrypt_to(
     fns: RustlsQuicPacketFns,
     session: Int,
     level: Int,
     packet_number: UInt64,
-    imm header: List[UInt8],
-    mut payload: List[UInt8],
-) raises -> List[UInt8]:
-    """``flare_rustls_quic_packet_encrypt``: encrypt ``payload``
-    in place at the given encryption level and return the
-    16-byte authentication tag.
+    header: Span[UInt8, _],
+    payload_addr: Int,
+    payload_len: Int,
+    tag_addr: Int,
+) raises:
+    """``flare_rustls_quic_packet_encrypt``: encrypt the payload at
+    ``payload_addr`` in place and write its 16-byte tag at ``tag_addr``.
 
     ``header`` is the QUIC packet header (used as AEAD AAD per
-    RFC 9001 §5.3). ``payload`` is mutated in place; the caller
-    appends the returned tag to the on-wire packet.
+    RFC 9001 §5.3). Raises if the FFI returns a non-zero code: rustls
+    error text is in :func:`_do_last_error`.
 
-    Raises if the FFI returns a non-zero code: rustls error
-    text is in :func:`_do_last_error`.
+    The FFI also reports the tag length via ``tag_written``, but that
+    out-parameter read-back is unreliable across the opaque FFI call
+    (the optimizer folds it to the initial 0, which would truncate the
+    tag to an empty slice and ship unauthenticated packets). The QUIC
+    AEAD suites (AES-GCM / ChaCha20-Poly1305) always emit a 16-byte tag
+    (RFC 9001 sec 5.3), so callers keep all 16 bytes rather than depend
+    on the readback.
     """
     _need(fns.packet_encrypt, "flare_rustls_quic_packet_encrypt")
     var f = _as_fn[_PacketEncryptFn](fns.packet_encrypt)
-    var tag = List[UInt8](capacity=16)
-    for _ in range(16):
-        tag.append(UInt8(0))
-    # The FFI also reports the tag length via ``tag_written``, but
-    # that out-parameter read-back is unreliable across the opaque
-    # FFI call (the optimizer folds it to the initial 0, which would
-    # truncate the tag to an empty slice and ship unauthenticated
-    # packets). The QUIC AEAD suites (AES-GCM / ChaCha20-Poly1305)
-    # always emit a 16-byte tag (RFC 9001 sec 5.3), and rustls has
-    # already copied those 16 bytes into ``tag``, so we keep the
-    # full buffer rather than depend on the readback.
     var written: Int = 0
     var rc = Int(
         f(
@@ -531,10 +526,10 @@ def _do_packet_encrypt(
             packet_number,
             Int(header.unsafe_ptr()),
             len(header),
-            Int(payload.unsafe_ptr()),
-            len(payload),
-            Int(tag.unsafe_ptr()),
-            len(tag),
+            payload_addr,
+            payload_len,
+            tag_addr,
+            16,
             Int(Pointer(to=written)),
         )
     )
@@ -542,7 +537,50 @@ def _do_packet_encrypt(
         raise Error(
             String("flare_rustls_quic_packet_encrypt returned ") + String(rc)
         )
+
+
+def _do_packet_encrypt(
+    fns: RustlsQuicPacketFns,
+    session: Int,
+    level: Int,
+    packet_number: UInt64,
+    imm header: List[UInt8],
+    mut payload: List[UInt8],
+) raises -> List[UInt8]:
+    """Encrypt ``payload`` in place at the given encryption level and
+    return the 16-byte authentication tag; the caller appends it to the
+    on-wire packet. See :func:`_packet_encrypt_to`."""
+    var tag = List[UInt8](length=16, fill=0)
+    _packet_encrypt_to(
+        fns,
+        session,
+        level,
+        packet_number,
+        Span(header),
+        Int(payload.unsafe_ptr()),
+        len(payload),
+        Int(tag.unsafe_ptr()),
+    )
     return tag^
+
+
+def _do_packet_seal(
+    fns: RustlsQuicPacketFns,
+    session: Int,
+    level: Int,
+    packet_number: UInt64,
+    header: Span[UInt8, _],
+    mut payload: List[UInt8],
+) raises:
+    """Encrypt ``payload`` in place and append its 16-byte tag to it, so
+    it holds the packet's whole protected payload. On a raise the tail
+    is not a tag and the payload must be discarded."""
+    var n = len(payload)
+    payload.resize(unsafe_uninit_length=n + 16)
+    var base = Int(payload.unsafe_ptr())
+    _packet_encrypt_to(
+        fns, session, level, packet_number, header, base, n, base + n
+    )
 
 
 def _do_packet_decrypt(
@@ -642,7 +680,7 @@ def _do_header_encrypt(
     fns: RustlsQuicPacketFns,
     session: Int,
     level: Int,
-    imm sample: List[UInt8],
+    sample: Span[UInt8, _],
     first_byte_addr: Int,
     pn_addr: Int,
     pn_len: Int,
@@ -683,7 +721,7 @@ def _do_header_decrypt(
     fns: RustlsQuicPacketFns,
     session: Int,
     level: Int,
-    imm sample: List[UInt8],
+    sample: Span[UInt8, _],
     first_byte_addr: Int,
     pn_addr: Int,
     pn_len: Int,

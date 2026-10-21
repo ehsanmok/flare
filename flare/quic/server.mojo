@@ -171,6 +171,7 @@ from ..tls._rustls_quic_ffi import (
     _do_packet_decrypt,
     _do_packet_decrypt_1rtt,
     _do_packet_encrypt,
+    _do_packet_seal,
     _do_peer_transport_params,
     _do_session_free,
     _do_take_crypto,
@@ -1395,7 +1396,7 @@ struct QuicListener(Movable):
             self.tls_acceptor._fns,
             handle,
             level,
-            sample,
+            Span(sample),
             first_addr,
             Int(pn_local.unsafe_ptr()),
             4,
@@ -3951,7 +3952,7 @@ struct QuicListener(Movable):
             self.tls_acceptor._fns,
             handle,
             QuicEncryptionLevel.HANDSHAKE,
-            sample,
+            Span(sample),
             first_addr,
             Int(pn_local.unsafe_ptr()),
             pn_length,
@@ -4069,55 +4070,42 @@ struct QuicListener(Movable):
         for i in range(pn_length):
             var shift = (pn_length - 1 - i) * 8
             unprotected_header.append(UInt8((Int(pn) >> shift) & 0xFF))
-        # 3. AEAD-encrypt via rustls at level 3.  See the
-        # _build_handshake_response comment for why we pass
-        # `self.tls_acceptor._lib` directly at each call.
+        # 3. AEAD-encrypt via rustls at level 3, the tag appended to
+        # the ciphertext.
         var encrypted_payload = plaintext^
-        var tag = _do_packet_encrypt(
+        _do_packet_seal(
             self.tls_acceptor._fns,
             handle,
             QuicEncryptionLevel.APPLICATION,
             pn,
-            unprotected_header,
+            Span(unprotected_header),
             encrypted_payload,
         )
-        # 4. Assemble the protected datagram. Move the header buffer in
-        # as the base (it is no longer needed standalone) and reserve
-        # the full datagram length so the payload + tag append in one
-        # allocation -- the per-byte grow loop here was a top _realloc /
-        # allocator-TLS cost under request concurrency.
+        # 4. The protected datagram: the header buffer, sized for the
+        # whole datagram above, then the ciphertext and tag.
         var header_len = len(unprotected_header)
         var protected = unprotected_header^
-        protected.reserve(header_len + len(encrypted_payload) + len(tag))
         protected.extend(Span[UInt8, _](encrypted_payload))
-        protected.extend(Span[UInt8, _](tag))
-        # 5. Apply header protection via rustls at level 3.
+        # 5. Apply header protection via rustls at level 3, in place:
+        # the 16-byte sample starts 4 bytes past the packet number
+        # (RFC 9001 sec 5.4.2), clear of the first byte and the pn
+        # bytes rustls rewrites.
         var pn_offset = header_len - pn_length
         var sample_offset = pn_offset + 4
         if sample_offset + 16 > len(protected):
             raise Error(
                 "_build_1rtt_response: ciphertext too short for HP sample"
             )
-        var sample = List[UInt8](capacity=16)
-        for i in range(16):
-            sample.append(protected[sample_offset + i])
-        var first_local: UInt8 = protected[0]
-        var pn_local = List[UInt8](capacity=pn_length)
-        for i in range(pn_length):
-            pn_local.append(protected[pn_offset + i])
-        var first_addr = Int(Pointer(to=first_local))
+        var base = Int(protected.unsafe_ptr())
         _do_header_encrypt(
             self.tls_acceptor._fns,
             handle,
             QuicEncryptionLevel.APPLICATION,
-            sample,
-            first_addr,
-            Int(pn_local.unsafe_ptr()),
+            Span(protected)[sample_offset : sample_offset + 16],
+            base,
+            base + pn_offset,
             pn_length,
         )
-        protected[0] = first_local
-        for i in range(pn_length):
-            protected[pn_offset + i] = pn_local[i]
         # 6. Advance the 1-RTT pn counter (no offset counter at
         # 1-RTT -- per-stream offsets live on each STREAM frame
         # encoded into the plaintext).

@@ -253,9 +253,8 @@ def parse_short_header(
         raise Error("quic packet: fixed bit (0x40) not set")
     var spin = (Int(first) & 0x20) != 0
     var kp = (Int(first) & 0x04) != 0
-    var bytes = List[UInt8]()
-    for i in range(1, 1 + dcid_length):
-        bytes.append(buf[i])
+    var bytes = List[UInt8](capacity=dcid_length)
+    bytes.extend(buf[1 : 1 + dcid_length])
     return ShortHeader(
         spin_bit=spin,
         key_phase=kp,
