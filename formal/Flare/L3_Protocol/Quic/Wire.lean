@@ -39,7 +39,7 @@ def rdTail (b : Bytes) (pos : Nat) : Nat → UInt64 → Except Err UInt64
       let x ← rd b (pos + 1)
       rdTail b (pos + 1) k ((acc <<< 8) ||| x.toUInt64)
 
-/-- mirrors flare/quic/varint.mojo#encode_varint+decode_varint sha=2aa71ded4048 at=59bda50f (applied to `buf[pos:]`;
+/-- mirrors flare/quic/varint.mojo#encode_varint+decode_varint sha=e3078996e3f0 at=b364b916 (applied to `buf[pos:]`;
 the empty-slice raise covers `pos = len`). -/
 def varint (b : Bytes) : Parser UInt64 := fun pos =>
   if pos > b.length then .error .oob

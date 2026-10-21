@@ -340,7 +340,7 @@ def encode_short_header(
     if key_phase:
         first |= 0x04
     first |= (pn_length - 1) & 0x3
-    var out = List[UInt8]()
+    var out = List[UInt8](capacity=1 + dcid.length())
     out.append(UInt8(first))
     for i in range(dcid.length()):
         out.append(dcid.bytes[i])

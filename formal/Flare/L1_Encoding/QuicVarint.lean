@@ -34,7 +34,7 @@ def encodedLength (v : UInt64) : Option Nat :=
   else if v < 1073741824 then some 4
   else some 8
 
-/-- mirrors flare/quic/varint.mojo#encode_varint sha=84303a8790da at=59bda50f -/
+/-- mirrors flare/quic/varint.mojo#encode_varint sha=39ec5ae2788d at=b364b916 -/
 def encode (v : UInt64) : Option Bytes :=
   match encodedLength v with
   | none => none
