@@ -47,7 +47,7 @@ libbrotlicommon  = ">=1,<2"        # HTTP: Content-Encoding br (shared brotli ta
 libbrotlidec     = ">=1,<2"        # HTTP: brotli decoder
 libbrotlienc     = ">=1,<2"        # HTTP: brotli encoder
 libdeflate       = ">=1.22,<2"     # HTTP: gzip encoder for Content-Encoding responses
-json             = { git = "https://github.com/ehsanmok/json.git", tag = "v0.4.1" }
+json             = { git = "https://github.com/ehsanmok/json.git", branch = "main" }
 
 # g++ is a BUILD-time dep on Linux: the activation scripts
 # (flare/tls/ffi/build.sh, flare/http/ffi/build.sh) invoke g++ to compile
