@@ -31,7 +31,7 @@ lifecycle invariants.
 |---|---|---|
 | Process / kernel | Anyone with `ptrace` rights, root, or the same uid. | flare cannot defend against root; depend on Linux user isolation + seccomp at the orchestrator layer. |
 | Process / OpenSSL | The host's libssl + libcrypto. | flare pins major versions via pixi; CVE response is a pixi bump. |
-| Process / zlib + brotli + FFI shims | The host's libz + libbrotli + the flare-built `libflare_*.so`. | The flare shims are built from `flare/{http,tls}/ffi/*.c` at activation time; they're trivially auditable. |
+| Process / zlib + libdeflate + brotli + FFI shims | The host's libz + libdeflate + libbrotli + the flare-built `libflare_*.so`. | The flare shims are built from `flare/{http,tls}/ffi/*.c` at activation time; they're trivially auditable. |
 | flare / network | Anyone on the public internet (worst case). | Everything below. |
 
 ## Adversaries

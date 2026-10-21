@@ -221,7 +221,7 @@ shape is:
 
 ```dockerfile
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y libssl3 libbrotli1 zlib1g \
+RUN apt-get update && apt-get install -y libssl3 libbrotli1 libdeflate0 zlib1g \
     && rm -rf /var/lib/apt/lists/*
 COPY ./target/server /usr/local/bin/server
 COPY ./certs /etc/flare/certs

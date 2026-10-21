@@ -26,6 +26,8 @@
 
 #include "scratch_cache.h"
 
+#include <libdeflate.h>
+
 /* zlib's allocator hooks over the shared scratch cache. */
 static voidpf zscratch_alloc(voidpf opaque, uInt items, uInt size) {
     if (size != 0 && items > SIZE_MAX / size) return Z_NULL;
@@ -196,6 +198,51 @@ void flare_zlib_free(void *p) { free(p); }
 
 /* ── Compress (deflate) ────────────────────────────────────────────────────── */
 
+/* One libdeflate compressor per level per thread, made on first use and
+ * freed at thread exit. A compressor is not safe to share between
+ * threads, and making one per call costs more than compressing a
+ * typical response. */
+#define GZIP_LEVELS 13
+
+typedef struct {
+    struct libdeflate_compressor* by_level[GZIP_LEVELS];
+} gzip_compressors;
+
+static pthread_key_t gzip_key;
+static pthread_once_t gzip_once = PTHREAD_ONCE_INIT;
+static int gzip_key_ok = 0;
+
+static void gzip_release(void* p) {
+    gzip_compressors* g = (gzip_compressors*)p;
+    for (int i = 0; i < GZIP_LEVELS; i++)
+        if (g->by_level[i]) libdeflate_free_compressor(g->by_level[i]);
+    free(g);
+}
+
+static void gzip_key_init(void) {
+    gzip_key_ok = pthread_key_create(&gzip_key, gzip_release) == 0;
+}
+
+static int compress_gzip_zlib(const void *in_buf, int in_len,
+                              void *out_buf, int out_cap, int level);
+
+static struct libdeflate_compressor* gzip_compressor(int level) {
+    pthread_once(&gzip_once, gzip_key_init);
+    if (!gzip_key_ok) return NULL;
+    gzip_compressors* g = (gzip_compressors*)pthread_getspecific(gzip_key);
+    if (!g) {
+        g = (gzip_compressors*)calloc(1, sizeof(gzip_compressors));
+        if (!g) return NULL;
+        if (pthread_setspecific(gzip_key, g) != 0) {
+            free(g);
+            return NULL;
+        }
+    }
+    if (!g->by_level[level])
+        g->by_level[level] = libdeflate_alloc_compressor(level);
+    return g->by_level[level];
+}
+
 /**
  * Compress ``in_len`` bytes from ``in_buf`` into a gzip container.
  *
@@ -209,6 +256,20 @@ void flare_zlib_free(void *p) { free(p); }
 int flare_compress_gzip(const void *in_buf, int in_len,
                         void *out_buf, int out_cap,
                         int level) {
+    if (in_len < 0 || out_cap < 0) return Z_STREAM_ERROR;
+    if (level < 0) level = 6;
+    if (level > 9) level = 9;
+    struct libdeflate_compressor* c = gzip_compressor(level);
+    if (!c) return compress_gzip_zlib(in_buf, in_len, out_buf, out_cap, level);
+    size_t n = libdeflate_gzip_compress(c, in_buf, (size_t)in_len,
+                                        out_buf, (size_t)out_cap);
+    /* 0 means the output did not fit: an error, never a cut stream. */
+    if (n == 0) return Z_BUF_ERROR;
+    return (int)n;
+}
+
+static int compress_gzip_zlib(const void *in_buf, int in_len,
+                              void *out_buf, int out_cap, int level) {
     z_stream strm;
     memset(&strm, 0, sizeof(z_stream));
     strm.zalloc = zscratch_alloc;
@@ -228,8 +289,8 @@ int flare_compress_gzip(const void *in_buf, int in_len,
     deflateEnd(&strm);
 
     if (rc == Z_STREAM_END) return written;
-    if (rc == Z_OK || rc == Z_BUF_ERROR) return written;  /* partial: buf_error */
-    return rc;  /* negative error code */
+    /* Anything short of the end of the stream is a cut stream. */
+    return rc < 0 ? rc : Z_BUF_ERROR;
 }
 
 /**

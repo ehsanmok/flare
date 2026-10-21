@@ -86,7 +86,7 @@ if $CC -O2 -fPIC -shared \
     "$SOURCE" \
     -I"$CONDA_PREFIX/include" \
     -L"$CONDA_PREFIX/lib" \
-    -lz -pthread \
+    -lz -ldeflate -pthread \
     $NODELETE \
     -Wl,-rpath,"$CONDA_PREFIX/lib"; then
     echo ""

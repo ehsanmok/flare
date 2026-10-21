@@ -8,7 +8,9 @@ input once, grows its own buffer, and requires Z_STREAM_END.
 """
 
 from std.testing import assert_equal, assert_true, TestSuite
-from flare.utils.dylib import pinned_flare_lib
+from std.ffi import c_int
+
+from flare.utils.dylib import dl_sym, pinned_flare_lib
 
 from flare.http.encoding import (
     compress_brotli,
@@ -145,6 +147,25 @@ def test_codec_libraries_are_opened_once() raises:
         Span[UInt8, _](compress_brotli(Span[UInt8, _](data))), "br"
     )
     assert_equal(len(round), 4096)
+
+
+def test_gzip_into_a_short_buffer_is_an_error() raises:
+    """An output buffer the stream does not fit is reported as an error,
+    never as a successful, cut-off stream."""
+    var src = _mixed(20_000, 3)
+    ref lib = pinned_flare_lib["zlib"]()[]
+    var fn_comp = dl_sym[
+        def(Int, c_int, Int, c_int, c_int) thin abi("C") -> c_int
+    ](lib, "flare_compress_gzip")
+    var out = List[UInt8](length=100, fill=0)
+    var written = fn_comp(
+        Int(src.unsafe_ptr()),
+        c_int(len(src)),
+        Int(out.unsafe_ptr()),
+        c_int(len(out)),
+        c_int(6),
+    )
+    assert_true(Int(written) < 0)
 
 
 def main() raises:
