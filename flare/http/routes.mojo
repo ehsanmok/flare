@@ -56,7 +56,7 @@ from std.collections import Dict
 from .handler import Handler
 from .headers import HeaderMap
 from .proto.ascii import ascii_unchecked_string
-from .request import Request, Method
+from .request import Request, Method, _child_request
 from .response import Response, Status
 
 
@@ -218,18 +218,9 @@ struct ComptimeRouter[routes: List[ComptimeRoute]](Copyable, Handler):
             var params = Dict[String, String]()
             if _match_one(seg_in, rt_pat, params):
                 if r.method == req.method:
-                    var child = Request(
-                        method=req.method,
-                        url=req.url,
-                        body=req.body.copy(),
-                        version=req.version,
-                        peer=req.peer,
-                        expose_errors=req.expose_errors,
-                    )
-                    child.headers = req.headers.copy()
-                    if req.has_params():
-                        for kv in req._params.value()[].items():
-                            child.params_mut()[kv.key] = kv.value
+                    if len(params) == 0 and not req.has_params():
+                        return r.handler(req)
+                    var child = _child_request(req, req.url)
                     if len(params) > 0:
                         for kv in params.items():
                             child.params_mut()[kv.key] = kv.value

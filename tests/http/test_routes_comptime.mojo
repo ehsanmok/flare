@@ -69,6 +69,23 @@ def _router() raises -> ComptimeRouter[_BASE_ROUTES]:
 # ── Literal matches ─────────────────────────────────────────────────────────
 
 
+def _trailer(req: Request) raises -> Response:
+    return ok("trailer:" + req.trailers.get("x-sum"))
+
+
+comptime _TRAILER_ROUTES: List[ComptimeRoute] = [
+    ComptimeRoute(Method.POST, "/upload", _trailer),
+]
+
+
+def test_handler_sees_the_whole_request() raises:
+    """The matched handler gets the request as sent, trailers included."""
+    var r = ComptimeRouter[_TRAILER_ROUTES]()
+    var req = Request(method=Method.POST, url="/upload")
+    req.trailers.append("x-sum", "42")
+    assert_equal(r.serve(req).text(), "trailer:42")
+
+
 def test_literal_root() raises:
     var r = _router()
     var resp = r.serve(Request(method=Method.GET, url="/"))

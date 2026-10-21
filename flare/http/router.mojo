@@ -57,7 +57,7 @@ from ..runtime import Pool
 from .handler import Handler, FnHandler
 from .headers import HeaderMap
 from .proto.ascii import ascii_unchecked_string
-from .request import Request, Method
+from .request import Request, Method, _child_request
 from .response import Response, Status
 from .server import not_found
 
@@ -672,6 +672,15 @@ struct Router(Copyable, Defaultable, Handler):
 
     # ── Handler impl ─────────────────────────────────────────────────────────
 
+    def _call_route(self, i: Int, req: Request) raises -> Response:
+        """Run route ``i``'s handler: a ``_ROUTE_KIND_FN`` handler directly,
+        a struct handler through the serve thunk captured at registration."""
+        if self._routes[i].handler_kind == _ROUTE_KIND_FN:
+            return self._handlers[self._routes[i].handler_idx].serve(req)
+        var sh_idx = self._routes[i].handler_idx
+        ref reg = self._struct_registry[]
+        return reg.serve_thunks[sh_idx](reg.addrs[sh_idx], req)
+
     def serve(self, req: Request) raises -> Response:
         """Dispatch ``req`` to the matching handler.
 
@@ -690,46 +699,17 @@ struct Router(Copyable, Defaultable, Handler):
                 if not _contains(allowed, self._routes[i].method):
                     allowed.append(self._routes[i].method)
                 continue
-            # Match — inject params, invoke handler.
-            var child = Request(
-                method=req.method,
-                url=req.url,
-                body=req.body.copy(),
-                version=req.version,
-                peer=req.peer,
-                expose_errors=req.expose_errors,
-            )
-            child.headers = req.headers.copy()
-            # Copy any params already on the parent (e.g. nested routers
-            # via ``mount``) into the child. ``req`` is a read-only
-            # borrow here, so we peek at the raw ``_params`` pointer
-            # rather than calling the ``mut self`` accessor. Only
-            # allocates ``child._params`` when there is something to
-            # copy, so the plaintext-bench path (no Router, no params)
-            # stays allocation-free.
-            if req.has_params():
-                for kv in req._params.value()[].items():
-                    child.params_mut()[kv.key] = kv.value
+            # Match: a route with no params to add gets ``req`` itself.
+            if len(m_result.params) == 0 and not req.has_params():
+                return self._call_route(i, req)
+            var child = _child_request(req, req.url)
             # Copy the captures from this match. ``_MatchResult.params``
             # is always populated (even if empty), so guard on length to
             # avoid a pointless lazy-allocate for literal-only routes.
             if len(m_result.params) > 0:
                 for kv in m_result.params.items():
                     child.params_mut()[kv.key] = kv.value
-            # Dispatch based on handler kind. ``_ROUTE_KIND_FN`` goes
-            # through the FnHandler list (zero-overhead direct call);
-            # ``_ROUTE_KIND_STRUCT`` calls the monomorphised serve thunk
-            # captured at registration time, which bitcasts the boxed
-            # Handler struct back to its concrete type and forwards
-            # to ``H.serve``.
-            if self._routes[i].handler_kind == _ROUTE_KIND_FN:
-                return self._handlers[self._routes[i].handler_idx].serve(child^)
-            else:
-                var sh_idx = self._routes[i].handler_idx
-                ref reg = self._struct_registry[]
-                var addr = reg.addrs[sh_idx]
-                var thunk = reg.serve_thunks[sh_idx]
-                return thunk(addr, child^)
+            return self._call_route(i, child)
 
         # No direct route handled the request. A mounted sub-router
         # owns its whole subtree, so delegate to the first mount whose
@@ -743,35 +723,17 @@ struct Router(Copyable, Defaultable, Handler):
                 ref reg = self._struct_registry[]
                 var addr = reg.addrs[sh_idx]
                 var thunk = reg.serve_thunks[sh_idx]
-                var child = Request(
-                    method=req.method,
-                    url=req.url,
-                    body=req.body.copy(),
-                    version=req.version,
-                    peer=req.peer,
-                    expose_errors=req.expose_errors,
-                )
-                child.headers = req.headers.copy()
-                if req.has_params():
-                    for kv in req._params.value()[].items():
-                        child.params_mut()[kv.key] = kv.value
+                if not req.has_params():
+                    return thunk(addr, req)
+                var child = _child_request(req, req.url)
                 return thunk(addr, child^)
 
         if len(allowed) > 0:
             return _method_not_allowed(allowed)
         if self._fallback:
-            var child = Request(
-                method=req.method,
-                url=req.url,
-                body=req.body.copy(),
-                version=req.version,
-                peer=req.peer,
-                expose_errors=req.expose_errors,
-            )
-            child.headers = req.headers.copy()
-            if req.has_params():
-                for kv in req._params.value()[].items():
-                    child.params_mut()[kv.key] = kv.value
+            if not req.has_params():
+                return self._fallback.value().serve(req)
+            var child = _child_request(req, req.url)
             return self._fallback.value().serve(child^)
         return not_found(req.url)
 
@@ -808,18 +770,7 @@ struct _MountedRouter(Copyable, Handler):
         if q.byte_length() > 0:
             rebuilt += "?"
             rebuilt += q
-        var child = Request(
-            method=req.method,
-            url=rebuilt,
-            body=req.body.copy(),
-            version=req.version,
-            peer=req.peer,
-            expose_errors=req.expose_errors,
-        )
-        child.headers = req.headers.copy()
-        if req.has_params():
-            for kv in req._params.value()[].items():
-                child.params_mut()[kv.key] = kv.value
+        var child = _child_request(req, rebuilt)
         return self.sub.serve(child^)
 
 

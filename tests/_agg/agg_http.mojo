@@ -3002,6 +3002,12 @@ from test_response_stream import (
 from test_response_stream import (
     test_full_chunked_stream_bytes as test_response_stream__test_full_chunked_stream_bytes,
 )
+from test_router import (
+    test_param_route_sees_the_whole_request as test_router__test_param_route_sees_the_whole_request,
+)
+from test_router import (
+    test_literal_route_sees_the_whole_request as test_router__test_literal_route_sees_the_whole_request,
+)
 from test_router import test_literal_root as test_router__test_literal_root
 from test_router import (
     test_literal_multi_segment as test_router__test_literal_multi_segment,
@@ -3167,6 +3173,9 @@ from test_router_mount import (
 )
 from test_router_mount import (
     test_mount_rejects_param_prefix as test_router_mount__test_mount_rejects_param_prefix,
+)
+from test_routes_comptime import (
+    test_handler_sees_the_whole_request as test_routes_comptime__test_handler_sees_the_whole_request,
 )
 from test_routes_comptime import (
     test_literal_root as test_routes_comptime__test_literal_root,
@@ -6145,6 +6154,8 @@ def main() raises:
     suite.test[test_response_stream__test_frame_terminator]()
     suite.test[test_response_stream__test_full_chunked_stream_bytes]()
     # tests/http/test_router.mojo
+    suite.test[test_router__test_param_route_sees_the_whole_request]()
+    suite.test[test_router__test_literal_route_sees_the_whole_request]()
     suite.test[test_router__test_literal_root]()
     suite.test[test_router__test_literal_multi_segment]()
     suite.test[test_router__test_literal_not_matched_returns_404]()
@@ -6219,6 +6230,7 @@ def main() raises:
     suite.test[test_router_mount__test_mount_survives_router_copy]()
     suite.test[test_router_mount__test_mount_rejects_param_prefix]()
     # tests/http/test_routes_comptime.mojo
+    suite.test[test_routes_comptime__test_handler_sees_the_whole_request]()
     suite.test[test_routes_comptime__test_literal_root]()
     suite.test[test_routes_comptime__test_literal_users]()
     suite.test[test_routes_comptime__test_literal_trailing_slash_matches]()

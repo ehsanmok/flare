@@ -534,3 +534,23 @@ struct Request(Movable):
             else:
                 lower += chr(Int(c))
         return lower == "close"
+
+
+def _child_request(req: Request, url: String) -> Request:
+    """A copy of ``req`` addressed to ``url``, carrying its path params,
+    for a handler that gets params added to them."""
+    var child = Request(
+        method=req.method,
+        url=url,
+        body=req.body.copy(),
+        version=req.version,
+        peer=req.peer,
+        expose_errors=req.expose_errors,
+    )
+    child.headers = req.headers.copy()
+    child.trailers = req.trailers.copy()
+    child.body_pipe = req.body_pipe
+    if req.has_params():
+        for kv in req._params.value()[].items():
+            child.params_mut()[kv.key] = kv.value
+    return child^

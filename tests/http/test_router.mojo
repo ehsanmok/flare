@@ -68,7 +68,34 @@ def h_admin(req: Request) raises -> Response:
     return ok("admin:" + req.url)
 
 
+def h_trailer(req: Request) raises -> Response:
+    return ok("trailer:" + req.trailers.get("x-sum"))
+
+
 # ── Literal paths ───────────────────────────────────────────────────────────
+
+
+def h_trailer_param(req: Request) raises -> Response:
+    return ok(req.param("id") + ":" + req.trailers.get("x-sum"))
+
+
+def test_param_route_sees_the_whole_request() raises:
+    """A route that adds params still hands over the trailers."""
+    var r = Router()
+    r.post("/upload/:id", h_trailer_param)
+    var req = Request(method=Method.POST, url="/upload/7")
+    req.trailers.append("x-sum", "42")
+    assert_equal(r.serve(req).text(), "7:42")
+
+
+def test_literal_route_sees_the_whole_request() raises:
+    """A handler behind a literal route gets the request as sent,
+    trailers included; rebuilding it for dispatch dropped them."""
+    var r = Router()
+    r.post("/upload", h_trailer)
+    var req = Request(method=Method.POST, url="/upload")
+    req.trailers.append("x-sum", "42")
+    assert_equal(r.serve(req).text(), "trailer:42")
 
 
 def test_literal_root() raises:

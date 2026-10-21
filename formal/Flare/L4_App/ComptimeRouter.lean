@@ -62,7 +62,7 @@ inductive CScan where
   | miss (allowed : List Str)
 
 /-- The unrolled route loop of `ComptimeRouter.serve`.
-mirrors flare/http/routes.mojo#ComptimeRouter.serve+_match_one sha=92a09d8e34b5 at=12630564 (unchanged by APP-10; the
+mirrors flare/http/routes.mojo#ComptimeRouter.serve+_match_one sha=787827c502c0 at=f84a9842 (unchanged by APP-10; the
 fix is in `_match_one`) -/
 def scanCT (segsIn : List Str) (method : Str) : List CRoute → List Str → CScan
   | [], allowed => .miss allowed
@@ -76,7 +76,7 @@ def scanCT (segsIn : List Str) (method : Str) : List CRoute → List Str → CSc
 /-- `ComptimeRouter.serve`. `_not_found` / `_method_not_allowed` in
 routes.mojo build the same responses as `not_found` / router
 `_method_not_allowed`, so the router's `Outcome` is reused.
-mirrors flare/http/routes.mojo#ComptimeRouter.serve sha=a9e60d15faf1 at=59bda50f -/
+mirrors flare/http/routes.mojo#ComptimeRouter.serve sha=1a04c4a300db at=f84a9842 -/
 def serveCT (routes : List CRoute) (req : Req) : Outcome :=
   let segsIn := splitPath (pathOnly req.url)
   match scanCT segsIn req.method routes [] with
