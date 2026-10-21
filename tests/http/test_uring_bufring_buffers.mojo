@@ -30,7 +30,7 @@ from std.sys.info import CompilationTarget
 from std.testing import assert_equal, assert_true, TestSuite
 
 from flare.utils import SIGKILL, exit, fork, kill, usleep, waitpid
-from flare.http import FnHandlerCT, HttpServer, Response, ok
+from flare.http import ServerConfig, FnHandlerCT, HttpServer, Response, ok
 from flare.http.request import Request
 from flare.net import SocketAddr
 from flare.net._libc import (
@@ -51,6 +51,17 @@ from flare.net._libc import (
     get_errno,
 )
 from flare.runtime.uring_reactor import use_uring_backend
+
+
+def _bufring_config() -> ServerConfig:
+    """A config the buffer-ring loop serves: it arms no timers, so a
+    config with any timeout set is served by the reactor loop instead."""
+    return ServerConfig(
+        idle_timeout_ms=0,
+        write_timeout_ms=0,
+        read_body_timeout_ms=0,
+        request_timeout_ms=0,
+    )
 
 
 comptime _ROUNDS: Int = 20
@@ -182,7 +193,7 @@ def test_stale_recv_completions_return_their_buffers() raises:
         return
 
     _ = _setenv("FLARE_BUFRING_HANDLER", "1")
-    var srv = HttpServer.bind(SocketAddr.localhost(0))
+    var srv = HttpServer.bind(SocketAddr.localhost(0), _bufring_config())
     var port = UInt16(srv.local_addr().port)
     assert_true(Int(port) > 0, "server must bind to a positive port")
 

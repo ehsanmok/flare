@@ -375,6 +375,28 @@ struct ServerConfig(Copyable):
         )
 
 
+def bufring_gap(cfg: ServerConfig) -> String:
+    """What ``cfg`` needs that the io_uring buffer-ring loop does not do,
+    or ``""`` when that loop can serve it.
+
+    The loop serves plain HTTP/1.1 and arms no timers and no connection
+    cap, so a config that relies on any of them is served by the reactor
+    loop instead: running it there would drop the limit silently.
+    """
+    if cfg.ws.handler or cfg.ws.reactor:
+        return "WebSocket upgrades"
+    if (
+        cfg.idle_timeout_ms > 0
+        or cfg.write_timeout_ms > 0
+        or cfg.read_body_timeout_ms > 0
+        or cfg.request_timeout_ms > 0
+    ):
+        return "timeouts"
+    if cfg.max_connections > 0:
+        return "max_connections"
+    return ""
+
+
 def _resolve_bufring_handler_env() -> Bool:
     """Read ``FLARE_BUFRING_HANDLER`` once at startup.
 

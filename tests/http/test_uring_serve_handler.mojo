@@ -71,6 +71,17 @@ from flare.net._libc import (
 from flare.runtime.uring_reactor import use_uring_backend
 
 
+def _bufring_config() -> ServerConfig:
+    """A config the buffer-ring loop serves: it arms no timers, so a
+    config with any timeout set is served by the reactor loop instead."""
+    return ServerConfig(
+        idle_timeout_ms=0,
+        write_timeout_ms=0,
+        read_body_timeout_ms=0,
+        request_timeout_ms=0,
+    )
+
+
 @always_inline
 def _setenv(name: String, value: String, overwrite: c_int = c_int(1)) -> c_int:
     return external_call["setenv", c_int](
@@ -186,7 +197,7 @@ def test_serve_handler_sequential_keepalive_churn() raises:
     # the env var and routes through run_uring_bufring_reactor_loop.
     _ = _setenv("FLARE_BUFRING_HANDLER", "1")
 
-    var srv = HttpServer.bind(SocketAddr.localhost(0))
+    var srv = HttpServer.bind(SocketAddr.localhost(0), _bufring_config())
     var port = UInt16(srv.local_addr().port)
     assert_true(Int(port) > 0, "server must bind to a positive port")
 
@@ -263,7 +274,7 @@ def test_serve_handler_concurrent_fanout() raises:
 
     _ = _setenv("FLARE_BUFRING_HANDLER", "1")
 
-    var srv = HttpServer.bind(SocketAddr.localhost(0))
+    var srv = HttpServer.bind(SocketAddr.localhost(0), _bufring_config())
     var port = UInt16(srv.local_addr().port)
 
     var server_pid = fork()

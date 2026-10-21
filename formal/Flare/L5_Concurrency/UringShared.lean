@@ -64,7 +64,7 @@ theorem probe_skew_shared :
 
 /-- The io_uring worker on the shared-listener state: the number is used by
 the arm only.
-mirrors flare/http/_server_reactor_uring.mojo#run_uring_bufring_reactor_loop_shared sha=3b4da4a6d678 at=12630564 -/
+mirrors flare/http/_server_reactor_uring.mojo#run_uring_bufring_reactor_loop_shared sha=32d4902a2724 at=504cca92 -/
 def uwStep (stop : Bool) (w : W) : Option (W × Bool) :=
   match w.pc with
   | .reg => some ({ w with pc := .check }, true)
@@ -72,8 +72,8 @@ def uwStep (stop : Bool) (w : W) : Option (W × Bool) :=
   | .acc => some ({ w with pc := .check }, false)
   | .done => none
 
-/-- mirrors flare/http/_server_reactor_uring.mojo#run_uring_bufring_reactor_loop_shared sha=3b4da4a6d678 at=c738a911 and
-flare/runtime/scheduler.mojo#Scheduler._signal_stop+Scheduler.drain sha=0d9bc4a3ee5b at=c738a911 -/
+/-- mirrors flare/http/_server_reactor_uring.mojo#run_uring_bufring_reactor_loop_shared sha=32d4902a2724 at=504cca92 and
+flare/runtime/scheduler.mojo#Scheduler._signal_stop+Scheduler.drain sha=0d9bc4a3ee5b at=504cca92 -/
 def ustep (hard : Bool) (s : St) : Lbl → Option St
   | .w i =>
     match s.ws[i]? with

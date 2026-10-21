@@ -24,6 +24,7 @@ from json import dumps, Value as JsonValue
 from ..runtime._libc_time import libc_nanosleep_ms, monotonic_now_ms
 
 from std.collections import Optional
+from std.sys import stderr
 
 from .handler import Handler, CancelHandler, ViewHandler
 from .cancel import Cancel
@@ -38,6 +39,7 @@ from ._server.config import (
     ServerConfig,
     WsUpgrade,
     _resolve_bufring_handler_env,
+    bufring_gap,
 )
 from .alpn_dispatch import (
     ALPN_HTTP_1_1,
@@ -771,6 +773,25 @@ struct HttpServer(Movable):
         """
         self._serve_one(handler)
 
+    def _resolve_bufring(mut self):
+        """Decide once, at startup, whether the io_uring buffer-ring loop
+        serves: when opted into (``FLARE_BUFRING_HANDLER=1`` or
+        ``use_bufring``) and the config needs nothing that loop lacks."""
+        if not self.config.use_bufring:
+            self.config.use_bufring = _resolve_bufring_handler_env()
+        if not self.config.use_bufring:
+            return
+        var gap = bufring_gap(self.config)
+        if not gap and self._ws_h2_hooks:
+            gap = "WebSocket upgrades"
+        if gap:
+            print(
+                "flare: the io_uring buffer ring does not enforce",
+                gap + "; serving with the reactor loop",
+                file=stderr,
+            )
+            self.config.use_bufring = False
+
     def _serve_one[H: Handler](mut self, ref handler: H) raises:
         """The single-worker reactor: io_uring buffer ring when opted in,
         else the unified h1/h2 loop over every bound listener, with the
@@ -781,8 +802,7 @@ struct HttpServer(Movable):
         from std.sys.info import CompilationTarget
 
         self._stopping = False
-        if not self.config.use_bufring:
-            self.config.use_bufring = _resolve_bufring_handler_env()
+        self._resolve_bufring()
         comptime if CompilationTarget.is_linux():
             if (
                 use_uring_backend()
@@ -1062,11 +1082,8 @@ struct HttpServer(Movable):
         self._listener.close()
         self._close_extras()
 
-        # Read FLARE_BUFRING_HANDLER once at startup before
-        # passing the config off to per-worker scheduler threads.
-        # See `_resolve_bufring_handler_env` for the rationale.
-        if not self.config.use_bufring:
-            self.config.use_bufring = _resolve_bufring_handler_env()
+        # Before the config is handed to the worker threads.
+        self._resolve_bufring()
 
         var frontend = HttpFrontend[H](
             handler^,

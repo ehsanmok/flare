@@ -957,8 +957,10 @@ of what you might reasonably assume from the surrounding feature.
   most 100 ms.
 - `bind(List[SocketAddr])` is single-worker only for its address cross product.
 - The io_uring buffer-ring handler path (`FLARE_BUFRING_HANDLER=1`) is
-  HTTP/1.1 cleartext only and cannot stream; a server with an
-  `attach_ws_h2` sidecar uses the unified loop instead.
+  HTTP/1.1 cleartext only and cannot stream. It arms no timers and no
+  connection cap, so it serves only a config with every timeout at 0, no
+  `max_connections` and no WebSocket upgrades; any other server uses the
+  unified loop and says so on stderr at startup.
 
 **QUIC and HTTP/3**
 

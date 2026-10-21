@@ -23,7 +23,7 @@ from std.sys.info import CompilationTarget
 from std.testing import assert_equal, assert_true, TestSuite
 
 from flare.utils import SIGKILL, exit, fork, kill, usleep, waitpid
-from flare.http import FnHandlerCT, HttpServer, Response, ok
+from flare.http import ServerConfig, FnHandlerCT, HttpServer, Response, ok
 from flare.http.request import Request
 from flare.net import SocketAddr
 from flare.net._libc import (
@@ -46,6 +46,17 @@ from flare.net._libc import (
 from flare.runtime.uring_reactor import use_uring_backend
 
 
+def _bufring_config() -> ServerConfig:
+    """A config the buffer-ring loop serves: it arms no timers, so a
+    config with any timeout set is served by the reactor loop instead."""
+    return ServerConfig(
+        idle_timeout_ms=0,
+        write_timeout_ms=0,
+        read_body_timeout_ms=0,
+        request_timeout_ms=0,
+    )
+
+
 comptime _OK: String = "HTTP/1.1 200"
 comptime _SCN_SPLIT_BODY: Int = 0
 comptime _SCN_LARGE_BODY: Int = 1
@@ -53,6 +64,8 @@ comptime _SCN_OTHER_CONN: Int = 2
 comptime _SCN_PIPELINED: Int = 3
 comptime _SCN_PIPELINED_THEN_SPLIT: Int = 4
 comptime _SCN_PIPELINED_CHUNKED: Int = 5
+comptime _SCN_LARGE_RESPONSE: Int = 6
+comptime _BIG: Int = 32 * 1024 * 1024
 
 
 @always_inline
@@ -148,7 +161,21 @@ def _post_headers(length: Int) -> String:
 
 
 def _handler(req: Request) raises -> Response:
+    if req.url == "/big":
+        return Response(200, body=List[UInt8](length=_BIG, fill=97))
     return ok("ok")
+
+
+def _read_all(fd: c_int, want: Int) -> Int:
+    """Bytes received until ``want`` arrived, EOF or the receive timeout."""
+    var buf = stack_allocation[65536, UInt8]()
+    var got = 0
+    while got < want:
+        var n = Int(_recv(fd, buf, c_size_t(65536), c_int(0)))
+        if n <= 0:
+            break
+        got += n
+    return got
 
 
 comptime _Handler = FnHandlerCT[_handler]
@@ -223,6 +250,15 @@ def _scenario(port: UInt16, which: Int) raises -> String:
             var seen = _await_responses(fd, 2)
             if seen != 2:
                 err = "pipelined chunked answered " + String(seen) + " of 2"
+        elif which == _SCN_LARGE_RESPONSE:
+            # More than the socket takes in one send: the rest must follow
+            # once the client reads, not be dropped.
+            # Not reading for a while fills the socket buffers.
+            _send_all(fd, _get("/big"))
+            usleep(300000)
+            var got = _read_all(fd, _BIG)
+            if got < _BIG:
+                err = "32 MiB response cut at " + String(got) + " bytes"
         else:
             err = "unknown scenario"
     except e:
@@ -245,7 +281,7 @@ def _run(which: Int, submit_send: Bool) raises:
 
     _ = _setenv("FLARE_BUFRING_HANDLER", "1")
     _ = _setenv("FLARE_SUBMIT_SEND", "1" if submit_send else "0")
-    var srv = HttpServer.bind(SocketAddr.localhost(0))
+    var srv = HttpServer.bind(SocketAddr.localhost(0), _bufring_config())
     var port = UInt16(srv.local_addr().port)
     assert_true(Int(port) > 0, "server must bind to a positive port")
 
@@ -298,6 +334,49 @@ def test_partial_request_does_not_stall_other_connections_submit_send() raises:
     _run(_SCN_OTHER_CONN, True)
 
 
+def test_large_response_sync() raises:
+    _run(_SCN_LARGE_RESPONSE, False)
+
+
+def test_large_response_submit_send() raises:
+    _run(_SCN_LARGE_RESPONSE, True)
+
+
+def test_timeouts_keep_the_reactor_loop() raises:
+    """The buffer-ring loop arms no timers, so a server that asks for it
+    with an idle timeout set is served by the reactor loop, which drops a
+    connection that sends nothing."""
+    comptime if not CompilationTarget.is_linux():
+        print("(skipped: io_uring is Linux-only)")
+        return
+    if not use_uring_backend():
+        print("(skipped: kernel lacks io_uring)")
+        return
+    _ = _setenv("FLARE_BUFRING_HANDLER", "1")
+    var srv = HttpServer.bind(
+        SocketAddr.localhost(0), ServerConfig(idle_timeout_ms=200)
+    )
+    var port = UInt16(srv.local_addr().port)
+    var pid = fork()
+    if pid == 0:
+        try:
+            var h = _Handler()
+            srv.serve(h^)
+        except:
+            pass
+        exit()
+    usleep(120000)
+    var n = -2
+    var fd = _connect_loopback(port)
+    if Int(fd) >= 0:
+        var buf = stack_allocation[16, UInt8]()
+        n = Int(_recv(fd, buf, c_size_t(16), c_int(0)))
+        _ = _close(fd)
+    _ = kill(pid, SIGKILL)
+    waitpid(pid)
+    assert_equal(n, 0, "idle connection must be closed by the server")
+
+
 def test_pipelined_burst_sync() raises:
     _run(_SCN_PIPELINED, False)
 
@@ -335,6 +414,9 @@ def main() raises:
     suite.test[
         test_partial_request_does_not_stall_other_connections_submit_send
     ]()
+    suite.test[test_large_response_sync]()
+    suite.test[test_large_response_submit_send]()
+    suite.test[test_timeouts_keep_the_reactor_loop]()
     suite.test[test_pipelined_burst_sync]()
     suite.test[test_pipelined_burst_submit_send]()
     suite.test[test_pipelined_then_split_sync]()

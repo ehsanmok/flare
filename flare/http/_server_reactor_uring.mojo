@@ -613,20 +613,37 @@ def _on_send_cqe_complete[
 ](
     fd: Int,
     conn_id: UInt64,
+    res: Int,
     config: ServerConfig,
     ref handler: H,
     ch_ptr: Pointer[ConnHandle, MutUntrackedOrigin],
     mut ureactor: UringReactor,
 ) raises -> Bool:
-    """Handle a ``URING_OP_SEND`` CQE: clear the send-in-flight
-    state, drain any read_buf bytes that were buffered while the
-    send was in flight, and start a new request cycle if there
-    are buffered bytes.
+    """Handle a ``URING_OP_SEND`` CQE that sent ``res`` bytes (or failed
+    with ``-errno``): send the rest of the response if the kernel took
+    only part of it; once all of it is out, clear the send-in-flight
+    state and start a new request cycle if bytes are buffered.
 
-    Returns True iff the conn should be cleaned up (e.g.,
-    ``should_close`` was set on the just-sent response and there
-    are no more requests to serve).
+    Returns True iff the conn should be cleaned up: the send failed, or
+    ``should_close`` was set on the response just sent.
     """
+    if res <= 0:
+        return True
+    ch_ptr[].write_pos += res
+    var rest = len(ch_ptr[].write_buf) - ch_ptr[].write_pos
+    if rest > 0:
+        try:
+            ureactor.submit_send(
+                fd,
+                ch_ptr[]
+                .write_buf.unsafe_ptr()
+                .unsafe_offset(ch_ptr[].write_pos),
+                rest,
+                conn_id,
+            )
+        except:
+            return True
+        return False
     ch_ptr[].send_in_flight = False
     # Reset the write buffer so the next request's response
     # serializes from a clean state.
@@ -656,15 +673,18 @@ def _on_send_cqe_complete[
 def _drive_handler_after_buf_recv[
     H: Handler,
 ](
+    fd: Int,
+    conn_id: UInt64,
     bytes: Span[UInt8, _],
     config: ServerConfig,
     ref handler: H,
     ch_ptr: Pointer[ConnHandle, MutUntrackedOrigin],
+    mut ureactor: UringReactor,
 ) raises -> Bool:
-    """Sync-send variant kept as a fallback / reference -- see
-    ``_drive_handler_with_submit_send`` for the production io_uring
-    path that uses ``submit_send`` instead of synchronous
-    ``on_writable``.
+    """Sync-send variant of ``_drive_handler_with_submit_send``: the
+    response is written with ``send(2)`` straight away, and whatever the
+    socket does not take is handed to a ``submit_send`` whose completion
+    (``_on_send_cqe_complete``) finishes it.
     """
     var step_done: Bool
     try:
@@ -678,7 +698,20 @@ def _drive_handler_after_buf_recv[
                 last_step = ch_ptr[].on_writable(config)
                 step_done = last_step.done
                 if (not step_done) and last_step.want_write:
-                    step_done = True
+                    if ch_ptr[].body_src:
+                        # A streamed body needs the reactor loop.
+                        step_done = True
+                        break
+                    ureactor.submit_send(
+                        fd,
+                        ch_ptr[]
+                        .write_buf.unsafe_ptr()
+                        .unsafe_offset(ch_ptr[].write_pos),
+                        len(ch_ptr[].write_buf) - ch_ptr[].write_pos,
+                        conn_id,
+                    )
+                    ch_ptr[].send_in_flight = True
+                    break
             elif last_step.want_read and ch_ptr[].has_buffered_request():
                 # Whole pipelined request already in read_buf -- drive the
                 # parser without appending more bytes (a partial one would
@@ -839,6 +872,7 @@ def run_uring_bufring_reactor_loop_shared[
                 var send_done = _on_send_cqe_complete[H](
                     send_fd,
                     send_conn_id,
+                    Int(comp.res),
                     config,
                     handler,
                     send_ch_ptr,
@@ -878,9 +912,7 @@ def run_uring_bufring_reactor_loop_shared[
             # before the handler runs (Span-origin narrowing -- see
             # the matching block in the single-worker variant for
             # the full rationale).
-            ch_ptr[].read_buf.reserve(len(ch_ptr[].read_buf) + n)
-            for i in range(n):
-                ch_ptr[].read_buf.append(buf.unsafe_offset(i).unsafe_load())
+            ch_ptr[].read_buf.extend(Span[UInt8, _](unsafe_ptr=buf, length=n))
 
             if decision.return_buf:
                 _br_return_buf(ring_addr, pool_addr, bid)
@@ -899,9 +931,15 @@ def run_uring_bufring_reactor_loop_shared[
                         ch_ptr,
                         ureactor,
                     )
-            else:
+            elif not ch_ptr[].send_in_flight:
                 step_done = _drive_handler_after_buf_recv[H](
-                    empty_span, config, handler, ch_ptr
+                    fd,
+                    conn_id,
+                    empty_span,
+                    config,
+                    handler,
+                    ch_ptr,
+                    ureactor,
                 )
 
             if (not step_done) and (not comp.has_more):

@@ -69,8 +69,8 @@ theorem pollTimeout_pos (nf now cap : Nat) (h : 1 ≤ cap) : 1 ≤ pollTimeout n
   · split <;> omega
 
 /-- Worker phase.
-mirrors flare/http/_server_reactor_epoll.mojo#_run_handler_loop_impl sha=2f9bbe6a6bd1 at=12630564 and
-flare/http/_server_reactor_uring.mojo#run_uring_bufring_reactor_loop_shared sha=3b4da4a6d678 at=12630564 -/
+mirrors flare/http/_server_reactor_epoll.mojo#_run_handler_loop_impl sha=2f9bbe6a6bd1 at=504cca92 and
+flare/http/_server_reactor_uring.mojo#run_uring_bufring_reactor_loop_shared sha=32d4902a2724 at=504cca92 -/
 inductive TPc where
   | reg | check | poll | ready | batch | clean | done
   deriving DecidableEq, Repr
@@ -159,10 +159,10 @@ def mStep (c : Cfg) (s : TS) : Option TS :=
   | .free _ => some { s with m := .fin s.now }
   | .fin _ => none
 
-/-- mirrors flare/http/_server_reactor_epoll.mojo#_run_handler_loop_impl sha=2f9bbe6a6bd1 at=c738a911,
-flare/http/_server_reactor_uring.mojo#run_uring_bufring_reactor_loop_shared sha=3b4da4a6d678 at=c738a911 (fixed, CONC-07: `poll` takes
+/-- mirrors flare/http/_server_reactor_epoll.mojo#_run_handler_loop_impl sha=2f9bbe6a6bd1 at=504cca92,
+flare/http/_server_reactor_uring.mojo#run_uring_bufring_reactor_loop_shared sha=32d4902a2724 at=504cca92 (fixed, CONC-07: `poll` takes
 `URING_STOP_POLL_MS`) and
-flare/runtime/scheduler.mojo#Scheduler._signal_stop+Scheduler.shutdown+Scheduler.drain sha=fce0ba997edc at=c738a911 -/
+flare/runtime/scheduler.mojo#Scheduler._signal_stop+Scheduler.shutdown+Scheduler.drain sha=fce0ba997edc at=504cca92 -/
 def step (c : Cfg) (s : TS) : Lbl → Option TS
   | .tick => some { s with now := s.now + 1 }
   | .w i =>
