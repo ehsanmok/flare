@@ -165,6 +165,10 @@ def test_gzip_into_a_short_buffer_is_an_error() raises:
         c_int(len(out)),
         c_int(6),
     )
+    # Only addresses went to C: keep both buffers alive past the call,
+    # or they may be freed before it writes into ``out``.
+    _ = src^
+    _ = out^
     assert_true(Int(written) < 0)
 
 
