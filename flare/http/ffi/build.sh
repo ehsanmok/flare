@@ -42,6 +42,7 @@ _needs_rebuild() {
     [ ! -f "$TARGET" ] && return 0
     [ ! -f "$INSTALLED" ] && return 0
     [ "$SOURCE" -nt "$TARGET" ] && return 0
+    [ "$SCRIPT_DIR/scratch_cache.h" -nt "$TARGET" ] && return 0
     [ "$CONDA_PREFIX/lib/libz.so" -nt "$TARGET" ] 2>/dev/null && return 0
     [ "$CONDA_PREFIX/lib/libz.dylib" -nt "$TARGET" ] 2>/dev/null && return 0
     [ "$TARGET" -nt "$INSTALLED" ] 2>/dev/null && return 0
@@ -85,7 +86,7 @@ if $CC -O2 -fPIC -shared \
     "$SOURCE" \
     -I"$CONDA_PREFIX/include" \
     -L"$CONDA_PREFIX/lib" \
-    -lz \
+    -lz -pthread \
     $NODELETE \
     -Wl,-rpath,"$CONDA_PREFIX/lib"; then
     echo ""
@@ -114,6 +115,7 @@ _brotli_needs_rebuild() {
     [ ! -f "$BROTLI_TARGET" ] && return 0
     [ ! -f "$BROTLI_INSTALLED" ] && return 0
     [ "$BROTLI_SOURCE" -nt "$BROTLI_TARGET" ] && return 0
+    [ "$SCRIPT_DIR/scratch_cache.h" -nt "$BROTLI_TARGET" ] && return 0
     [ "$BROTLI_TARGET" -nt "$BROTLI_INSTALLED" ] 2>/dev/null && return 0
     return 1
 }

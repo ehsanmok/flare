@@ -58,6 +58,25 @@ def test_brotli_is_deterministic_across_reused_scratch() raises:
                 assert_equal(back[i], src[i])
 
 
+def test_gzip_is_deterministic_across_reused_scratch() raises:
+    """As for brotli: deflate's reused work buffers leave the output a
+    function of the input alone."""
+    for level in [1, 6, 9]:
+        for n in [100, 20_000, 300_000]:
+            var src = _mixed(n, n + level)
+            var first = compress_gzip(Span[UInt8, _](src), level)
+            var other = _mixed(n, 7 * n + 1)
+            _ = compress_gzip(Span[UInt8, _](other), level)
+            var again = compress_gzip(Span[UInt8, _](src), level)
+            assert_equal(len(again), len(first))
+            for i in range(len(first)):
+                assert_equal(again[i], first[i])
+            var back = decompress_gzip(Span[UInt8, _](again))
+            assert_equal(len(back), n)
+            for i in range(n):
+                assert_equal(back[i], src[i])
+
+
 def test_round_trip() raises:
     var src = _text(10_000)
     var z = compress_gzip(Span[UInt8, _](src))

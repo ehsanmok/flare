@@ -24,6 +24,18 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "scratch_cache.h"
+
+/* zlib's allocator hooks over the shared scratch cache. */
+static voidpf zscratch_alloc(voidpf opaque, uInt items, uInt size) {
+    if (size != 0 && items > SIZE_MAX / size) return Z_NULL;
+    return scratch_alloc(opaque, (size_t)items * size);
+}
+
+static void zscratch_free(voidpf opaque, voidpf address) {
+    scratch_free(opaque, address);
+}
+
 /* ── Decompress (inflate) ──────────────────────────────────────────────────── */
 
 /**
@@ -199,6 +211,8 @@ int flare_compress_gzip(const void *in_buf, int in_len,
                         int level) {
     z_stream strm;
     memset(&strm, 0, sizeof(z_stream));
+    strm.zalloc = zscratch_alloc;
+    strm.zfree = zscratch_free;
 
     /* windowBits = 15 | 16 = gzip container; method = Z_DEFLATED */
     int rc = deflateInit2(&strm, level, Z_DEFLATED, 15 | 16, 8, Z_DEFAULT_STRATEGY);
@@ -242,6 +256,8 @@ int flare_compress_raw_deflate(const void *in_buf, int in_len,
                                int level) {
     z_stream strm;
     memset(&strm, 0, sizeof(z_stream));
+    strm.zalloc = zscratch_alloc;
+    strm.zfree = zscratch_free;
 
     /* windowBits = -15 -> raw deflate (no zlib/gzip wrapper). */
     int rc = deflateInit2(&strm, level, Z_DEFLATED, -15, 8, Z_DEFAULT_STRATEGY);
