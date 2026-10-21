@@ -365,6 +365,9 @@ from test_ws_protocol import (
     test_fragments_split_byte_by_byte_reassemble as test_ws_protocol__test_fragments_split_byte_by_byte_reassemble,
 )
 from test_ws_protocol import (
+    test_a_burst_of_small_frames_is_decoded_in_linear_time as test_ws_protocol__test_a_burst_of_small_frames_is_decoded_in_linear_time,
+)
+from test_ws_protocol import (
     test_orphan_continuation_is_1002 as test_ws_protocol__test_orphan_continuation_is_1002,
 )
 from test_ws_protocol import (
@@ -721,6 +724,9 @@ def main() raises:
     # tests/ws/test_ws_protocol.mojo
     suite.test[test_ws_protocol__test_text_message_and_ping]()
     suite.test[test_ws_protocol__test_fragments_split_byte_by_byte_reassemble]()
+    suite.test[
+        test_ws_protocol__test_a_burst_of_small_frames_is_decoded_in_linear_time
+    ]()
     suite.test[test_ws_protocol__test_orphan_continuation_is_1002]()
     suite.test[test_ws_protocol__test_data_frame_inside_a_message_is_1002]()
     suite.test[test_ws_protocol__test_unmasked_frame_is_1002]()

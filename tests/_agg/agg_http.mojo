@@ -3754,6 +3754,9 @@ from test_server_ws_offload import (
     test_offloaded_threads_are_capped as test_server_ws_offload__test_offloaded_threads_are_capped,
 )
 from test_server_ws_upgrade import (
+    test_a_16_mib_message_is_received_in_linear_time as test_server_ws_upgrade__test_a_16_mib_message_is_received_in_linear_time,
+)
+from test_server_ws_upgrade import (
     test_http_and_ws_on_one_port as test_server_ws_upgrade__test_http_and_ws_on_one_port,
 )
 from test_server_ws_upgrade import (
@@ -6552,6 +6555,9 @@ def main() raises:
     ]()
     suite.test[test_server_ws_offload__test_offloaded_threads_are_capped]()
     # tests/http/test_server_ws_upgrade.mojo
+    suite.test[
+        test_server_ws_upgrade__test_a_16_mib_message_is_received_in_linear_time
+    ]()
     suite.test[test_server_ws_upgrade__test_http_and_ws_on_one_port]()
     suite.test[
         test_server_ws_upgrade__test_upgrade_request_is_ordinary_traffic_without_a_ws_handler

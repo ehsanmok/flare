@@ -87,7 +87,6 @@ struct WsConnHandle(Movable):
         while taken < _READ_PER_EDGE and self.session.proto.wants_input():
             ref inbox = self.session.proto.inbox
             var have = len(inbox)
-            inbox.reserve(have + _READ_CHUNK)
             inbox.resize(unsafe_uninit_length=have + _READ_CHUNK)
             var got = _recv(
                 fd,

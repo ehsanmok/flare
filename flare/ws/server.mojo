@@ -829,7 +829,6 @@ struct WsConnection(Movable):
             ):
                 break
             var have = len(self._prebuf)
-            self._prebuf.reserve(have + 4096)
             self._prebuf.resize(unsafe_uninit_length=have + 4096)
             var n = self._stream.read(
                 self._prebuf.unsafe_ptr().unsafe_offset(have), 4096

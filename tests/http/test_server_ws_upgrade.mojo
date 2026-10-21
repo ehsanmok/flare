@@ -24,6 +24,7 @@ instead, which is the only way to reach the prebuf with real data.
 from std.ffi import c_int, c_size_t
 from std.memory import stack_allocation
 from std.testing import assert_equal, assert_false, assert_true
+from std.time import perf_counter_ns
 
 from flare.utils import SIGKILL, exit, fork, kill, usleep, waitpid
 
@@ -71,6 +72,41 @@ def _ws_handler(mut conn: WsConnection) raises -> None:
             conn.send_text("echo: " + frame.text_payload())
         else:
             conn.send_binary(frame.payload)
+
+
+def _ws_size_handler(mut conn: WsConnection) raises -> None:
+    var frame = conn.recv()
+    conn.send_text(String(len(frame.payload)))
+
+
+def test_a_16_mib_message_is_received_in_linear_time() raises:
+    """The receive buffer grew by exactly 4 KiB per read, so a 16 MiB
+    frame was copied about 4000 times: seconds on loopback."""
+    var srv = HttpServer.bind(SocketAddr.localhost(0))
+    var port = UInt16(srv.local_addr().port)
+    var pid = fork()
+    if pid == 0:
+        try:
+            srv.config.ws = WsUpgrade(_ws_size_handler)
+            srv.serve(_http_handler)
+        except:
+            pass
+        exit()
+    usleep(300000)
+    var got = String("")
+    var ms = 0
+    try:
+        var ws = WsClient.connect("ws://127.0.0.1:" + String(Int(port)) + "/ws")
+        var payload = List[UInt8](length=16 * 1024 * 1024, fill=7)
+        var t0 = perf_counter_ns()
+        ws.send_binary(payload)
+        got = ws.recv().text_payload()
+        ms = Int((perf_counter_ns() - t0) // 1_000_000)
+    finally:
+        _ = kill(pid, SIGKILL)
+        _ = waitpid(pid)
+    assert_equal(got, String(16 * 1024 * 1024))
+    assert_true(ms < 1500, "16 MiB took " + String(ms) + " ms")
 
 
 # ── Raw loopback connect helper (same as unified-server test) ─────────────────
@@ -676,4 +712,5 @@ def main() raises:
     test_shared_listener_checks_the_whole_handshake()
     test_shared_listener_upgrade_carries_origin()
     test_ws_handshake_on_tls_is_never_upgraded_in_cleartext()
-    print("test_server_ws_upgrade: 8 passed")
+    test_a_16_mib_message_is_received_in_linear_time()
+    print("test_server_ws_upgrade: 9 passed")

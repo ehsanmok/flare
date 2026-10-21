@@ -190,7 +190,7 @@ def message (s : St) (isText : Bool) (p : Bytes) : St × List Out :=
 
 /-- One decoded input, as `next_event` handles it (the body of its loop and
 `_on_frame`). `m` is `max_message`, `mo` is `max_outbox`.
-mirrors flare/ws/protocol.mojo#WsProtocol.next_event+WsProtocol._on_frame+WsProtocol._message+WsProtocol._fail+WsProtocol.close+WsProtocol._send+_close_reply_payload+_valid_close_code sha=763db3da93dd at=240066a4 -/
+mirrors flare/ws/protocol.mojo#WsProtocol.next_event+WsProtocol._on_frame+WsProtocol._message+WsProtocol._fail+WsProtocol.close+WsProtocol._send+_close_reply_payload+_valid_close_code sha=307728402360 at=3e153703 -/
 def step (m mo : Nat) (s : St) (i : In) : St × List Out :=
   if finished s then (s, []) else
   match i with

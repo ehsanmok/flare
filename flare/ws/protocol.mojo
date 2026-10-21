@@ -111,7 +111,9 @@ struct WsProtocol(Copyable, Movable):
     """One server-side WebSocket session, without I/O."""
 
     var inbox: List[UInt8]
-    """Received bytes not yet decoded. Carriers append to it."""
+    """Received bytes; those from ``_in_pos`` on are not decoded yet.
+    Carriers append to it."""
+    var _in_pos: Int
     var outbox: List[UInt8]
     """Encoded frames waiting to be sent. Carriers send from the front
     and call ``consumed``."""
@@ -131,6 +133,7 @@ struct WsProtocol(Copyable, Movable):
         max_outbox: Int = DEFAULT_MAX_OUTBOX_BYTES,
     ):
         self.inbox = List[UInt8]()
+        self._in_pos = 0
         self.outbox = List[UInt8]()
         self.max_message = max_message
         self.max_outbox = max_outbox
@@ -225,15 +228,16 @@ struct WsProtocol(Copyable, Movable):
         """Decode buffered frames until a message completes, the session
         ends, or more bytes are needed (``None``)."""
         while not self.finished():
-            var need = ws_frame_length(Span[UInt8, _](self.inbox))
+            var pending = Span[UInt8, _](self.inbox)[self._in_pos :]
+            var need = ws_frame_length(pending)
             if need < 0:
                 return None
-            if need > len(self.inbox) and need <= self.max_message + 14:
+            if need > len(pending) and need <= self.max_message + 14:
                 return None
             var frame: WsFrame
             try:
                 var r = WsFrame.decode_one(
-                    Span[UInt8, _](self.inbox), max_payload=self.max_message
+                    pending, max_payload=self.max_message
                 )
                 self._drop_inbox(r.consumed)
                 frame = r^.take_frame()
@@ -314,9 +318,16 @@ struct WsProtocol(Copyable, Movable):
         return WsEvent(WS_EVENT_MESSAGE, is_text, payload^, 0)
 
     def _drop_inbox(mut self, n: Int):
-        if n >= len(self.inbox):
+        """Mark ``n`` more bytes decoded. The undecoded tail is moved to
+        the front only once it is at most half the buffer, so each byte
+        is copied a bounded number of times however many frames it
+        arrived with."""
+        self._in_pos += n
+        if self._in_pos >= len(self.inbox):
             self.inbox.clear()
-            return
-        var rest = List[UInt8](capacity=len(self.inbox) - n)
-        rest.extend(Span[UInt8, _](self.inbox)[n : len(self.inbox)])
-        self.inbox = rest^
+            self._in_pos = 0
+        elif self._in_pos * 2 >= len(self.inbox):
+            var rest = List[UInt8](capacity=len(self.inbox) - self._in_pos)
+            rest.extend(Span[UInt8, _](self.inbox)[self._in_pos :])
+            self.inbox = rest^
+            self._in_pos = 0

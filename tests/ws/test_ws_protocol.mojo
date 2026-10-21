@@ -1,6 +1,7 @@
 """Tests for the sans-I/O WebSocket protocol core (``flare.ws.protocol``)."""
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
+from std.time import perf_counter_ns
 
 from flare.ws import WsFrame, WsOpcode
 from flare.ws.frame import ws_frame_length
@@ -76,6 +77,26 @@ def test_fragments_split_byte_by_byte_reassemble() raises:
             got += 1
             assert_equal(String(unsafe_from_utf8=ev.value().payload), "aéb")
     assert_equal(got, 1)
+
+
+def test_a_burst_of_small_frames_is_decoded_in_linear_time() raises:
+    """Every decoded frame used to copy the rest of the inbox, so a burst
+    of small frames cost time quadratic in its size: 200000 frames took
+    seconds."""
+    var p = WsProtocol()
+    var frame = _masked(WsOpcode.BINARY, _bytes("abcd"))
+    for _ in range(200000):
+        p.inbox.extend(Span[UInt8, _](frame))
+    var t0 = perf_counter_ns()
+    var n = 0
+    while True:
+        var ev = p.next_event()
+        if not ev:
+            break
+        n += 1
+    var ms = (perf_counter_ns() - t0) // 1_000_000
+    assert_equal(n, 200000)
+    assert_true(ms < 1000, "200000 frames took " + String(ms) + " ms")
 
 
 def test_orphan_continuation_is_1002() raises:
