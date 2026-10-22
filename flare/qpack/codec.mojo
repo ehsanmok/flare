@@ -74,6 +74,35 @@ from .static_table import (
 )
 
 
+comptime QPACK_DEFAULT_MAX_FIELD_SECTION_SIZE: UInt64 = 65536
+"""Default cap on a *decoded* field section: the sum of
+``name + value + 32`` over its field lines, the size RFC 9114 section
+4.2.2 gives SETTINGS_MAX_FIELD_SECTION_SIZE. Matches the 64 KiB flare
+advertises."""
+
+comptime QPACK_FIELD_SECTION_TOO_LARGE = "qpack: field section above limit"
+"""Error text raised when a decoded section passes the cap. Callers match
+on ``field section above limit``."""
+
+
+@always_inline
+def _charge_field(
+    mut used: UInt64, name_len: Int, value_len: Int, limit: UInt64
+) raises:
+    """Add one decoded field line to ``used`` and raise once the section
+    passes ``limit``.
+
+    Called as each line is decoded, before it is stored. The caller's cap
+    on the *compressed* section does not bound the decoded one: an indexed
+    line is one byte on the wire and a whole header in memory, and a
+    dynamic-table entry can be referenced over and over (CVE-2025-64702 and
+    the FoxIO QPACK disclosure, Oct 2026). Checking afterwards, once the
+    section is fully expanded, is the same bug."""
+    used += UInt64(name_len) + UInt64(value_len) + 32
+    if used > limit:
+        raise Error(QPACK_FIELD_SECTION_TOO_LARGE)
+
+
 # ── Encoder ────────────────────────────────────────────────────────────────
 
 
@@ -249,6 +278,7 @@ def _decode_string_literal(
 
 def decode_field_section(
     buf: Span[UInt8, _],
+    max_field_section_size: UInt64 = QPACK_DEFAULT_MAX_FIELD_SECTION_SIZE,
 ) raises -> List[QpackHeader]:
     """Parse a QPACK field section.
 
@@ -268,8 +298,13 @@ def decode_field_section(
     * ``0001xxxx`` -- indexed post-base (dynamic only) -> reject.
     * ``0000Nhxx`` -- literal with name reference post-base
       (dynamic only) -> reject.
+
+    The decoded size (``name + value + 32`` per line) is capped at
+    ``max_field_section_size``; the section is rejected as soon as a line
+    would pass it.
     """
     var headers = List[QpackHeader]()
+    var used = UInt64(0)
     if len(buf) < 2:
         raise Error("qpack: field section prefix truncated")
     # Required Insert Count (8-bit prefix).
@@ -300,12 +335,15 @@ def decode_field_section(
                 raise Error(
                     "qpack: static index " + String(ip.value) + " out of range"
                 )
-            headers.append(
-                QpackHeader(
-                    String(static_name(ip.value)),
-                    String(static_value(ip.value)),
-                )
+            var sname = String(static_name(ip.value))
+            var svalue = String(static_value(ip.value))
+            _charge_field(
+                used,
+                sname.byte_length(),
+                svalue.byte_length(),
+                max_field_section_size,
             )
+            headers.append(QpackHeader(sname^, svalue^))
             pos = ip.offset
             continue
         if (b0 & UInt8(0x40)) != UInt8(0):
@@ -324,7 +362,14 @@ def decode_field_section(
                     + " out of range"
                 )
             var lit = _decode_string_literal(buf, ip.offset, 7, UInt8(0x80))
-            headers.append(QpackHeader(String(static_name(ip.value)), lit[0]))
+            var nm = String(static_name(ip.value))
+            _charge_field(
+                used,
+                nm.byte_length(),
+                lit[0].byte_length(),
+                max_field_section_size,
+            )
+            headers.append(QpackHeader(nm^, lit[0]))
             pos = lit[1]
             continue
         if (b0 & UInt8(0x20)) != UInt8(0):
@@ -332,6 +377,12 @@ def decode_field_section(
             var name_lit = _decode_string_literal(buf, pos, 3, UInt8(0x08))
             var value_lit = _decode_string_literal(
                 buf, name_lit[1], 7, UInt8(0x80)
+            )
+            _charge_field(
+                used,
+                name_lit[0].byte_length(),
+                value_lit[0].byte_length(),
+                max_field_section_size,
             )
             headers.append(QpackHeader(name_lit[0], value_lit[0]))
             pos = value_lit[1]

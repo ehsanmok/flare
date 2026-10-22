@@ -100,5 +100,25 @@ def test_h3_oversized_single_section_still_fails() raises:
     assert_true(reader.has_error(), "one oversized section must still fail")
 
 
+def test_h3_small_section_that_expands_past_the_limit_fails() raises:
+    """A HEADERS frame far under the wire limit but whose decoded size is
+    not: 3000 one-byte ``:status 200`` lines decode to 126 KB. The
+    reader stops decoding at the limit instead of expanding the frame and
+    summing afterwards."""
+    var reader = Http3ResponseReader(max_field_section_bytes=UInt64(4096))
+    var payload = List[UInt8]()
+    payload.append(0x00)
+    payload.append(0x00)
+    for _ in range(3000):
+        payload.append(UInt8(0xC0 | 25))
+    var wire = List[UInt8]()
+    wire.extend(encode_varint(UInt64(1)))
+    wire.extend(encode_varint(UInt64(len(payload))))
+    wire.extend(Span(payload))
+    reader.feed(Span(wire))
+    assert_true(reader.has_error(), "an expanding section must fail")
+    assert_false(reader.head_ready())
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

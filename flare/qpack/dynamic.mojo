@@ -54,7 +54,12 @@ from flare.http2.hpack import (
     encode_integer,
 )
 
-from .codec import _decode_string_literal, _encode_string_literal
+from .codec import (
+    QPACK_DEFAULT_MAX_FIELD_SECTION_SIZE,
+    _charge_field,
+    _decode_string_literal,
+    _encode_string_literal,
+)
 from .static_table import (
     QPACK_STATIC_TABLE_SIZE,
     static_name,
@@ -533,14 +538,23 @@ def _post_base_abs(base: UInt64, ric: UInt64, ip: Int) raises -> UInt64:
 def decode_field_section_dynamic(
     buf: Span[UInt8, _],
     table: QpackDynamicTable,
+    max_field_section_size: UInt64 = QPACK_DEFAULT_MAX_FIELD_SECTION_SIZE,
 ) raises -> List[QpackHeader]:
     """Decode a field section against ``table``, resolving dynamic
     indexed / name-reference / post-base lines (RFC 9204 section 4.5).
     Static-only inputs (Required Insert Count 0) decode without touching
     the table: every dynamic reference must resolve to an absolute index
     below the Required Insert Count (and a Sign-1 Delta Base below it),
-    otherwise the section is a ``QPACK_DECOMPRESSION_FAILED`` error."""
+    otherwise the section is a ``QPACK_DECOMPRESSION_FAILED`` error.
+
+    The decoded size (``name + value + 32`` per line, RFC 9114 section
+    4.2.2) is capped at ``max_field_section_size`` and checked as each
+    line is decoded, so a one-byte reference to a large dynamic-table entry
+    repeated thousands of times is refused after the first few instead of
+    being expanded in full. The caller's limit on the compressed section
+    does not do this."""
     var headers = List[QpackHeader]()
+    var used = UInt64(0)
     if len(buf) < 2:
         raise Error("qpack: field section prefix truncated")
     var ric_enc = decode_integer(buf, 0, 8)
@@ -585,16 +599,24 @@ def decode_field_section_dynamic(
             if t_static:
                 if ip.value < 0 or ip.value >= QPACK_STATIC_TABLE_SIZE:
                     raise Error("qpack: static index out of range")
-                headers.append(
-                    QpackHeader(
-                        String(static_name(ip.value)),
-                        String(static_value(ip.value)),
-                    )
+                var sname = String(static_name(ip.value))
+                var svalue = String(static_value(ip.value))
+                _charge_field(
+                    used,
+                    sname.byte_length(),
+                    svalue.byte_length(),
+                    max_field_section_size,
                 )
+                headers.append(QpackHeader(sname^, svalue^))
             else:
-                headers.append(
-                    table.get_abs(_pre_base_abs(base, ric, ip.value))
+                var dyn = table.get_abs(_pre_base_abs(base, ric, ip.value))
+                _charge_field(
+                    used,
+                    dyn.name.byte_length(),
+                    dyn.value.byte_length(),
+                    max_field_section_size,
                 )
+                headers.append(dyn^)
             pos = ip.offset
             continue
         if (b0 & UInt8(0x40)) != UInt8(0):
@@ -609,6 +631,12 @@ def decode_field_section_dynamic(
             else:
                 name = table.get_abs(_pre_base_abs(base, ric, ip.value)).name
             var lit = _decode_string_literal(buf, ip.offset, 7, UInt8(0x80))
+            _charge_field(
+                used,
+                name.byte_length(),
+                lit[0].byte_length(),
+                max_field_section_size,
+            )
             headers.append(QpackHeader(name, lit[0]))
             pos = lit[1]
             continue
@@ -618,19 +646,38 @@ def decode_field_section_dynamic(
             var value_lit = _decode_string_literal(
                 buf, name_lit[1], 7, UInt8(0x80)
             )
+            _charge_field(
+                used,
+                name_lit[0].byte_length(),
+                value_lit[0].byte_length(),
+                max_field_section_size,
+            )
             headers.append(QpackHeader(name_lit[0], value_lit[0]))
             pos = value_lit[1]
             continue
         if (b0 & UInt8(0x10)) != UInt8(0):
             # Indexed Field Line With Post-Base Index: 0001xxxx
             var ip = decode_integer(buf, pos, 4)
-            headers.append(table.get_abs(_post_base_abs(base, ric, ip.value)))
+            var dyn = table.get_abs(_post_base_abs(base, ric, ip.value))
+            _charge_field(
+                used,
+                dyn.name.byte_length(),
+                dyn.value.byte_length(),
+                max_field_section_size,
+            )
+            headers.append(dyn^)
             pos = ip.offset
             continue
         # Literal Field Line With Post-Base Name Reference: 0000Nxxx
         var ip = decode_integer(buf, pos, 3)
         var name = table.get_abs(_post_base_abs(base, ric, ip.value)).name
         var lit = _decode_string_literal(buf, ip.offset, 7, UInt8(0x80))
+        _charge_field(
+            used,
+            name.byte_length(),
+            lit[0].byte_length(),
+            max_field_section_size,
+        )
         headers.append(QpackHeader(name, lit[0]))
         pos = lit[1]
     return headers^
@@ -666,9 +713,16 @@ struct QpackDecoder(Copyable):
         self.pending_increment = 0
         return True
 
-    def decode(self, buf: Span[UInt8, _]) raises -> List[QpackHeader]:
-        """Decode a field section against the dynamic table."""
-        return decode_field_section_dynamic(buf, self.table)
+    def decode(
+        self,
+        buf: Span[UInt8, _],
+        max_field_section_size: UInt64 = QPACK_DEFAULT_MAX_FIELD_SECTION_SIZE,
+    ) raises -> List[QpackHeader]:
+        """Decode a field section against the dynamic table, capped at
+        ``max_field_section_size`` decoded bytes."""
+        return decode_field_section_dynamic(
+            buf, self.table, max_field_section_size
+        )
 
 
 struct QpackEncoder(Copyable):

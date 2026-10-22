@@ -301,11 +301,19 @@ def feed_into[
         var payload = buf[header_size:total]
         var headers: List[QpackHeader]
         try:
+            # The limit applies to the *decoded* section as well: a HEADERS
+            # frame under it on the wire can expand to thousands of times
+            # its size (indexed lines, dynamic-table references).
             headers = decode_field_section_dynamic(
-                payload, reader.qpack_table[]
+                payload, reader.qpack_table[], reader.max_field_section_bytes
             )
-        except:
+        except e:
             reader.state = H3_REQUEST_STATE_DONE
+            if "field section above limit" in String(e):
+                handler.on_protocol_error(
+                    String("h3 reader: HEADERS field section above limit")
+                )
+                return total
             # An undecodable field section is a connection error of type
             # QPACK_DECOMPRESSION_FAILED (RFC 9204 sec 2.2.3, 4.5.1.1);
             # the tag lets Http3Connection raise it to the QUIC layer.

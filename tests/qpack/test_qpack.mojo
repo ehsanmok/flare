@@ -234,6 +234,74 @@ def test_valid_utf8_literal_value_is_still_accepted() raises:
     assert_equal(out2[0].value, String("abc"))
 
 
+def _indexed_lines(count: Int) -> List[UInt8]:
+    """A static-only section of ``count`` one-byte lines, each ``:method
+    GET`` (index 17, 42 bytes decoded: 7 + 3 + 32)."""
+    var buf = _bytes(0x00, 0x00)
+    for _ in range(count):
+        buf.append(UInt8(0xC0 | 17))
+    return buf^
+
+
+def test_decoded_size_is_capped_not_just_the_wire_size() raises:
+    """One wire byte per 42 decoded bytes: a section well under any wire
+    limit expands past the decoded one (the FoxIO QPACK class, Oct
+    2026). The cap is exact: the cap itself decodes, one byte under is
+    refused."""
+    var buf = _indexed_lines(100)
+    var ok = decode_field_section(Span[UInt8, _](buf), UInt64(4200))
+    assert_equal(len(ok), 100)
+    var raised = False
+    try:
+        var _ = decode_field_section(Span[UInt8, _](buf), UInt64(4199))
+    except e:
+        raised = True
+        assert_true("field section above limit" in String(e))
+    assert_true(raised)
+
+
+def test_default_cap_stops_a_small_section_that_expands_hugely() raises:
+    """About 64 KiB of decoded headers is the default ceiling: 1560 lines
+    pass, 1561 do not, and a 100 KB-on-the-wire flood is refused rather
+    than expanded to megabytes."""
+    var at = _indexed_lines(1560)
+    assert_equal(len(decode_field_section(Span[UInt8, _](at))), 1560)
+    var over = _indexed_lines(1561)
+    var raised = False
+    try:
+        var _ = decode_field_section(Span[UInt8, _](over))
+    except e:
+        raised = True
+        assert_true("field section above limit" in String(e))
+    assert_true(raised)
+    var flood = _indexed_lines(100000)
+    raised = False
+    try:
+        var _ = decode_field_section(Span[UInt8, _](flood))
+    except:
+        raised = True
+    assert_true(raised)
+
+
+def test_literal_lines_count_toward_the_cap() raises:
+    """An empty literal name and value is still 32 bytes of table entry
+    in RFC 9114 section 4.2.2's accounting: 001N0000 then a zero-length
+    value, three-byte lines costing 32 each."""
+    var buf = _bytes(0x00, 0x00)
+    for _ in range(10):
+        buf.append(UInt8(0x20))
+        buf.append(UInt8(0x00))
+    assert_equal(
+        len(decode_field_section(Span[UInt8, _](buf), UInt64(320))), 10
+    )
+    var raised = False
+    try:
+        var _ = decode_field_section(Span[UInt8, _](buf), UInt64(319))
+    except:
+        raised = True
+    assert_true(raised)
+
+
 def main() raises:
     test_static_table_size()
     test_static_table_lookup_known_indices()
@@ -253,4 +321,7 @@ def main() raises:
     test_huffman_literal_value_that_is_not_utf8_is_refused()
     test_literal_name_that_is_not_utf8_is_refused()
     test_valid_utf8_literal_value_is_still_accepted()
-    print("test_qpack: 18 passed")
+    test_decoded_size_is_capped_not_just_the_wire_size()
+    test_default_cap_stops_a_small_section_that_expands_hugely()
+    test_literal_lines_count_toward_the_cap()
+    print("test_qpack: 21 passed")

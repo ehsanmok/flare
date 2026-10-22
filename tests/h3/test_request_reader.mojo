@@ -223,6 +223,28 @@ def test_oversized_headers_is_protocol_error() raises:
     assert_equal(r.state, H3_REQUEST_STATE_DONE)
 
 
+def test_small_headers_frame_that_expands_past_the_limit_is_refused() raises:
+    """The limit is on the decoded section, not only the HEADERS payload:
+    1000 one-byte indexed lines (``:method GET``, 42 bytes decoded each)
+    fit an 8 KiB wire limit many times over and decode to 42 KB. They are
+    refused as an oversized section, not expanded and not mistaken for a
+    QPACK_DECOMPRESSION_FAILED connection error."""
+    var r = Http3RequestReader.new()
+    var rec = _Recorder.new()
+    var payload = List[UInt8]()
+    payload.append(0x00)
+    payload.append(0x00)
+    for _ in range(1000):
+        payload.append(UInt8(0xC0 | 17))
+    var hf = _frame(H3_FRAME_TYPE_HEADERS, payload)
+    var _ = feed_into(r, Span[UInt8, _](hf), rec)
+    assert_equal(rec.error_count, 1)
+    assert_equal(rec.headers_count, 0)
+    assert_true("field section above limit" in rec.last_error)
+    assert_true("QPACK_DECOMPRESSION_FAILED" not in rec.last_error)
+    assert_equal(r.state, H3_REQUEST_STATE_DONE)
+
+
 def test_repeat_headers_after_trailers_is_protocol_error() raises:
     var r = Http3RequestReader.new()
     var rec = _Recorder.new()
@@ -364,8 +386,9 @@ def main() raises:
     test_truncated_frame_yields_needs_more()
     test_unknown_frame_type_is_skipped()
     test_oversized_headers_is_protocol_error()
+    test_small_headers_frame_that_expands_past_the_limit_is_refused()
     test_repeat_headers_after_trailers_is_protocol_error()
     test_limits_are_checked_before_the_payload_arrives()
     test_oversized_unknown_frame_is_refused_from_its_header()
     test_h2_reserved_frame_types_are_refused()
-    print("test_h3_request_reader: 13 passed")
+    print("test_h3_request_reader: 14 passed")

@@ -332,9 +332,20 @@ struct Http3ResponseReader(Copyable):
                 return
             var fields: List[QpackHeader]
             try:
-                fields = decode_field_section(payload)
-            except:
-                self._fail(String("QPACK decode failed"))
+                # Capped at what is left of the response's header budget,
+                # as lines are decoded: checking the total afterwards (the
+                # loop below) lets a small frame expand in full first.
+                fields = decode_field_section(
+                    payload,
+                    self.max_field_section_bytes
+                    - self._header_bytes if self._header_bytes
+                    < self.max_field_section_bytes else UInt64(0),
+                )
+            except e:
+                if "field section above limit" in String(e):
+                    self._fail(String("response headers above limit"))
+                else:
+                    self._fail(String("QPACK decode failed"))
                 return
             for field in fields:
                 self._header_bytes += UInt64(

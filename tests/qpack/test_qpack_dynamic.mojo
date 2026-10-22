@@ -473,7 +473,42 @@ def test_truncated_prefix_without_sign_byte_is_refused() raises:
     assert_true(_decode_raises(one, t), "one-byte prefix decoded")
 
 
+def test_repeated_reference_to_a_large_entry_is_capped() raises:
+    """The 4000-fold case: one ~4 KB entry in the dynamic table, then a
+    section of one-byte references to it. 5000 wire bytes would decode to
+    ~20 MB; the decoded cap refuses it after the first few lines instead
+    of expanding it."""
+    var table = QpackDynamicTable(UInt64(8192))
+    assert_true(table.insert(QpackHeader("x-big", String("v") * 4000)))
+    var buf = List[UInt8]()
+    buf.append(UInt8(encode_required_insert_count(1, table.max_entries())))
+    buf.append(0x00)  # Delta Base 0, so Base == Required Insert Count.
+    for _ in range(5000):
+        buf.append(0x80)  # indexed, dynamic, relative index 0
+    var raised = False
+    try:
+        var _ = decode_field_section_dynamic(
+            Span[UInt8, _](buf), table, UInt64(65536)
+        )
+    except e:
+        raised = True
+        assert_true("field section above limit" in String(e))
+    assert_true(raised)
+    # Within the cap it decodes: 4037 bytes a line, 16 lines under 64 KiB.
+    var few = List[UInt8]()
+    few.append(UInt8(encode_required_insert_count(1, table.max_entries())))
+    few.append(0x00)
+    for _ in range(16):
+        few.append(0x80)
+    var out = decode_field_section_dynamic(
+        Span[UInt8, _](few), table, UInt64(65536)
+    )
+    assert_equal(len(out), 16)
+    assert_equal(out[15].value.byte_length(), 4000)
+
+
 def main() raises:
+    test_repeated_reference_to_a_large_entry_is_capped()
     test_entry_size()
     test_table_insert_and_index()
     test_table_eviction()
