@@ -123,8 +123,9 @@ jobs:
             mojo-cache-${{ matrix.os }}-
 
       - name: Setup Pixi
-        uses: prefix-dev/setup-pixi@v0.9.4
+        uses: prefix-dev/setup-pixi@v0.11.2
         with:
+          pixi-version: v0.83.0
           # Only solve + install the lean runtime env. Without this,
           # setup-pixi installs every environment declared in pixi.toml
           # (dev, fuzz, bench), which would pull in mojodoc, mozz, go,
@@ -226,8 +227,9 @@ jobs:
             mojo-cache-asan-ubuntu-latest-
 
       - name: Setup Pixi
-        uses: prefix-dev/setup-pixi@v0.9.4
+        uses: prefix-dev/setup-pixi@v0.11.2
         with:
+          pixi-version: v0.83.0
           environments: default
           locked: true
           cache: false
@@ -267,8 +269,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Setup Pixi
-        uses: prefix-dev/setup-pixi@v0.9.4
+        uses: prefix-dev/setup-pixi@v0.11.2
         with:
+          pixi-version: v0.83.0
           environments: default
           locked: true
           cache: false

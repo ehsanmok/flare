@@ -55,7 +55,7 @@ source:
   # with no change here. Bump together with pixi.lock.
   - git: https://github.com/ehsanmok/json.git
     target_directory: json-src
-    rev: 0bae1f3815d249efa6cb0a3483eb6658700635e5
+    rev: c6016ca12ccccf3a06ab93a4eecacf884a2de864
 
 build:
   script:
@@ -124,7 +124,7 @@ requirements:
     - libbrotlienc >=1,<2
     - simdjson >=4.2.4,<5    # json's simdjson FFI wrapper
   run:
-    - mojo >=1.1.0,<2.0.0
+    - mojo >=1.2.0,<2.0.0
     - openssl >=3.6.1,<4
     - ca-certificates
     - zlib >=1.3.1,<2        # libflare_zlib.so is loaded at runtime
