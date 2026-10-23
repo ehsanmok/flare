@@ -40,7 +40,7 @@
 
 context:
   name: flare
-  version: "0.12.0"
+  version: "0.13.0"
 
 package:
   name: ${{ name }}
@@ -83,7 +83,8 @@ build:
         flare/http/ffi/zlib_wrapper.c
         -I$PREFIX/include
         -L$PREFIX/lib
-        -lz
+        -lz -ldeflate -pthread
+        $([ "$(uname)" = Darwin ] || echo -Wl,-z,nodelete)
         -Wl,-rpath,$PREFIX/lib
     # ── flare: brotli FFI wrapper (Content-Encoding br) ───────────────────
     - $CC -O2 -fPIC -shared
@@ -119,6 +120,7 @@ requirements:
     - openssl >=3.6.1,<4
     - ca-certificates
     - zlib >=1.3.1,<2        # flare's gzip / deflate wrapper
+    - libdeflate >=1.22,<2   # flare's gzip encoder
     - libbrotlicommon >=1.2.1,<2 # flare's brotli wrapper
     - libbrotlidec >=1.2.1,<2
     - libbrotlienc >=1.2.1,<2
@@ -128,6 +130,7 @@ requirements:
     - openssl >=3.6.1,<4
     - ca-certificates
     - zlib >=1.3.1,<2        # libflare_zlib.so is loaded at runtime
+    - libdeflate >=1.22,<2   # libflare_zlib.so links it for gzip encoding
     - libbrotlicommon >=1.2.1,<2 # libflare_brotli.so is loaded at runtime
     - libbrotlidec >=1.2.1,<2
     - libbrotlienc >=1.2.1,<2
