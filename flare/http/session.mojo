@@ -439,7 +439,7 @@ struct CookieSessionStore(Copyable, SessionStore):
             if exp != 0 and now_s >= exp:
                 return Session.empty()
             var out = utf8_lossy_string(Span[UInt8, _](payload)[bar + 1 :])
-            return Session(out^)
+            return Session(out)
         except:
             return Session.empty()
 

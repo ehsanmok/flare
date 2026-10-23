@@ -726,7 +726,7 @@ struct Router(Copyable, Defaultable, Handler):
                 if not req.has_params():
                     return thunk(addr, req)
                 var child = _child_request(req, req.url)
-                return thunk(addr, child^)
+                return thunk(addr, child)
 
         if len(allowed) > 0:
             return _method_not_allowed(allowed)
@@ -734,7 +734,7 @@ struct Router(Copyable, Defaultable, Handler):
             if not req.has_params():
                 return self._fallback.value().serve(req)
             var child = _child_request(req, req.url)
-            return self._fallback.value().serve(child^)
+            return self._fallback.value().serve(child)
         return not_found(req.url)
 
 
@@ -771,7 +771,7 @@ struct _MountedRouter(Copyable, Handler):
             rebuilt += "?"
             rebuilt += q
         var child = _child_request(req, rebuilt)
-        return self.sub.serve(child^)
+        return self.sub.serve(child)
 
 
 # ── Internals ────────────────────────────────────────────────────────────────

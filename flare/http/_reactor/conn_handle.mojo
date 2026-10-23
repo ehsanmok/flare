@@ -843,7 +843,7 @@ struct ConnHandle(Movable):
         )
         if resp.body_stream and not bodyless:
             self.body_src = resp.body_stream.take()
-            self._serialize_response_chunked(resp^, not close_after)
+            self._serialize_response_chunked(resp, not close_after)
         else:
             # A bodyless answer to a streaming handler sends its head
             # only; the chunk source is dropped with ``resp``, unread.
@@ -1058,7 +1058,7 @@ struct ConnHandle(Movable):
         var request_id = req.headers.get("x-request-id")
         var resp: Response
         try:
-            resp = handler.serve(req^).lower()
+            resp = handler.serve(req).lower()
         except e:
             log_handler_error(request_id, String(e))
             var mapped = map_handler_error(String(e), expose_errors)
@@ -1159,7 +1159,7 @@ struct ConnHandle(Movable):
         var request_id = req.headers.get("x-request-id")
         var resp: Response
         try:
-            resp = handler.serve(req^).lower()
+            resp = handler.serve(req).lower()
         except e:
             log_handler_error(request_id, String(e))
             var mapped = map_handler_error(String(e), expose_errors)
@@ -1242,7 +1242,7 @@ struct ConnHandle(Movable):
             # Hand the handler a cancel handle bound to this
             # connection's cancel cell. The cell outlives the handler
             # call (it's owned by ``self``).
-            resp = handler.serve(req^, self.cancel_cell.handle())
+            resp = handler.serve(req, self.cancel_cell.handle())
         except e:
             log_handler_error(request_id, String(e))
             var mapped = map_handler_error(String(e), expose_errors)
@@ -1904,7 +1904,7 @@ struct ConnHandle(Movable):
         answering a HEAD request carries no content (APP-05)."""
         self.should_close = True
         var resp = build_error_response(status, reason)
-        self._serialize_response(resp^, False)
+        self._serialize_response(resp, False)
 
     def _serialize_static(
         mut self,

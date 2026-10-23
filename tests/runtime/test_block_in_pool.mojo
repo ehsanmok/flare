@@ -397,16 +397,16 @@ def _run_sem_failure_child(which: Int) raises -> Int:
     if pid == 0:
         exit(_sem_failure_child(which))
     var status = stack_allocation[1, c_int]()
-    status[0] = c_int(0)
+    status[unsafe_offset=0] = c_int(0)
     _ = external_call["waitpid", c_int](c_int(pid), Int(status), c_int(0))
-    var sig = Int(status[0] & 0x7F)
+    var sig = Int(status[unsafe_offset=0] & 0x7F)
     assert_equal(
         sig,
         0,
         "child killed by a signal (sem_open failure dereferenced SEM_FAILED?): "
         + String(sig),
     )
-    return Int((status[0] >> 8) & 0xFF)
+    return Int((status[unsafe_offset=0] >> 8) & 0xFF)
 
 
 def test_acquire_survives_sem_open_failure() raises:

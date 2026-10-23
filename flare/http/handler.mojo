@@ -559,7 +559,7 @@ struct WithViewCancel[H: Handler & Copyable](Copyable, ViewHandler):
             erased ``Response``.
         """
         var owned = req.into_owned()
-        return self.inner.serve(owned^).lower()
+        return self.inner.serve(owned).lower()
 
 
 # ── (existing) WithCancel adapter ──────────────────────────────────────────

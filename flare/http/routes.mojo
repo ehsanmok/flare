@@ -224,7 +224,7 @@ struct ComptimeRouter[routes: List[ComptimeRoute]](Copyable, Handler):
                     if len(params) > 0:
                         for kv in params.items():
                             child.params_mut()[kv.key] = kv.value
-                    return r.handler(child^)
+                    return r.handler(child)
                 else:
                     var m = String(r.method)
                     if not _contains(allowed, m):

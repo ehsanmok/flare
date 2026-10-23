@@ -126,7 +126,7 @@ def HTTP_ : Bytes := Bytes.ofString "HTTP/"
 
 /-- The shipped `_parse_status_line` (H1-08 fix): the code must be followed by
 SP or the end of line.
-mirrors flare/http/_client/parse.mojo#_parse_status_line+_str_find sha=2c7c574750d9 at=ea1b9282 (fixed, H1-08) -/
+mirrors flare/http/_client/parse.mojo#_parse_status_line+_str_find sha=516393b46dbb at=e767e34c (fixed, H1-08) -/
 def parseStatus (line : Bytes) : Option Nat :=
   if line.take 5 ≠ HTTP_ then none else
   match findB 32 line with
@@ -199,7 +199,7 @@ def hasTok (tok : Bytes) (vals : List Bytes) : Bool :=
 connection open. An HTTP/1.0 response with `keep-alive` is not pooled either,
 which is stricter than RFC 9112 §9.3 allows and still meets `PersistOK`.
 `version` is the status line up to its first SP (`http11` in Mojo).
-mirrors flare/http/_client/parse.mojo#_read_http_response_framed sha=4fbda9f3d399 at=ea1b9282 (fixed, H1-09) -/
+mirrors flare/http/_client/parse.mojo#_read_http_response_framed sha=7dd6eebcb60e at=e767e34c (fixed, H1-09) -/
 def canReuse (version : Bytes) (clean : Bool) (conn : List Bytes) (fr : RFraming) : Bool :=
   clean && !(hasTok CLOSE conn) && fr != .close && version == HTTP11
 

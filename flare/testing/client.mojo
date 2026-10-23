@@ -66,7 +66,7 @@ struct TestClient[H: Handler](Deinitable, Movable):
         var req = Request(
             method=method,
             url=path,
-            body=body^,
+            body=body,
             version=String("HTTP/1.1"),
             peer=SocketAddr(IpAddr("127.0.0.1", False), UInt16(0)),
             expose_errors=True,

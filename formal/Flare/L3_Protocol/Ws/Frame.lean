@@ -39,7 +39,7 @@ structure Key where
   deriving DecidableEq, Repr
 
 /-- `key[i & 3]`.
-mirrors flare/ws/frame.mojo#WsFrame.decode_one+_append_masked sha=e33ad044eff0 at=12630564 -/
+mirrors flare/ws/frame.mojo#WsFrame.decode_one+_append_masked sha=a41464f6d44f at=e767e34c -/
 def Key.at (k : Key) (i : Nat) : UInt8 :=
   match i % 4 with
   | 0 => k.k0
@@ -53,7 +53,7 @@ def Key.isZero (k : Key) : Bool := k.k0 == 0 && k.k1 == 0 && k.k2 == 0 && k.k3 =
 
 /-- RFC 6455 §5.3: octet `i` is XOR'd with key octet `i mod 4`. `maskFrom k i p`
 masks `p` as if it started at payload offset `i`.
-mirrors flare/ws/frame.mojo#WsFrame.decode_one+_append_masked sha=e33ad044eff0 at=12630564 (unmask) (scalar tail) -/
+mirrors flare/ws/frame.mojo#WsFrame.decode_one+_append_masked sha=a41464f6d44f at=e767e34c (unmask) (scalar tail) -/
 def maskFrom (k : Key) : Nat → Bytes → Bytes
   | _, [] => []
   | i, b :: bs => (b ^^^ k.at i) :: maskFrom k (i + 1) bs
@@ -179,7 +179,7 @@ inductive LRes where
   | ok (plen : Nat) (rest : Bytes) (hdr : Nat)
 
 /-- Extended payload length.
-mirrors flare/ws/frame.mojo#WsFrame.decode_one sha=64c344c5d112 at=12630564 -/
+mirrors flare/ws/frame.mojo#WsFrame.decode_one sha=74491ec0e75b at=e767e34c -/
 def parseLen (plen7 : Nat) (r : Bytes) : LRes :=
   if plen7 < 126 then .ok plen7 r 2
   else if plen7 = 126 then
@@ -204,7 +204,7 @@ inductive DRes where
 
 /-- The tail of `decode_one` once the header and key are read: control-frame
 checks, then the payload.
-mirrors flare/ws/frame.mojo#WsFrame.decode_one sha=64c344c5d112 at=12630564 -/
+mirrors flare/ws/frame.mojo#WsFrame.decode_one sha=74491ec0e75b at=e767e34c -/
 def finish (fin rsv1 : Bool) (op : UInt8) (masked : Bool) (plen hdr : Nat) (key : Key) (r : Bytes) : DRes :=
   if isControl op && (!fin || plen > 125) then .error
   else if r.length < plen then .needMore

@@ -178,7 +178,7 @@ def _request_path(req: Request) -> String:
 
 
 def _alloc_store_or_zero[
-    S: CacheStore & Deinitable & Movable & Defaultable,
+    S: CacheStore & Deinitable,
 ]() -> Int:
     """Heap-allocate a fresh ``S`` and return its address, or 0
     on allocator failure. Defaultable middleware ``__init__``
@@ -227,8 +227,8 @@ struct Cache[
     ``ArcPointer`` upgrade can swap the leak for ref-counting.
 
     Parameters:
-        Inner: the inner handler.
-        S: the cache store; must satisfy the :class:`CacheStore`
+        Inner: The inner handler.
+        S: The cache store; must satisfy the :class:`CacheStore`
            trait.
 
     Example::
@@ -295,7 +295,7 @@ struct Cache[
             String("http"),
             _request_authority(req),
             _request_path(req),
-            pairs^,
+            pairs,
         )
 
     def _store_response(
@@ -368,7 +368,7 @@ struct Cache[
                 vary=vary_value,
                 date_ms=Optional[Int64](),
             )
-            self._store_ptr()[].put(base_key, entry^)
+            self._store_ptr()[].put(base_key, entry)
         else:
             var marker = CacheEntry(
                 status=response.status,
@@ -379,7 +379,7 @@ struct Cache[
                 vary=vary_value,
                 date_ms=Optional[Int64](),
             )
-            self._store_ptr()[].put(base_key, marker^)
+            self._store_ptr()[].put(base_key, marker)
             var full_key = self._build_full_key(req, vary_value)
             var entry = CacheEntry(
                 status=response.status,
@@ -390,7 +390,7 @@ struct Cache[
                 vary=vary_value,
                 date_ms=Optional[Int64](),
             )
-            self._store_ptr()[].put(full_key, entry^)
+            self._store_ptr()[].put(full_key, entry)
         return response^
 
     def _user_visible_header_names(self, headers: HeaderMap) -> List[String]:

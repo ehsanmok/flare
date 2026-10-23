@@ -109,6 +109,8 @@ struct HttpFrontend[H: Handler & Copyable](Copyable, Frontend):
                 0 (default) serves cleartext. When set, each accepted
                 connection starts as a TLS handshake and its protocol
                 is chosen by ALPN.
+            ws_hooks: Optional WS-over-h2 sidecar handler (RFC 8441).
+                ``None`` disables the WS carrier path.
         """
         self.handler = handler^
         self.config = config^

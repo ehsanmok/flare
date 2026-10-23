@@ -635,7 +635,7 @@ struct WsClient(Movable):
         scratch.append(UInt8(0))
 
         if u.is_tls():
-            var tls = TlsStream.connect(u.host, u.port, tls_cfg^)
+            var tls = TlsStream.connect(u.host, u.port, tls_cfg)
             var req_bytes = req.as_bytes()
             tls.write_all(Span[UInt8, _](req_bytes))
 
@@ -930,7 +930,7 @@ struct WsClient(Movable):
         if not is_text:
             return WsMessage(payload)
         return WsMessage(
-            WsFrame(opcode=WsOpcode.TEXT, payload=payload^).text_payload()
+            WsFrame(opcode=WsOpcode.TEXT, payload=payload).text_payload()
         )
 
     # ── Context manager ───────────────────────────────────────────────────────

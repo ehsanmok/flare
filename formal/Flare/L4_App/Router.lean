@@ -592,7 +592,7 @@ inductive Scan where
 /-- The direct-route loop of `Router.serve`: first route whose pattern
 matches and whose method equals the request method wins; matching routes
 with another method are appended to `allowed` unless already present.
-mirrors flare/http/router.mojo#Router.serve sha=ee6a2e26f468 at=f84a9842 -/
+mirrors flare/http/router.mojo#Router.serve sha=5653deb2b885 at=e767e34c -/
 def scan (segsIn : List Str) (method : Str) : List Route → List Str → Scan
   | [], allowed => .miss allowed
   | r :: rs, allowed =>
@@ -611,7 +611,7 @@ def prefixMatch : List Str → List Str → Bool
 
 /-- `_MountedRouter.serve` URL rebuild: drop the first `k` segments, keep the
 query string.
-mirrors flare/http/router.mojo#_MountedRouter.serve sha=7cb24c90f1f0 at=f84a9842 -/
+mirrors flare/http/router.mojo#_MountedRouter.serve sha=c64186cff22a at=e767e34c -/
 def stripUrl (k : Nat) (url : Str) : Str :=
   let segs := splitPath (pathOnly url)
   let rebuilt := '/' :: joinSlash (segs.drop k)
@@ -620,7 +620,7 @@ def stripUrl (k : Nat) (url : Str) : Str :=
 
 mutual
 /-- `Router.serve`.
-mirrors flare/http/router.mojo#Router.serve sha=ee6a2e26f468 at=f84a9842 -/
+mirrors flare/http/router.mojo#Router.serve sha=5653deb2b885 at=e767e34c -/
 def serve : Router → Req → Outcome
   | .mk routes ms fb, req =>
     let segsIn := splitPath (pathOnly req.url)
@@ -631,7 +631,7 @@ def serve : Router → Req → Outcome
 /-- Mount delegation and the final 405 / fallback / 404 choice;
 `_MountedRouter.serve` forwards the stripped request (same params) to the
 sub-router.
-mirrors flare/http/router.mojo#Router.serve+_MountedRouter.serve sha=57424e9e0859 at=f84a9842 -/
+mirrors flare/http/router.mojo#Router.serve+_MountedRouter.serve sha=9e3ded274fbd at=e767e34c -/
 def serveMounts : Mounts → Option Nat → List Str → Req → List Str → Outcome
   | .nil, fb, _, req, allowed =>
     if allowed.isEmpty then

@@ -216,7 +216,7 @@ struct Url(Movable):
         if host.byte_length() == 0:
             raise UrlParseError("missing host in URL: " + raw)
 
-        return Url(scheme^, host^, port, path^, query^, fragment^)
+        return Url(scheme, host, port, path, query, fragment)
 
     def request_target(self) -> String:
         """Return the request-target for the HTTP request line.

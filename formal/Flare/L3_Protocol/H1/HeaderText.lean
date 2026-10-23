@@ -130,7 +130,7 @@ theorem ieqPrefix_append_stop : ∀ (n h t : Bytes) (s : UInt8), s ∉ n → low
     rw [ieqPrefix_append_stop ms xs t s (fun h => hn (List.mem_cons_of_mem _ h)) hs]
 
 /-- The first `c` in a byte list (the colon search).
-mirrors flare/http/_server/parse.mojo#_parse_http_request_bytes sha=ddb7cb75d062 at=ea1b9282 -/
+mirrors flare/http/_server/parse.mojo#_parse_http_request_bytes sha=2ee83b6c49a1 at=e767e34c -/
 def findB (c : UInt8) : Bytes → Option Nat
   | [] => none
   | x :: xs => if x = c then some 0 else (findB c xs).map (· + 1)

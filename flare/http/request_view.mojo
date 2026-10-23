@@ -227,7 +227,7 @@ struct RequestView[origin: Origin](Movable):
         var req = Request(
             method=self.method,
             url=url_owned,
-            body=body_owned^,
+            body=body_owned,
             version=self.version,
             peer=self.peer,
             expose_errors=self.expose_errors,

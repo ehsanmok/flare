@@ -192,7 +192,7 @@ struct WsProtocol(Copyable, Movable):
         var body = List[UInt8]()
         body.append(UInt8(ev.code >> 8))
         body.append(UInt8(ev.code & 0xFF))
-        return WsFrame(opcode=WsOpcode.CLOSE, payload=body^)
+        return WsFrame(opcode=WsOpcode.CLOSE, payload=body)
 
     def close(mut self, code: UInt16 = WsCloseCode.NORMAL):
         """Start the closing handshake; a no-op once a CLOSE was sent."""

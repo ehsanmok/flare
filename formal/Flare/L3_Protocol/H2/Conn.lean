@@ -793,8 +793,8 @@ def respond (c : Conn) (k n : Nat) : Conn × List Out :=
     else (put { c with sendW := c.sendW - n } k { s with state := .closed, sendW := s.sendW - n },
           if n > 0 then [.data k n] else [])
 
-/-- mirrors flare/http2/client.mojo#Http2ClientConnection.send_request+Http2ClientConnection.send_extended_connect+Http2ClientConnection.send_request_open sha=9368911d9ef4 at=30c98ba7
-and flare/http2/state.mojo#Connection.note_local_stream sha=7504d960f0e3 at=30c98ba7 -/
+/-- mirrors flare/http2/client.mojo#Http2ClientConnection.send_request+Http2ClientConnection.send_extended_connect+Http2ClientConnection.send_request_open sha=bfdb4f6432bd at=e767e34c
+and flare/http2/state.mojo#Connection.note_local_stream sha=7504d960f0e3 at=e767e34c -/
 def openLocal (c : Conn) (k : Nat) (es : Bool) : Conn :=
   let c := { c with maxLocalSid := if k > c.maxLocalSid then k else c.maxLocalSid }
   put c k { state := if es then .hcl else .open_, sendW := c.peerInitW, recvW := c.initW }
@@ -802,7 +802,7 @@ def openLocal (c : Conn) (k : Nat) (es : Bool) : Conn :=
 /-- Local END_STREAM: a closed stream is left alone (the guard at the top
 of `send_data`, nothing is sent); otherwise half-closed (remote) becomes
 closed and anything else half-closed (local).
-mirrors flare/http2/client.mojo#Http2ClientConnection._emit_body_span+Http2ClientConnection.send_data sha=1fecb7971c3a at=ea1b9282 -/
+mirrors flare/http2/client.mojo#Http2ClientConnection._emit_body_span+Http2ClientConnection.send_data sha=75b53a89c0a3 at=e767e34c -/
 def endLocal (c : Conn) (k : Nat) : Conn :=
   match get c k with
   | none => c

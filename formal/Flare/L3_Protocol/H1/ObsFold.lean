@@ -34,7 +34,7 @@ abbrev Field := Bytes × Bytes
 `_check_field_value` also refuses obs-text that is not UTF-8 (H1-05,
 `FieldValue.valueAccepted`); `valueOk` leaves that out, so this loop accepts
 a superset of what the code accepts.
-mirrors flare/http/_server/parse.mojo#_check_field_value+_parse_http_request_bytes sha=3d43fbdb8d2b at=ea1b9282 (fixed, H1-10) -/
+mirrors flare/http/_server/parse.mojo#_check_field_value+_parse_http_request_bytes sha=e947e2428622 at=e767e34c (fixed, H1-10) -/
 def fields (obsFold obsText : Bool) : Option Field → List Bytes → Except String (List Field)
   | prev, [] => .ok prev.toList
   | prev, l :: ls =>

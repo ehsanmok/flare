@@ -96,9 +96,9 @@ struct ReflectionService(Copyable):
 
     var services: List[String]
     var descriptors: Dict[String, List[UInt8]]
-    """filename -> serialized FileDescriptorProto bytes."""
+    """Maps each filename to its serialized FileDescriptorProto bytes."""
     var symbol_index: Dict[String, String]
-    """fully-qualified symbol (``pkg.Service`` / ``pkg.Message``) ->
+    """Maps each fully-qualified symbol (``pkg.Service`` / ``pkg.Message``) to
     the filename whose descriptor defines it."""
 
     def __init__(out self):

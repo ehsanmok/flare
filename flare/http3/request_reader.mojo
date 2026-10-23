@@ -326,11 +326,11 @@ def feed_into[
             return total
         if reader.state == H3_REQUEST_STATE_INIT:
             reader.state = H3_REQUEST_STATE_BODY
-            handler.on_headers(headers^)
+            handler.on_headers(headers)
             return total
         # In BODY -- this is the trailers frame.
         reader.state = H3_REQUEST_STATE_TRAILERS
-        handler.on_trailers(headers^)
+        handler.on_trailers(headers)
         return total
 
     if ftype == H3_FRAME_TYPE_DATA:
@@ -345,7 +345,7 @@ def feed_into[
         var data = List[UInt8](capacity=Int(flen))
         data.extend(buf[header_size:total])
         reader.body_bytes += flen
-        handler.on_data(data^)
+        handler.on_data(data)
         return total
 
     # CANCEL_PUSH / SETTINGS / PUSH_PROMISE / GOAWAY / MAX_PUSH_ID

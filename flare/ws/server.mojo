@@ -346,7 +346,7 @@ struct _UpgradeFields(Movable):
             self.versions,
         )
         if problem.byte_length() != 0:
-            raise NetworkError(problem^)
+            raise NetworkError(problem)
         return _WsUpgradeRequest(self.keys[0].copy(), self.origin.copy())
 
 
@@ -773,7 +773,7 @@ struct WsConnection(Movable):
             payload.extend(Span[UInt8, _](next.payload))
             fin = next.fin
         if not is_text:
-            return WsMessage(payload^)
+            return WsMessage(payload)
         if not _is_valid_utf8(payload):
             self._fail_connection(WsCloseCode.INVALID_PAYLOAD)
             raise WsProtocolError(
@@ -781,7 +781,7 @@ struct WsConnection(Movable):
                 " with 1007"
             )
         return WsMessage(
-            WsFrame(opcode=WsOpcode.TEXT, payload=payload^).text_payload()
+            WsFrame(opcode=WsOpcode.TEXT, payload=payload).text_payload()
         )
 
     def _recv_data_frame(mut self) raises -> WsFrame:

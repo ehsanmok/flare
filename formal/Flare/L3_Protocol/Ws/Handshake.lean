@@ -140,7 +140,7 @@ def ClientOK (sha1 : Sha1) (key status : Bytes) (fs : Fields) : Prop :=
 
 /-- The shipped client check (`_UpgradeResponse.verify` after the status-line
 check, both branches): the whole RFC 6455 §4.1 list.
-mirrors flare/ws/client.mojo#WsClient._connect_impl sha=ce52b1d6b386 at=0516607a (fixed, WS-04) -/
+mirrors flare/ws/client.mojo#WsClient._connect_impl sha=0c780a982b41 at=e767e34c (fixed, WS-04) -/
 def clientAccepts (sha1 : Sha1) (key status : Bytes) (fs : Fields) : Bool :=
   STATUS101.isPrefixOf status &&
   (vals fs UPGRADE).any (fun v => lowerB v == WEBSOCKET) &&
@@ -263,7 +263,7 @@ theorem reactorCapped_ok {full : Bool} {r : Req} {key : Bytes}
 
 /-! ## Pairing flare's client with flare's servers -/
 
-/-- mirrors flare/ws/client.mojo#WsClient._connect_impl sha=ce52b1d6b386 at=12630564 -/
+/-- mirrors flare/ws/client.mojo#WsClient._connect_impl sha=0c780a982b41 at=e767e34c -/
 def clientRequest (host target key : Bytes) : Req :=
   { method := GET, target := target, version := HTTP11,
     fields := [(HOST_CAP, host), (UPGRADE_CAP, WEBSOCKET), (CONNECTION_CAP, UPGRADE_CAP),

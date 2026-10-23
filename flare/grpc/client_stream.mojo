@@ -148,7 +148,7 @@ def _drive_client_stream_reply[
             GrpcStatus.err(GRPC_STATUS_INVALID_ARGUMENT, String(e))
         )
     try:
-        return handler.serve_client_streaming(ctx, messages^)
+        return handler.serve_client_streaming(ctx, messages)
     except e:
         return GrpcUnaryReply.err(
             GrpcStatus.err(GRPC_STATUS_INTERNAL, _HANDLER_RAISED)
@@ -240,7 +240,7 @@ def _drive_bidi_reply[
             GrpcStatus.err(GRPC_STATUS_INVALID_ARGUMENT, String(e))
         )
     try:
-        return handler.serve_bidi(ctx, messages^)
+        return handler.serve_bidi(ctx, messages)
     except e:
         return GrpcServerStreamReply.err(
             GrpcStatus.err(GRPC_STATUS_INTERNAL, _HANDLER_RAISED)

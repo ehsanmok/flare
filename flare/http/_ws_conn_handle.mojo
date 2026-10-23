@@ -129,7 +129,7 @@ struct WsConnHandle(Movable):
                 break
             var msg = WsMessage(
                 String(unsafe_from_utf8=ev.payload)
-            ) if ev.is_text else WsMessage(ev.payload^)
+            ) if ev.is_text else WsMessage(ev.payload)
             try:
                 self.hooks.msg_thunk(self.handler_addr, self.session, msg^)
             except:

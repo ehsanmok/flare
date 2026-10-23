@@ -45,7 +45,9 @@ def new_h3_control() -> Int:
 
 def free_h3_control(addr: Int):
     if addr != 0:
-        Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=addr).free()
+        Pointer[UInt8, MutUntrackedOrigin](
+            unsafe_from_address=addr
+        ).unsafe_free()
 
 
 def _cell(addr: Int, i: Int) -> Pointer[Int64, MutUntrackedOrigin]:
@@ -91,7 +93,7 @@ def _serve_h3_stream[
         var expose = req.expose_errors
         var request_id = req.headers.get("x-request-id")
         try:
-            resp = handler.serve(req^).lower()
+            resp = handler.serve(req).lower()
         except e:
             log_handler_error(request_id, String(e))
             var mapped = map_handler_error(String(e), expose)
@@ -222,9 +224,7 @@ def serve_h3[
             if ws:
                 mine = ws.value().clone()
             ctx.unsafe_write(
-                _WorkerCtx[H](
-                    QuicListener.bind(cfg^), handler.copy(), ctl, mine
-                )
+                _WorkerCtx[H](QuicListener.bind(cfg), handler.copy(), ctl, mine)
             )
             ctxs.append(Int(ctx))
             threads.unsafe_offset(started).unsafe_write(
@@ -243,7 +243,7 @@ def serve_h3[
         except:
             pass
         threads.unsafe_offset(i).unsafe_deinit_pointee()
-    threads.unsafe_bitcast[UInt8]().free()
+    threads.unsafe_bitcast[UInt8]().unsafe_free()
     for i in range(len(ctxs)):
         var ctx = Pointer[UInt8, MutUntrackedOrigin](
             unsafe_from_address=ctxs[i]
@@ -252,7 +252,7 @@ def serve_h3[
         if ctx[].ws:
             ctx[].ws.value().destroy(ctx[].ws.value().addr)
         ctx.unsafe_deinit_pointee()
-        ctx.unsafe_bitcast[UInt8]().free()
+        ctx.unsafe_bitcast[UInt8]().unsafe_free()
     free_inbox_table(first.config.inbox_table, n)
     first.config.inbox_table = 0
     if err.byte_length() > 0:

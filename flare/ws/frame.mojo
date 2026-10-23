@@ -229,7 +229,7 @@ struct WsFrame(Movable, Writable):
         payload.append(UInt8(code & 0xFF))
         for b in reason.as_bytes():
             payload.append(b)
-        return WsFrame(opcode=WsOpcode.CLOSE, payload=payload^)
+        return WsFrame(opcode=WsOpcode.CLOSE, payload=payload)
 
     # ── Wire encoding ─────────────────────────────────────────────────────────
 
@@ -521,7 +521,7 @@ struct WsFrame(Movable, Writable):
         var consumed = pos + plen
         var frame = WsFrame(
             opcode=opcode,
-            payload=payload^,
+            payload=payload,
             fin=fin,
             rsv1=rsv1,
             masked=is_masked,

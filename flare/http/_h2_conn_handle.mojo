@@ -326,6 +326,8 @@ struct Http2ConnHandle(Movable):
             settings_payload: Raw bytes of the ``HTTP2-Settings``
                 header value (base64url-decoded). Format identical
                 to a SETTINGS frame body.
+            ws_hooks: Optional non-owning WS-over-h2 sidecar handler
+                (RFC 8441). ``None`` disables the WS carrier path.
         """
         self.peer = stream.peer_addr()
         self._stream = stream^
@@ -552,7 +554,7 @@ struct Http2ConnHandle(Movable):
             var request_id = req.headers.get("x-request-id")
             var resp: Response
             try:
-                resp = handler.serve(req^).lower()
+                resp = handler.serve(req).lower()
             except e:
                 log_handler_error(request_id, String(e))
                 var mapped = map_handler_error(String(e), expose_errors)
@@ -983,7 +985,7 @@ struct Http2ConnHandle(Movable):
             var request_id = req.headers.get("x-request-id")
             var resp: Response
             try:
-                resp = handler.serve(req^, cancel)
+                resp = handler.serve(req, cancel)
             except e:
                 log_handler_error(request_id, String(e))
                 var mapped = map_handler_error(String(e), expose_errors)

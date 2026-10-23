@@ -352,7 +352,9 @@ struct WsAutoClient(Movable):
     # ── Connect ────────────────────────────────────────────────────────
 
     def connect(mut self) raises:
-        """Run the runtime connection sequence:
+        """Run the runtime connection sequence.
+
+        The steps are:
 
         1. Parse the URL scheme.
         2. ``ws://``: open a cleartext :class:`WsClient` (no ALPN
@@ -406,7 +408,7 @@ struct WsAutoClient(Movable):
             var cfg = self.config.tls_config.copy()
             cfg.alpn = List[String]()
             cfg.alpn.append("http/1.1")
-            var c = WsClient.connect(self.config.url, cfg^)
+            var c = WsClient.connect(self.config.url, cfg)
             self._h1_client = Optional[WsClient](c^)
             self.chosen_wire = WsWireChoice.HTTP_1_1
             return
@@ -416,7 +418,7 @@ struct WsAutoClient(Movable):
         probe_cfg.alpn = List[String]()
         probe_cfg.alpn.append("h2")
         probe_cfg.alpn.append("http/1.1")
-        var tls = TlsStream.connect(u.host, u.port, probe_cfg^)
+        var tls = TlsStream.connect(u.host, u.port, probe_cfg)
         var alpn = tls.alpn_selected()
 
         if alpn == "h2":
@@ -435,7 +437,7 @@ struct WsAutoClient(Movable):
         var h1_cfg = self.config.tls_config.copy()
         h1_cfg.alpn = List[String]()
         h1_cfg.alpn.append("http/1.1")
-        var c = WsClient.connect(self.config.url, h1_cfg^)
+        var c = WsClient.connect(self.config.url, h1_cfg)
         self._h1_client = Optional[WsClient](c^)
         self.chosen_wire = WsWireChoice.HTTP_1_1
 

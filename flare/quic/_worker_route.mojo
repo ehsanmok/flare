@@ -116,5 +116,5 @@ def free_inbox_table(table: Int, workers: Int):
     for w in range(workers):
         var box = inbox_at(table, w)
         box.unsafe_deinit_pointee()
-        box.unsafe_bitcast[UInt8]().free()
-    Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=table).free()
+        box.unsafe_bitcast[UInt8]().unsafe_free()
+    Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=table).unsafe_free()

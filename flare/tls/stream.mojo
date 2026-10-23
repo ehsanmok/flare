@@ -877,7 +877,7 @@ struct TlsStream(Movable, Readable):
         """
         var received = 0
         while received < size:
-            var n = self.read(buf + received, size - received)
+            var n = self.read(buf.unsafe_offset(received), size - received)
             if n == 0:
                 raise NetworkError("TLS EOF before buffer full")
             received += n

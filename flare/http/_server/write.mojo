@@ -122,7 +122,7 @@ def _append_int(mut buf: List[UInt8], var n: Int):
     var tmp = stack_allocation[20, UInt8]()
     var i = 0
     while n > 0:
-        tmp[i] = UInt8(48 + (n % 10))
+        tmp[unsafe_offset=i] = UInt8(48 + (n % 10))
         n = n // 10
         i += 1
     var old_len = len(buf)
@@ -130,11 +130,11 @@ def _append_int(mut buf: List[UInt8], var n: Int):
     buf.resize(old_len + sign + i, UInt8(0))
     var p = buf.unsafe_ptr().unsafe_offset(old_len)
     if negative:
-        p[0] = UInt8(45)  # '-'
-        p += 1
+        p[unsafe_offset=0] = UInt8(45)  # '-'
+        p = p.unsafe_offset(1)
     # ``tmp`` holds the digits in reverse order; flip them on the way out.
     for k in range(i):
-        p[k] = tmp[i - 1 - k]
+        p[unsafe_offset=k] = tmp[unsafe_offset=i - 1 - k]
 
 
 def _status_reason(code: Int) -> String:

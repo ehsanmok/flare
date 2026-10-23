@@ -205,7 +205,7 @@ struct Request(Movable):
         var bb = body.as_bytes()
         for i in range(len(bb)):
             body_bytes.append(bb[i])
-        var req = Request(method=Method.POST, url=url, body=body_bytes^)
+        var req = Request(method=Method.POST, url=url, body=body_bytes)
         req.headers.set("Content-Type", content_type)
         return req^
 

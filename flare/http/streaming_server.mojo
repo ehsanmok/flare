@@ -678,8 +678,9 @@ struct StreamConn(Movable):
         return self._inbound_enabled
 
     def read_body(mut self, max_bytes: Int = 65536) raises -> ChunkPoll:
-        """Read up to ``max_bytes`` of the inbound request body, without
-        blocking, as a ``ChunkPoll`` (so inbound and outbound share
+        """Read up to ``max_bytes`` of the inbound request body, without blocking.
+
+        The result is a ``ChunkPoll`` (so inbound and outbound share
         one tri-state shape):
 
         - ``ready(bytes)`` -- a body chunk is available now;

@@ -82,7 +82,7 @@ struct RequestBuilder(Movable):
                 url += "&" + self._query
             else:
                 url += "?" + self._query
-        var req = Request(method=self._method, url=url, body=self._body^)
+        var req = Request(method=self._method, url=url, body=self._body)
         for i in range(self._headers.len()):
             req.headers.append(self._headers._keys[i], self._headers._values[i])
         if self._content_type.byte_length() > 0:

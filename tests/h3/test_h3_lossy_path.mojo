@@ -76,7 +76,7 @@ struct _Relay(Movable):
     def pump(mut self) raises:
         var buf = List[UInt8](length=2048, fill=0)
         for _ in range(256):
-            var got = 0
+            var got: Int
             try:
                 var r = self.front.try_recv_from(Span[UInt8, _](buf))
                 got = r[0]
@@ -87,7 +87,7 @@ struct _Relay(Movable):
                 break
             self._forward(List[UInt8](Span[UInt8, _](buf)[:got]), True)
         for _ in range(256):
-            var got = 0
+            var got: Int
             try:
                 got = self.back.try_recv_from(Span[UInt8, _](buf))[0]
             except:

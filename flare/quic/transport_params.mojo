@@ -93,7 +93,7 @@ comptime TP_ID_MAX_DATAGRAM_FRAME_SIZE: Int = 0x20
 """RFC 9221 §3: max DATAGRAM frame size the endpoint will accept.
 Absent or 0 means the peer MUST NOT send DATAGRAM frames."""
 comptime TP_ID_MIN_ACK_DELAY: Int = 0xFF04DE1B
-"""draft-ietf-quic-ack-frequency: the smallest ACK delay (microseconds)
+"""The draft-ietf-quic-ack-frequency minimum: the smallest ACK delay (microseconds)
 the endpoint can honour; present means it accepts ACK_FREQUENCY."""
 
 # Default values from RFC 9000 §18.2 (used when a parameter is

@@ -296,9 +296,9 @@ struct Http3ClientConnection(Movable, PoolableConn):
         :meth:`send_request` emit either flight without duplicating the
         H3 encoding."""
         if early:
-            self.quic.send_stream_early(stream_id, data^, fin)
+            self.quic.send_stream_early(stream_id, data, fin)
         else:
-            self.quic.send_stream(stream_id, data^, fin)
+            self.quic.send_stream(stream_id, data, fin)
 
     def open_streams(mut self, early: Bool = False) raises:
         """Open the client control + QPACK uni-streams (RFC 9114

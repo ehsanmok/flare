@@ -415,9 +415,11 @@ struct HttpClient(Movable):
             prefer_http3: When ``True``, ``https://`` requests prefer
                 HTTP/3 over QUIC on first contact rather than waiting
                 for an ``Alt-Svc`` advert; any QUIC dial failure falls
-                back transparently to h2/h1. (Without this, h3 still
+                back transparently to h2/h1. Without this, h3 still
                 kicks in automatically once a server advertises it via
-                ``Alt-Svc``.)
+                ``Alt-Svc``.
+            auto_decompress: When ``True`` (default), compressed response
+                bodies are decoded transparently.
         """
         self._config = TlsConfig()
         self._max_redirects = max_redirects
@@ -1127,7 +1129,7 @@ struct HttpClient(Movable):
             tls_cfg.alpn.append("h2")
             tls_cfg.alpn.append("http/1.1")
         var stream = TlsStream.connect_timeout(
-            u.host, u.port, tls_cfg^, self._timeout_ms
+            u.host, u.port, tls_cfg, self._timeout_ms
         )
         self._arm_read_timeout(stream)
         var negotiated = stream.alpn_selected()
@@ -1275,10 +1277,10 @@ struct HttpClient(Movable):
         var stream: TlsStream
         if proxy.byte_length() > 0:
             var tcp = self._connect_tunnel(proxy, u.host, u.port)
-            stream = TlsStream.connect_over_tcp(tcp^, u.host, tls_cfg^)
+            stream = TlsStream.connect_over_tcp(tcp^, u.host, tls_cfg)
         else:
             stream = TlsStream.connect_timeout(
-                u.host, u.port, tls_cfg^, self._timeout_ms
+                u.host, u.port, tls_cfg, self._timeout_ms
             )
         self._arm_read_timeout(stream)
         var negotiated = stream.alpn_selected()
@@ -1446,6 +1448,9 @@ struct HttpClient(Movable):
                 exhaustion (``next`` returns ``None``).
             content_type: ``Content-Type`` header value. Defaults to
                 ``application/octet-stream``.
+            body_size: Total body length in bytes when known (sent as
+                ``Content-Length``); negative selects chunked framing.
+            cancel: Cancellation token checked while the body is pulled.
 
         Returns:
             The server's ``Response``.
@@ -1540,7 +1545,7 @@ struct HttpClient(Movable):
         tls_cfg.alpn = List[String]()
         tls_cfg.alpn.append("http/1.1")
         var stream = TlsStream.connect_timeout(
-            u.host, u.port, tls_cfg^, self._timeout_ms
+            u.host, u.port, tls_cfg, self._timeout_ms
         )
         self._arm_read_timeout(stream)
         var wb = wire.as_bytes()
@@ -1870,10 +1875,10 @@ struct HttpClient(Movable):
         var proxy = self._resolve_proxy(u)
         if proxy.byte_length() > 0:
             var tcp = self._connect_tunnel(proxy, u.host, u.port)
-            stream = TlsStream.connect_over_tcp(tcp^, u.host, tls_cfg^)
+            stream = TlsStream.connect_over_tcp(tcp^, u.host, tls_cfg)
         else:
             stream = TlsStream.connect_timeout(
-                u.host, u.port, tls_cfg^, self._timeout_ms
+                u.host, u.port, tls_cfg, self._timeout_ms
             )
         self._arm_read_timeout(stream)
         var negotiated = stream.alpn_selected()
@@ -2001,7 +2006,7 @@ struct HttpClient(Movable):
         """
         var body_bytes = List[UInt8](body.as_bytes())
         var req = Request(
-            method=Method.POST, url=self._resolve_url(url), body=body_bytes^
+            method=Method.POST, url=self._resolve_url(url), body=body_bytes
         )
         req.headers.set("Content-Type", "application/json")
         return self.send(req)
@@ -2065,7 +2070,7 @@ struct HttpClient(Movable):
         """
         var body_bytes = List[UInt8](body.as_bytes())
         var req = Request(
-            method=Method.PUT, url=self._resolve_url(url), body=body_bytes^
+            method=Method.PUT, url=self._resolve_url(url), body=body_bytes
         )
         req.headers.set("Content-Type", "application/json")
         return self.send(req)
@@ -2163,7 +2168,7 @@ struct HttpClient(Movable):
         """
         var body_bytes = List[UInt8](body.as_bytes())
         var req = Request(
-            method=Method.PATCH, url=self._resolve_url(url), body=body_bytes^
+            method=Method.PATCH, url=self._resolve_url(url), body=body_bytes
         )
         req.headers.set("Content-Type", "application/json")
         return self.send(req)

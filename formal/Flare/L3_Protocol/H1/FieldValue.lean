@@ -28,7 +28,7 @@ def valueOk (obsText : Bool) (v : Bytes) : Bool := v.all (byteOk obsText)
 
 /-- The shipped value acceptance: the byte check, and a value with an obs-text
 byte must be valid UTF-8 (an ASCII value always is).
-mirrors flare/http/_server/parse.mojo#_check_field_value+_parse_http_request_bytes sha=3d43fbdb8d2b at=ea1b9282 (fixed, H1-05) -/
+mirrors flare/http/_server/parse.mojo#_check_field_value+_parse_http_request_bytes sha=e947e2428622 at=e767e34c (fixed, H1-05) -/
 def valueAccepted (obsText : Bool) (v : Bytes) : Bool := valueOk obsText v && Flare.L1.Utf8.isValidUtf8 v
 
 /-- Every accepted value is valid UTF-8. -/

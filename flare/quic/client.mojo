@@ -275,7 +275,7 @@ struct QuicClientConnection(Movable):
     bookkeeping, reused unchanged from the server path."""
 
     var session: RustlsQuicSession
-    """rustls client session: drives the TLS 1.3 handshake inside
+    """The rustls client session: drives the TLS 1.3 handshake inside
     CRYPTO frames and holds the Handshake / 1-RTT AEAD keys."""
 
     var sock: UdpSocket

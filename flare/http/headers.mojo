@@ -44,11 +44,11 @@ def _lower(s: String) -> String:
     var src = s.unsafe_ptr()
     var dst = buf.unsafe_ptr()
     for i in range(n):
-        var c = src[i]
+        var c = src[unsafe_offset=i]
         if c >= 65 and c <= 90:
-            dst[i] = c + 32
+            dst[unsafe_offset=i] = c + 32
         else:
-            dst[i] = c
+            dst[unsafe_offset=i] = c
     return ascii_unchecked_string(Span[UInt8, _](buf))
 
 

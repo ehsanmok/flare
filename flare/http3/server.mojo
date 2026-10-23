@@ -1110,7 +1110,7 @@ struct Http3Connection(Copyable, Defaultable):
             pipe = ArcPointer(BodyPipe(body^, False))
             body = List[UInt8]()
             state.pipe = pipe
-        var req = Request(method=method^, url=path^, body=body^)
+        var req = Request(method=method, url=path, body=body)
         req.body_pipe = pipe^
         # Same rules as h2's take_request: repeated fields are appended,
         # cookie crumbs are joined (RFC 9114 sec 4.2.1), and :authority

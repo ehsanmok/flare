@@ -427,7 +427,7 @@ struct RawSocket(Movable):
         """
         var buf = stack_allocation[28, UInt8]()
         for i in range(28):
-            (buf + i).unsafe_write(0)
+            buf.unsafe_offset(i).unsafe_write(0)
         var len_ptr = stack_allocation[1, c_uint]()
         len_ptr.unsafe_write(c_uint(28))
         var rc = _getpeername(self.fd, buf, len_ptr)

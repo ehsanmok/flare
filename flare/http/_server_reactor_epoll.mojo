@@ -152,6 +152,8 @@ def _run_handler_loop_impl[
             via a fresh externally-mutated pointer so the optimiser
             cannot LICM-hoist the load. The owning ``Scheduler`` (or
             the dedicated-path caller) flips it on shutdown.
+        stats_addr: Address of this worker's stats block, or ``0`` for
+            none. Inflight and exit-status counters are published to it.
     """
     var reactor = Reactor()
     var wheel = TimerWheel(now_ms=UInt64(_monotonic_ms()))
@@ -314,6 +316,8 @@ def run_reactor_loop_shared[
         handler: Per-worker copy of ``H``.
         stopping: Heap-allocated stop flag mutated by the
             ``Scheduler`` from another thread on shutdown.
+        stats_addr: Address of this worker's stats block, or ``0`` for
+            none. Inflight and exit-status counters are published to it.
     """
     _run_handler_loop_impl[H, is_shared=True](
         listener_fd, config, handler, stopping, stats_addr
@@ -354,6 +358,8 @@ def _run_static_loop_impl[
         resp: Pre-encoded static response (immutable).
         stopping: Heap-allocated stop flag re-read every iteration
             via a fresh externally-mutated pointer (LICM defeat).
+        stats_addr: Address of this worker's stats block, or ``0`` for
+            none. Inflight and exit-status counters are published to it.
     """
     var reactor = Reactor()
     var wheel = TimerWheel(now_ms=UInt64(_monotonic_ms()))
@@ -574,6 +580,8 @@ def run_reactor_loop_static_shared(
             across workers via ``StaticScheduler``'s heap-stored copy).
         stopping: Heap-allocated stop flag mutated by
             ``StaticScheduler.shutdown`` from the main thread.
+        stats_addr: Address of this worker's stats block, or ``0`` for
+            none. Inflight and exit-status counters are published to it.
     """
     _run_static_loop_impl[is_shared=True](
         listener_fd, config, resp, stopping, stats_addr
@@ -610,6 +618,8 @@ def run_reactor_loop_cancel[
         handler: Per-request cancel-aware callback.
         stopping: Checked each iteration; flipping it stops the loop
             and closes in-flight connections.
+        stats_addr: Address of this worker's stats block, or ``0`` for
+            none. Inflight and exit-status counters are published to it.
     """
     listener._socket.set_nonblocking(True)
     var listener_fd = listener._socket.fd
@@ -763,6 +773,8 @@ def run_reactor_loop_view[
         config: Server configuration.
         handler: Per-request view-aware handler.
         stopping: Checked each iteration.
+        stats_addr: Address of this worker's stats block, or ``0`` for
+            none. Inflight and exit-status counters are published to it.
     """
     listener._socket.set_nonblocking(True)
     var listener_fd = listener._socket.fd

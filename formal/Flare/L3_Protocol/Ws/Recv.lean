@@ -34,7 +34,7 @@ def OpcodeSafe (dec : Bytes → DRes) : Prop :=
 raises right after the RSV checks; this checks after decoding. The only
 difference is that a truncated reserved-opcode frame is `needMore` here
 instead of `error`.
-mirrors flare/ws/frame.mojo#WsFrame.decode_one sha=64c344c5d112 at=7aa8820c (fixed, WS-01) -/
+mirrors flare/ws/frame.mojo#WsFrame.decode_one sha=74491ec0e75b at=e767e34c (fixed, WS-01) -/
 def decodeKnown (allowRsv1 : Bool) (maxP : Nat) (d : Bytes) : DRes :=
   match decode allowRsv1 maxP d with
   | .ok f n => if knownOpcode f.opcode then .ok f n else .error
@@ -228,7 +228,7 @@ CLOSE ends, TEXT/BINARY starts a message that runs to the CONTINUATION with
 FIN; any other data opcode is a protocol error. The size bound on the
 reassembled payload (`max_frame_size`) is not modelled: it only turns some
 `.text`/`.binary` results into an error.
-mirrors flare/ws/client.mojo#WsClient._recv_data_frame+WsClient.recv_message sha=73a42af7acbd at=97cfd1be (fixed, WS-02) -/
+mirrors flare/ws/client.mojo#WsClient._recv_data_frame+WsClient.recv_message sha=229e348906e9 at=e767e34c (fixed, WS-02) -/
 def nextMessage : List Frame → Option (Msg × List Frame)
   | [] => none
   | f :: fs =>

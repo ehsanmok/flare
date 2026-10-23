@@ -242,7 +242,7 @@ def _send_h2c_via_upgrade(
     """
     var h2_cfg = Http2ClientConfig()
     var settings_payload = build_h2c_settings_payload(h2_cfg)
-    var settings_b64 = base64url_encode(settings_payload^)
+    var settings_b64 = base64url_encode(settings_payload)
     var wire = method + " " + u.request_target() + " HTTP/1.1\r\n"
     var host_header = u.host
     if u.port != 80:

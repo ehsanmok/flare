@@ -128,10 +128,10 @@ def Expires (accepts : Nat → Nat → Bool) : Prop :=
 
 /-- `encode_at` signs `"<now + ttl_s>|<value>"`; `load_at` refuses a
 payload with no expiry or a past one.
-mirrors flare/http/session.mojo#CookieSessionStore.encode_at+CookieSessionStore.load_at sha=f0b87fbcec86 at=ea1b9282 (fixed, DOC-06) -/
+mirrors flare/http/session.mojo#CookieSessionStore.encode_at+CookieSessionStore.load_at sha=300af32e7642 at=e767e34c (fixed, DOC-06) -/
 def csEncode (now : Nat) (v : String) : Payload := ⟨some (now + lifetime), v⟩
 
-/-- mirrors flare/http/session.mojo#CookieSessionStore.encode_at+CookieSessionStore.load_at sha=f0b87fbcec86 at=ea1b9282 (fixed, DOC-06) -/
+/-- mirrors flare/http/session.mojo#CookieSessionStore.encode_at+CookieSessionStore.load_at sha=300af32e7642 at=e767e34c (fixed, DOC-06) -/
 def csLoad (now : Nat) (p : Payload) : Option String :=
   match p.exp with
   | some e => if now < e then some p.value else none

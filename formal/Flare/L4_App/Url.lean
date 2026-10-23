@@ -171,7 +171,7 @@ def parseRestWith (sf sa : Bytes → Bytes × Bytes) (strip : Bytes → Bytes)
     if host = [] then .error "missing host"
     else .ok ⟨scheme, host, port, path, query, fragment⟩
 
-/-- mirrors flare/http/url.mojo#Url.parse sha=11eddb276c82 at=12630564 (step 1, then `parseRestWith`). -/
+/-- mirrors flare/http/url.mojo#Url.parse sha=07d8c938a88e at=e767e34c (step 1, then `parseRestWith`). -/
 def parseWith (sf sa : Bytes → Bytes × Bytes) (strip : Bytes → Bytes) (raw : Bytes) :
     Except String Url :=
   match find raw sepB with
@@ -182,12 +182,12 @@ def parseWith (sf sa : Bytes → Bytes × Bytes) (strip : Bytes → Bytes) (raw 
     else parseRestWith sf sa strip scheme (raw.drop (se + 3))
 
 /-- Fragment starts at the **first** `#` (RFC 3986 §3.5, WHATWG).
-mirrors flare/http/url.mojo#Url.parse sha=11eddb276c82 at=12630564 (fixed, APP-23) -/
+mirrors flare/http/url.mojo#Url.parse sha=07d8c938a88e at=e767e34c (fixed, APP-23) -/
 def splitFragment (s : Bytes) : Bytes × Bytes :=
   match idxOf cHash s with | some p => (s.take p, s.drop (p + 1)) | none => (s, [])
 
 /-- Authority ends at the first `/` **or `?`** (RFC 3986 §3.2).
-mirrors flare/http/url.mojo#Url.parse sha=11eddb276c82 at=12630564 (fixed, APP-23) -/
+mirrors flare/http/url.mojo#Url.parse sha=07d8c938a88e at=e767e34c (fixed, APP-23) -/
 def splitAuthority (s : Bytes) : Bytes × Bytes :=
   match idxWhere (fun c => c == cSlash || c == cQ) s with
   | none => (s, [cSlash]) | some p => (s.take p, s.drop p)
@@ -196,11 +196,11 @@ def splitAuthority (s : Bytes) : Bytes × Bytes :=
 
 /-- Userinfo stripped through the **last** `@` (WHATWG, curl): `_rfind(authority,
 "@")`.
-mirrors flare/http/url.mojo#Url.parse sha=11eddb276c82 at=4b1c9f56 (fixed, APP-25) -/
+mirrors flare/http/url.mojo#Url.parse sha=07d8c938a88e at=e767e34c (fixed, APP-25) -/
 def stripUserinfo (a : Bytes) : Bytes :=
   match rfindB cAt a with | some i => a.drop (i + 1) | none => a
 
-/-- mirrors flare/http/url.mojo#Url.__init__+Url.parse sha=f12311797bf9 at=4b1c9f56 (fixed, APP-23, APP-25): `Url.parse` as
+/-- mirrors flare/http/url.mojo#Url.__init__+Url.parse sha=f45963733364 at=e767e34c (fixed, APP-23, APP-25): `Url.parse` as
 shipped. -/
 def parse : Bytes → Except String Url := parseWith splitFragment splitAuthority stripUserinfo
 

@@ -401,7 +401,7 @@ struct HttpServer(Movable):
             NetworkError: For any other OS error.
         """
         var tcp_listener = TcpListener.bind(tcp_addr)
-        var quic_listener = QuicListener.bind(udp_cfg^)
+        var quic_listener = QuicListener.bind(udp_cfg)
         var srv = HttpServer(tcp_listener^, config^)
         srv._http3_listener = quic_listener^
         return srv^
@@ -1098,7 +1098,7 @@ struct HttpServer(Movable):
             frontend=frontend^,
             num_workers=num_workers,
             pin_cores=pin_cores,
-            extra_addrs=extra_addrs^,
+            extra_addrs=extra_addrs,
         )
 
         # Block until the caller flips _stopping via close() or until

@@ -411,7 +411,7 @@ def _parse_http_request_bytes(
     var req = Request(
         method=method,
         url=path,
-        body=body^,
+        body=body,
         version=version,
         peer=peer,
         expose_errors=expose_errors,
@@ -541,7 +541,7 @@ def _parse_http_request_bytes_minimal(
     var req = Request(
         method=method,
         url=path,
-        body=body^,
+        body=body,
         version=version,
         peer=peer,
         expose_errors=expose_errors,

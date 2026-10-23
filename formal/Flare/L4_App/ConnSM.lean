@@ -138,7 +138,7 @@ def segBytes (s : St Req) : Bytes := (s.segs.map Prod.fst).flatten
 
 /-- `_queue_error` then `_transition_to_writing`: mark close, queue a
 `Connection: close` error response, enter STATE_WRITING.
-mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._queue_error+ConnHandle._transition_to_writing sha=24fc9902f25c at=98b092d2 -/
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._queue_error+ConnHandle._transition_to_writing sha=6439713b54ef at=e767e34c -/
 def queueError (P : Params Req) (s : St Req) (o : Out Req) : St Req :=
   { s with shouldClose := true, wbuf := P.ser o, wpos := 0, phase := .writing,
            log := s.log ++ [o] }
@@ -146,7 +146,7 @@ def queueError (P : Params Req) (s : St Req) (o : Out Req) : St Req :=
 /-- `_finalise_response` (buffered path): drop the request's bytes from
 `read_buf`, serialise, enter STATE_WRITING. `close_after` only selects the
 `Connection:` header; `should_close` is not touched here.
-mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._finalise_response sha=fcbd41c49646 at=59bda50f -/
+mirrors flare/http/_reactor/conn_handle.mojo#ConnHandle._finalise_response sha=aa96b5d82b7a at=e767e34c -/
 def finalise (P : Params Req) (s : St Req) (r : Req) (n : Nat) (o : Out Req) : St Req :=
   { s with rbuf := s.rbuf.drop n, segs := s.segs ++ [(s.rbuf.take n, r)],
            wbuf := P.ser o, wpos := 0, phase := .writing, log := s.log ++ [o] }

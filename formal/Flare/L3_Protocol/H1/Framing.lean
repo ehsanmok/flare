@@ -85,38 +85,38 @@ def reactorFraming (allowCL : Bool) (maxBody : Nat) (lines : List Bytes) : Frami
 
 /-- Field-name slice: `line[:colon]`, with trailing SP/HTAB removed under
 `allow_ows_around_colon`.
-mirrors flare/http/_server/parse.mojo#_parse_http_request_bytes sha=ddb7cb75d062 at=ea1b9282 -/
+mirrors flare/http/_server/parse.mojo#_parse_http_request_bytes sha=2ee83b6c49a1 at=e767e34c -/
 def nameOf (ows : Bool) (t : Bytes) : Bytes :=
   if ows then (t.reverse.dropWhile isWS).reverse else t
 
 /-- The line is a field line the parser accepts: a colon, and a nonempty
 all-tchar name.
-mirrors flare/http/_server/parse.mojo#_parse_http_request_bytes sha=ddb7cb75d062 at=ea1b9282 -/
+mirrors flare/http/_server/parse.mojo#_parse_http_request_bytes sha=2ee83b6c49a1 at=e767e34c -/
 def wfB (ows : Bool) (L : Bytes) : Bool :=
   match findB 58 L with
   | none => false
   | some k => let nm := nameOf ows (L.take k); !nm.isEmpty && nm.all isTchar
 
 /-- `(k, v)`: the name, and the stripped bytes after the first colon.
-mirrors flare/http/_server/parse.mojo#_parse_http_request_bytes sha=ddb7cb75d062 at=ea1b9282 -/
+mirrors flare/http/_server/parse.mojo#_parse_http_request_bytes sha=2ee83b6c49a1 at=e767e34c -/
 def field (ows : Bool) (L : Bytes) : Bytes × Bytes :=
   match findB 58 L with
   | none => ([], [])
   | some k => (nameOf ows (L.take k), strip (L.drop (k + 1)))
 
 /-- The value when the name equals `lit` (ASCII case-insensitive).
-mirrors flare/http/_server/parse.mojo#_parse_http_request_bytes sha=ddb7cb75d062 at=ea1b9282 -/
+mirrors flare/http/_server/parse.mojo#_parse_http_request_bytes sha=2ee83b6c49a1 at=e767e34c -/
 def parserField (ows : Bool) (lit L : Bytes) : Option Bytes :=
   if ieq (field ows L).1 lit = true then some (field ows L).2 else none
 
 /-- `te_joined`: a comma before every value but the first.
-mirrors flare/http/_server/parse.mojo#_parse_http_request_bytes sha=ddb7cb75d062 at=ea1b9282 -/
+mirrors flare/http/_server/parse.mojo#_parse_http_request_bytes sha=2ee83b6c49a1 at=e767e34c -/
 def joinP : List Bytes → Bytes
   | [] => []
   | v :: vs => vs.foldl (fun j w => j ++ 44 :: w) v
 
 /-- The parser's framing decision.
-mirrors flare/http/_server/parse.mojo#_parse_http_request_bytes sha=ddb7cb75d062 at=ea1b9282 -/
+mirrors flare/http/_server/parse.mojo#_parse_http_request_bytes sha=2ee83b6c49a1 at=e767e34c -/
 def parserFraming (ows allowCL : Bool) (maxBody : Nat) (lines : List Bytes) : Framing :=
   if lines.all (wfB ows) = false then .reject else
   let S := lines.filterMap (parserField ows TEn)

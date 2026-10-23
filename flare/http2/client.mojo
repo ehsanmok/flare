@@ -385,7 +385,7 @@ struct Http2ClientConnection(Defaultable, Movable):
             self._append_setting(p, 0x8, 1)
         f.payload = p^
         f.header.length = len(f.payload)
-        var bytes = encode_frame(f^)
+        var bytes = encode_frame(f)
         for i in range(len(bytes)):
             self.outbox.append(bytes[i])
         # The connection window starts at 65535 (RFC 9113 sec 6.9.2);
@@ -598,7 +598,7 @@ struct Http2ClientConnection(Defaultable, Movable):
         ping.header.type = FrameType.PING()
         ping.payload = _bdp_ping_payload()
         ping.header.length = 8
-        self.outbox.extend(encode_frame(ping^))
+        self.outbox.extend(encode_frame(ping))
         self._bdp_sent_ns = now
         self._bdp_bytes = n
 
@@ -622,7 +622,7 @@ struct Http2ClientConnection(Defaultable, Movable):
         f.header.type = FrameType.SETTINGS()
         f.header.length = len(p)
         f.payload = p^
-        self.outbox.extend(encode_frame(f^))
+        self.outbox.extend(encode_frame(f))
         self.conn.initial_window_size = w
         var sids = List[Int]()
         for entry in self.conn.streams.items():
@@ -697,7 +697,7 @@ struct Http2ClientConnection(Defaultable, Movable):
                 dp.append(body[pos + i])
             df.payload = dp^
             df.header.length = len(df.payload)
-            var db = encode_frame(df^)
+            var db = encode_frame(df)
             for i in range(len(db)):
                 self.outbox.append(db[i])
             self.conn.send_window -= chunk
@@ -866,7 +866,7 @@ struct Http2ClientConnection(Defaultable, Movable):
             hf.header.flags = FrameFlags(flags)
             hf.payload = enc^
             hf.header.length = len(hf.payload)
-            var hb = encode_frame(hf^)
+            var hb = encode_frame(hf)
             for i in range(len(hb)):
                 self.outbox.append(hb[i])
         else:
@@ -887,7 +887,7 @@ struct Http2ClientConnection(Defaultable, Movable):
                 first_payload.append(enc[i])
             hf.payload = first_payload^
             hf.header.length = len(hf.payload)
-            var hb = encode_frame(hf^)
+            var hb = encode_frame(hf)
             for i in range(len(hb)):
                 self.outbox.append(hb[i])
             # CONTINUATION frames for the rest. Each carries
@@ -909,7 +909,7 @@ struct Http2ClientConnection(Defaultable, Movable):
                     cp.append(enc[pos + i])
                 cf.payload = cp^
                 cf.header.length = len(cf.payload)
-                var cb = encode_frame(cf^)
+                var cb = encode_frame(cf)
                 for i in range(len(cb)):
                     self.outbox.append(cb[i])
                 pos += chunk
@@ -986,7 +986,7 @@ struct Http2ClientConnection(Defaultable, Movable):
         hf.header.flags = FrameFlags(FrameFlags.END_HEADERS())
         hf.payload = enc^
         hf.header.length = len(hf.payload)
-        var hb = encode_frame(hf^)
+        var hb = encode_frame(hf)
         for i in range(len(hb)):
             self.outbox.append(hb[i])
         var s = Stream()
@@ -1030,7 +1030,7 @@ struct Http2ClientConnection(Defaultable, Movable):
             df.header.flags = FrameFlags(FrameFlags.END_STREAM())
             df.payload = List[UInt8]()
             df.header.length = 0
-            var db = encode_frame(df^)
+            var db = encode_frame(df)
             for i in range(len(db)):
                 self.outbox.append(db[i])
             if sid in self.conn.streams:
@@ -1084,7 +1084,7 @@ struct Http2ClientConnection(Defaultable, Movable):
         p.append(UInt8(error_code & 0xFF))
         f.payload = p^
         f.header.length = len(f.payload)
-        var bytes = encode_frame(f^)
+        var bytes = encode_frame(f)
         for i in range(len(bytes)):
             self.outbox.append(bytes[i])
 
@@ -1101,7 +1101,7 @@ struct Http2ClientConnection(Defaultable, Movable):
         p.append(UInt8(error_code & 0xFF))
         f.payload = p^
         f.header.length = len(f.payload)
-        var bytes = encode_frame(f^)
+        var bytes = encode_frame(f)
         for i in range(len(bytes)):
             self.outbox.append(bytes[i])
 
@@ -1239,7 +1239,7 @@ struct Http2ClientConnection(Defaultable, Movable):
             hf.header.flags = FrameFlags(FrameFlags.END_HEADERS())
             hf.payload = enc^
             hf.header.length = len(hf.payload)
-            var hb = encode_frame(hf^)
+            var hb = encode_frame(hf)
             for i in range(len(hb)):
                 self.outbox.append(hb[i])
         else:
@@ -1252,7 +1252,7 @@ struct Http2ClientConnection(Defaultable, Movable):
                 first_payload.append(enc[i])
             hf.payload = first_payload^
             hf.header.length = len(hf.payload)
-            var hb = encode_frame(hf^)
+            var hb = encode_frame(hf)
             for i in range(len(hb)):
                 self.outbox.append(hb[i])
             var pos = max_frame
@@ -1272,7 +1272,7 @@ struct Http2ClientConnection(Defaultable, Movable):
                     cp.append(enc[pos + i])
                 cf.payload = cp^
                 cf.header.length = len(cf.payload)
-                var cb = encode_frame(cf^)
+                var cb = encode_frame(cf)
                 for i in range(len(cb)):
                     self.outbox.append(cb[i])
                 pos += chunk

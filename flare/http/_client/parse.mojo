@@ -403,7 +403,7 @@ def _parse_status_line(line: String) raises -> _StatusLine:
         reason = String(String(unsafe_from_utf8=rest.as_bytes()[4:]))
     return _StatusLine(
         code,
-        reason^,
+        reason,
         String(unsafe_from_utf8=line.as_bytes()[:sp1]) == "HTTP/1.1",
     )
 
@@ -706,6 +706,7 @@ def _read_http_response_tls(
 
     Args:
         stream: Open ``TlsStream``.
+        method: The request method, which decides how the body is framed.
 
     Returns:
         Parsed ``Response``.
@@ -830,8 +831,9 @@ def _read_http_response_framed[
 ](
     mut stream: R, mut can_reuse: Bool, method: String = "GET"
 ) raises -> Response:
-    """Read one framed HTTP/1.1 response and return whether the
-    connection is in a reusable state.
+    """Read one framed HTTP/1.1 response from a stream.
+
+    Also records whether the connection is in a reusable state.
 
     Stops at the end of the framed body instead of reading until EOF,
     so the socket can go back to a connection pool. The framing follows
@@ -840,10 +842,15 @@ def _read_http_response_framed[
     hung the request. Informational 1xx heads are read past.
 
     A chunked body is walked chunk by chunk (``scan_chunked_resume``).
-    It used to be found by searching the raw bytes for ``\r\n0\r\n``,
+    It used to be found by searching the raw bytes for ``\\r\\n0\\r\\n``,
     which stopped early when the *payload* contained that pattern --
     leaving body bytes in the socket for the next pooled request to read
     as its response -- and never matched an empty chunked body at all.
+
+    Args:
+        stream: The open stream to read from.
+        can_reuse: Set on return to whether the connection can be pooled.
+        method: The request method, which decides how the body is framed.
 
     Returns:
         The response. ``can_reuse`` is set when the connection is
@@ -864,7 +871,7 @@ def _read_http_response_framed[
     var hdr_end: Int
     var status: Int
     var headers: HeaderMap
-    var http11 = False
+    var http11: Bool
     while True:
         hdr_end = _find_crlf2_from(raw, start)
         while hdr_end < 0:
