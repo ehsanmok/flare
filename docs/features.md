@@ -949,9 +949,9 @@ of what you might reasonably assume from the surrounding feature.
 **HTTP server**
 
 - `bind_tls(addr, TlsServerConfig)` applies mTLS, the minimum protocol
-  version and the session-ticket policy to the reactor's handshakes. A
-  certificate reload and per-SNI certificates are still `TlsAcceptor`-only
-  (the reactor's context is not swapped while it serves).
+  version, the session-ticket policy and per-SNI certificates to the
+  reactor's handshakes, and `HttpServer.reload_tls()` re-reads every
+  certificate while serving.
 - Multi-worker HTTP/3 (`QuicServerConfig.num_workers = N`) gives each
   worker its own `SO_REUSEPORT` socket, so the kernel spreads client
   flows by 4-tuple, not by load. A packet that arrives at the wrong
