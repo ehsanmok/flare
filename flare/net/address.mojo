@@ -112,7 +112,7 @@ struct IpAddr(Copyable, Equatable, ImplicitlyCopyable, Writable):
                 String(
                     StringSlice(
                         unsafe_from_utf8=CStringSpan(
-                            unsafe_from_ptr=ntop.unsafe_bitcast[Int8]()
+                            unsafe_from_ptr=ntop.unsafe_bitcast[c_char]()
                         )
                     )
                 ),
@@ -139,7 +139,7 @@ struct IpAddr(Copyable, Equatable, ImplicitlyCopyable, Writable):
                 String(
                     StringSlice(
                         unsafe_from_utf8=CStringSpan(
-                            unsafe_from_ptr=ntop.unsafe_bitcast[Int8]()
+                            unsafe_from_ptr=ntop.unsafe_bitcast[c_char]()
                         )
                     )
                 ),

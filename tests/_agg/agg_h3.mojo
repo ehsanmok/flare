@@ -277,6 +277,9 @@ from test_h3_response_reader import (
 from test_h3_response_reader import (
     test_h3_oversized_single_section_still_fails as test_h3_response_reader__test_h3_oversized_single_section_still_fails,
 )
+from test_h3_response_reader import (
+    test_h3_small_section_that_expands_past_the_limit_fails as test_h3_response_reader__test_h3_small_section_that_expands_past_the_limit_fails,
+)
 from test_h3_streaming_body import (
     test_an_upload_streams_through_its_handler as test_h3_streaming_body__test_an_upload_streams_through_its_handler,
 )
@@ -390,6 +393,9 @@ from test_request_reader import (
 )
 from test_request_reader import (
     test_oversized_headers_is_protocol_error as test_request_reader__test_oversized_headers_is_protocol_error,
+)
+from test_request_reader import (
+    test_small_headers_frame_that_expands_past_the_limit_is_refused as test_request_reader__test_small_headers_frame_that_expands_past_the_limit_is_refused,
 )
 from test_request_reader import (
     test_repeat_headers_after_trailers_is_protocol_error as test_request_reader__test_repeat_headers_after_trailers_is_protocol_error,
@@ -649,6 +655,9 @@ def main() raises:
     suite.test[
         test_h3_response_reader__test_h3_oversized_single_section_still_fails
     ]()
+    suite.test[
+        test_h3_response_reader__test_h3_small_section_that_expands_past_the_limit_fails
+    ]()
     # tests/h3/test_h3_streaming_body.mojo
     suite.test[
         test_h3_streaming_body__test_an_upload_streams_through_its_handler
@@ -727,6 +736,9 @@ def main() raises:
     suite.test[test_request_reader__test_truncated_frame_yields_needs_more]()
     suite.test[test_request_reader__test_unknown_frame_type_is_skipped]()
     suite.test[test_request_reader__test_oversized_headers_is_protocol_error]()
+    suite.test[
+        test_request_reader__test_small_headers_frame_that_expands_past_the_limit_is_refused
+    ]()
     suite.test[
         test_request_reader__test_repeat_headers_after_trailers_is_protocol_error
     ]()

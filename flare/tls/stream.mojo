@@ -48,7 +48,7 @@ sequence. Same idiom as
 """
 
 from std.sys import stderr
-from std.ffi import OwnedDLHandle, c_int, CStringSpan
+from std.ffi import OwnedDLHandle, c_char, c_int, CStringSpan
 from std.memory import Pointer, stack_allocation
 from ..dns import resolve
 from ..net import SocketAddr, NetworkError, _find_flare_lib
@@ -94,7 +94,7 @@ def _c_err(imm lib: OwnedDLHandle) raises -> String:
     return String(
         StringSlice(
             unsafe_from_utf8=CStringSpan(
-                unsafe_from_ptr=p.unsafe_bitcast[Int8]()
+                unsafe_from_ptr=p.unsafe_bitcast[c_char]()
             )
         )
     )
@@ -269,7 +269,7 @@ def _do_ssl_get_version(imm lib: OwnedDLHandle, ssl: Int) raises -> String:
     return String(
         StringSlice(
             unsafe_from_utf8=CStringSpan(
-                unsafe_from_ptr=p.unsafe_bitcast[Int8]()
+                unsafe_from_ptr=p.unsafe_bitcast[c_char]()
             )
         )
     )
@@ -283,7 +283,7 @@ def _do_ssl_get_cipher(imm lib: OwnedDLHandle, ssl: Int) raises -> String:
     return String(
         StringSlice(
             unsafe_from_utf8=CStringSpan(
-                unsafe_from_ptr=p.unsafe_bitcast[Int8]()
+                unsafe_from_ptr=p.unsafe_bitcast[c_char]()
             )
         )
     )
@@ -996,7 +996,7 @@ struct TlsStream(Movable, Readable):
         return String(
             StringSlice(
                 unsafe_from_utf8=CStringSpan(
-                    unsafe_from_ptr=buf.unsafe_bitcast[Int8]()
+                    unsafe_from_ptr=buf.unsafe_bitcast[c_char]()
                 )
             )
         )
@@ -1029,7 +1029,7 @@ struct TlsStream(Movable, Readable):
         return String(
             StringSlice(
                 unsafe_from_utf8=CStringSpan(
-                    unsafe_from_ptr=buf.unsafe_bitcast[Int8]()
+                    unsafe_from_ptr=buf.unsafe_bitcast[c_char]()
                 )
             )
         )

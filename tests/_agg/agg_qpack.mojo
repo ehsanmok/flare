@@ -63,6 +63,15 @@ from test_qpack import (
 from test_qpack import (
     test_valid_utf8_literal_value_is_still_accepted as test_qpack__test_valid_utf8_literal_value_is_still_accepted,
 )
+from test_qpack import (
+    test_decoded_size_is_capped_not_just_the_wire_size as test_qpack__test_decoded_size_is_capped_not_just_the_wire_size,
+)
+from test_qpack import (
+    test_default_cap_stops_a_small_section_that_expands_hugely as test_qpack__test_default_cap_stops_a_small_section_that_expands_hugely,
+)
+from test_qpack import (
+    test_literal_lines_count_toward_the_cap as test_qpack__test_literal_lines_count_toward_the_cap,
+)
 from test_qpack_dynamic import (
     test_entry_size as test_qpack_dynamic__test_entry_size,
 )
@@ -132,6 +141,9 @@ from test_qpack_dynamic import (
 from test_qpack_dynamic import (
     test_truncated_prefix_without_sign_byte_is_refused as test_qpack_dynamic__test_truncated_prefix_without_sign_byte_is_refused,
 )
+from test_qpack_dynamic import (
+    test_repeated_reference_to_a_large_entry_is_capped as test_qpack_dynamic__test_repeated_reference_to_a_large_entry_is_capped,
+)
 
 
 def main() raises:
@@ -161,6 +173,11 @@ def main() raises:
     ]()
     suite.test[test_qpack__test_literal_name_that_is_not_utf8_is_refused]()
     suite.test[test_qpack__test_valid_utf8_literal_value_is_still_accepted]()
+    suite.test[test_qpack__test_decoded_size_is_capped_not_just_the_wire_size]()
+    suite.test[
+        test_qpack__test_default_cap_stops_a_small_section_that_expands_hugely
+    ]()
+    suite.test[test_qpack__test_literal_lines_count_toward_the_cap]()
     # tests/qpack/test_qpack_dynamic.mojo
     suite.test[test_qpack_dynamic__test_entry_size]()
     suite.test[test_qpack_dynamic__test_table_insert_and_index]()
@@ -212,5 +229,8 @@ def main() raises:
     ]()
     suite.test[
         test_qpack_dynamic__test_truncated_prefix_without_sign_byte_is_refused
+    ]()
+    suite.test[
+        test_qpack_dynamic__test_repeated_reference_to_a_large_entry_is_capped
     ]()
     suite^.run()

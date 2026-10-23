@@ -16,7 +16,7 @@ defensive pattern is documented at length in
 """
 
 from std.collections import List
-from std.ffi import OwnedDLHandle, c_int, CStringSpan
+from std.ffi import OwnedDLHandle, c_char, c_int, CStringSpan
 
 from ..utils.dylib import find_flare_lib, dl_sym
 
@@ -762,7 +762,7 @@ def _do_last_error(imm lib: OwnedDLHandle) raises -> String:
     return String(
         StringSlice(
             unsafe_from_utf8=CStringSpan(
-                unsafe_from_ptr=p.unsafe_bitcast[Int8]()
+                unsafe_from_ptr=p.unsafe_bitcast[c_char]()
             )
         )
     )

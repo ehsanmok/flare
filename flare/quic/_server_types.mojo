@@ -19,7 +19,7 @@ keep resolving unchanged.
 - :func:`cid_to_hex` -- lowercase-hex CID key for the table.
 """
 
-from std.hashlib import Hasher
+from std.hash import Hasher
 from std.collections import Dict, List, Optional
 from std.collections.span import Span
 

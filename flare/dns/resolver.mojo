@@ -269,7 +269,7 @@ def _ipv4_from_sockaddr(sa_ptr: Int) -> String:
     return String(
         StringSlice(
             unsafe_from_utf8=CStringSpan(
-                unsafe_from_ptr=ntop.unsafe_bitcast[Int8]()
+                unsafe_from_ptr=ntop.unsafe_bitcast[c_char]()
             )
         )
     )
@@ -305,7 +305,7 @@ def _ipv6_from_sockaddr(sa_ptr: Int) -> String:
     return String(
         StringSlice(
             unsafe_from_utf8=CStringSpan(
-                unsafe_from_ptr=ntop.unsafe_bitcast[Int8]()
+                unsafe_from_ptr=ntop.unsafe_bitcast[c_char]()
             )
         )
     )

@@ -356,7 +356,7 @@ def _read_ip_from_sockaddr(buf: Pointer[UInt8, _]) raises -> String:
     return String(
         StringSlice(
             unsafe_from_utf8=CStringSpan(
-                unsafe_from_ptr=ntop_buf.unsafe_bitcast[Int8]()
+                unsafe_from_ptr=ntop_buf.unsafe_bitcast[c_char]()
             )
         )
     )
@@ -394,7 +394,7 @@ def _read_ipv6_from_sockaddr(buf: Pointer[UInt8, _]) raises -> String:
     return String(
         StringSlice(
             unsafe_from_utf8=CStringSpan(
-                unsafe_from_ptr=ntop_buf.unsafe_bitcast[Int8]()
+                unsafe_from_ptr=ntop_buf.unsafe_bitcast[c_char]()
             )
         )
     )
@@ -441,7 +441,7 @@ def _strerror(code: c_int) -> String:
     return String(
         StringSlice(
             unsafe_from_utf8=CStringSpan(
-                unsafe_from_ptr=ptr.unsafe_bitcast[Int8]()
+                unsafe_from_ptr=ptr.unsafe_bitcast[c_char]()
             )
         )
     )
@@ -885,7 +885,7 @@ def _gai_strerror(code: c_int) -> String:
     return String(
         StringSlice(
             unsafe_from_utf8=CStringSpan(
-                unsafe_from_ptr=ptr.unsafe_bitcast[Int8]()
+                unsafe_from_ptr=ptr.unsafe_bitcast[c_char]()
             )
         )
     )

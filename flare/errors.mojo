@@ -82,7 +82,7 @@ Both types are ``Copyable`` (which implies ``Movable``) and
 
 from std.collections import Optional
 from std.format import Writable, Writer
-from std.io.file_descriptor import FileDescriptor
+from std.io.file_descriptor import RawFileDescriptor
 
 
 comptime HTTP_STATUS_ERROR_PREFIX: String = "HttpStatusError("
@@ -344,7 +344,9 @@ def log_error_response(kind: String, request_id: String, message: String):
     gets a fixed status reason, the operator gets the message and the
     request id that ties it to a request.
     """
-    print(format_error_log(kind, request_id, message), file=FileDescriptor(2))
+    print(
+        format_error_log(kind, request_id, message), file=RawFileDescriptor(2)
+    )
 
 
 def log_handler_error(request_id: String, error_str: String):
