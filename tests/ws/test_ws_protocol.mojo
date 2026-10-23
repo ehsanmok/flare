@@ -15,7 +15,7 @@ from flare.ws.protocol import (
 def _masked(
     op: UInt8, var payload: List[UInt8], fin: Bool = True
 ) raises -> List[UInt8]:
-    var f = WsFrame(opcode=op, payload=payload^)
+    var f = WsFrame(opcode=op, payload=payload)
     f.fin = fin
     return f.encode(mask=True)
 

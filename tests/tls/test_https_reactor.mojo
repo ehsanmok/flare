@@ -491,7 +491,7 @@ def test_https_alpn_negotiates_h2() raises:
         cfg.alpn = List[String]()
         cfg.alpn.append("h2")
         cfg.alpn.append("http/1.1")
-        var s = TlsStream.connect("localhost", port, cfg^)
+        var s = TlsStream.connect("localhost", port, cfg)
         negotiated = s.alpn_selected()
         s.close()
     except:
@@ -535,7 +535,7 @@ def test_alpn_is_offered_by_connect_timeout() raises:
         cfg.alpn = List[String]()
         cfg.alpn.append("h2")
         cfg.alpn.append("http/1.1")
-        var s = TlsStream.connect_timeout("localhost", port, cfg^, 5000)
+        var s = TlsStream.connect_timeout("localhost", port, cfg, 5000)
         negotiated = s.alpn_selected()
         s.close()
     except:
@@ -576,7 +576,7 @@ def test_alpn_is_offered_by_connect_over_tcp() raises:
         cfg.alpn.append("h2")
         cfg.alpn.append("http/1.1")
         var tcp = TcpStream.connect(SocketAddr(IpAddr.parse("127.0.0.1"), port))
-        var s = TlsStream.connect_over_tcp(tcp^, "localhost", cfg^)
+        var s = TlsStream.connect_over_tcp(tcp^, "localhost", cfg)
         negotiated = s.alpn_selected()
         s.close()
     except:

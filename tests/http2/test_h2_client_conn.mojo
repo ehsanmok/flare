@@ -413,7 +413,7 @@ def test_response_with_chunked_body() raises:
     hf.header.flags = FrameFlags(FrameFlags.END_HEADERS())
     hf.payload = enc.encode(Span[HpackHeader, _](status_hdrs))
     hf.header.length = len(hf.payload)
-    var hb = encode_frame(hf^)
+    var hb = encode_frame(hf)
     # Two DATA frames: "abc" then "def" with END_STREAM on the
     # second.
     var d1 = Frame()
@@ -422,14 +422,14 @@ def test_response_with_chunked_body() raises:
     d1.header.flags = FrameFlags(UInt8(0))
     d1.payload = List[UInt8](String("abc").as_bytes())
     d1.header.length = len(d1.payload)
-    var d1b = encode_frame(d1^)
+    var d1b = encode_frame(d1)
     var d2 = Frame()
     d2.header.type = FrameType.DATA()
     d2.header.stream_id = sid
     d2.header.flags = FrameFlags(FrameFlags.END_STREAM())
     d2.payload = List[UInt8](String("def").as_bytes())
     d2.header.length = len(d2.payload)
-    var d2b = encode_frame(d2^)
+    var d2b = encode_frame(d2)
     # Splice the three frames into one byte buffer and feed.
     var combined = List[UInt8]()
     for i in range(len(hb)):
@@ -481,7 +481,7 @@ def test_rst_stream_surfaced() raises:
     p.append(UInt8(0x7))
     rf.payload = p^
     rf.header.length = len(rf.payload)
-    var rb = encode_frame(rf^)
+    var rb = encode_frame(rf)
     client.feed(Span[UInt8, _](rb))
 
     assert_true(client.response_ready(sid))

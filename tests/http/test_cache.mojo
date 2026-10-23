@@ -121,7 +121,7 @@ def test_in_memory_store_round_trip() raises:
         body=body^,
         inserted_at_ms=Int64(1000),
     )
-    store.put(key, entry^)
+    store.put(key, entry)
     var got = store.get(key)
     assert_true(got.__bool__())
     var fetched = got.unsafe_take()
@@ -155,10 +155,10 @@ def test_in_memory_store_capacity_eviction() raises:
         body=List[UInt8](),
         inserted_at_ms=Int64(0),
     )
-    store.put(k1, e1^)
-    store.put(k2, e2^)
+    store.put(k1, e1)
+    store.put(k2, e2)
     assert_equal(store.len(), 2)
-    store.put(k3, e3^)  # should evict k1
+    store.put(k3, e3)  # should evict k1
     assert_equal(store.len(), 2)
     assert_false(store.get(k1).__bool__())
     assert_true(store.get(k2).__bool__())

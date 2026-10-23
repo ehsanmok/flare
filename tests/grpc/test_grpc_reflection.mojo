@@ -166,7 +166,7 @@ def test_bidi_handler_answers_each_message() raises:
         initial_metadata=GrpcMetadata(),
         accept_encoding=String(""),
     )
-    var reply = handler.serve_bidi(ctx, msgs^)
+    var reply = handler.serve_bidi(ctx, msgs)
     assert_equal(len(reply.messages), 2)
     assert_equal(len(_service_names(reply.messages[0])), 1)
     assert_equal(len(_service_names(reply.messages[1])), 1)

@@ -58,7 +58,7 @@ def _h3_alpn() -> List[String]:
 def _make_connector() raises -> RustlsQuicConnector:
     """Client connector trusting the fixture CA (``ca.pem``)."""
     var ca = _read_file(_FIXDIR + "ca.pem")
-    return RustlsQuicConnector(ca^, _h3_alpn())
+    return RustlsQuicConnector(ca, _h3_alpn())
 
 
 def _make_acceptor() raises -> RustlsQuicAcceptor:
