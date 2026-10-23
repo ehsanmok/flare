@@ -47,7 +47,7 @@ def _h3_alpn() -> List[String]:
 
 def _make_connector() raises -> RustlsQuicConnector:
     var ca = _read_file(_FIXDIR + "ca.pem")
-    return RustlsQuicConnector(ca^, _h3_alpn())
+    return RustlsQuicConnector(ca, _h3_alpn())
 
 
 def _bind_server() raises -> QuicListener:
@@ -62,7 +62,7 @@ def _bind_server() raises -> QuicListener:
     # Advertise 0-RTT in issued tickets so the resumed client gets
     # EarlyData keys (the readiness this test asserts).
     cfg.rustls_config.max_early_data_size = UInt32(0xFFFF)
-    return QuicListener.bind(cfg^)
+    return QuicListener.bind(cfg)
 
 
 def _drive(

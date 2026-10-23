@@ -465,7 +465,7 @@ def test_http_server_get_loopback() raises:
     assert_equal(req.method, "GET")
     assert_equal(req.url, "/")
 
-    var resp = handler(req^)
+    var resp = handler(req)
     _write_response(server_stream, resp)
     server_stream.close()
 

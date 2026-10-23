@@ -16,7 +16,7 @@ def _listener() raises -> QuicListener:
     var cfg = QuicServerConfig()
     cfg.host = String("127.0.0.1")
     cfg.port = UInt16(0)
-    return QuicListener.bind(cfg^)
+    return QuicListener.bind(cfg)
 
 
 def _probe(version: UInt32, size: Int) -> List[UInt8]:

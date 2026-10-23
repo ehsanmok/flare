@@ -90,7 +90,7 @@ def test_a_returning_client_skips_the_retry() raises:
     cfg.rustls_config.cert_chain_pem = Path(_FIXDIR + "cert.pem").read_text()
     cfg.rustls_config.private_key_pem = Path(_FIXDIR + "key.pem").read_text()
     cfg.rustls_config.alpn_protocols = alpn^
-    var listener = QuicListener.bind(cfg^)
+    var listener = QuicListener.bind(cfg)
     var first = _connect(listener, List[UInt8]())
     assert_true(first.retried, "a first visit is validated by Retry")
     var token = first.address_token()

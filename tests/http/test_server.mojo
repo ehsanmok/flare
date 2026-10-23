@@ -441,7 +441,7 @@ def test_request_text_with_body() raises:
     var body = List[UInt8]()
     for b in body_str.as_bytes():
         body.append(b)
-    var req = Request(method="POST", url="/", body=body^)
+    var req = Request(method="POST", url="/", body=body)
     assert_equal(req.text(), "hello body")
 
 
@@ -450,7 +450,7 @@ def test_request_json() raises:
     var body = List[UInt8]()
     for b in body_str.as_bytes():
         body.append(b)
-    var req = Request(method="POST", url="/", body=body^)
+    var req = Request(method="POST", url="/", body=body)
     var val = req.json()
     assert_equal(val["key"].string_value(), "value")
 

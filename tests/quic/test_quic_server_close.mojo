@@ -54,7 +54,7 @@ def _bind(with_tls: Bool = True) raises -> QuicListener:
             _FIXDIR + "key.pem"
         ).read_text()
         cfg.rustls_config.alpn_protocols = _alpn()
-    return QuicListener.bind(cfg^)
+    return QuicListener.bind(cfg)
 
 
 def _established(

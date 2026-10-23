@@ -464,7 +464,7 @@ def test_cross_origin_redirect_drops_caller_cookie_and_proxy_auth() raises:
         req.headers.set(
             "X-Next", "http://127.0.0.1:" + String(b_port) + "/landing"
         )
-        got = HttpClient().send(req^).text()
+        got = HttpClient().send(req).text()
     except e:
         got = String(e)
     kill_forked_server(pa)

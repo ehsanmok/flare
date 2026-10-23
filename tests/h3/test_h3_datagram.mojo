@@ -82,7 +82,7 @@ def test_datagrams_ride_a_tunnel_and_bad_ones_close() raises:
     cfg.rustls_config.cert_chain_pem = Path(_FIXDIR + "cert.pem").read_text()
     cfg.rustls_config.private_key_pem = Path(_FIXDIR + "key.pem").read_text()
     cfg.rustls_config.alpn_protocols = _alpn()
-    var listener = QuicListener.bind(cfg^)
+    var listener = QuicListener.bind(cfg)
     var quic = QuicClientConnection.start(
         listener.local_addr(),
         RustlsQuicConnector(Path(_FIXDIR + "ca.pem").read_text(), _alpn()),

@@ -109,7 +109,7 @@ def _build_synth_initial_with_crypto(
     packet_number: UInt64,
     var crypto_payload: List[UInt8],
 ) raises -> List[UInt8]:
-    var crypto_bytes = _crypto_frame_bytes(crypto_payload^)
+    var crypto_bytes = _crypto_frame_bytes(crypto_payload)
     var plaintext = _padded_plaintext(crypto_bytes, 80)
     var first_bits = 0
     var hdr = encode_long_header(

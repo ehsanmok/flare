@@ -193,7 +193,7 @@ def _bind_listener() raises -> QuicListener:
     cfg.host = String("127.0.0.1")
     cfg.port = UInt16(0)
     cfg.rustls_config = RustlsQuicConfig()
-    return QuicListener.bind(cfg^)
+    return QuicListener.bind(cfg)
 
 
 def _seed_slot(mut listener: QuicListener) raises -> Int:
@@ -267,7 +267,7 @@ def test_get_request_dispatches_through_handler() raises:
     var req = listener.take_http3_request(slot, Int(stream_id))
     assert_equal(req.method, String("GET"))
     assert_equal(req.url, String("/hello"))
-    var resp = handler.serve(req^)
+    var resp = handler.serve(req)
     assert_equal(resp.status, 200)
     listener.emit_http3_response(slot, Int(stream_id), resp^)
 
@@ -300,7 +300,7 @@ def test_post_request_body_echo() raises:
     var req = listener.take_http3_request(slot, Int(stream_id))
     assert_equal(req.method, String("POST"))
     assert_equal(len(req.body), 5)
-    var resp = handler.serve(req^)
+    var resp = handler.serve(req)
     assert_equal(resp.status, 200)
     assert_equal(len(resp.body), 5)
     listener.emit_http3_response(slot, Int(stream_id), resp^)
@@ -334,7 +334,7 @@ def test_concurrent_streams_on_one_connection() raises:
     for i in range(len(ready)):
         var sid = ready[i]
         var req = listener.take_http3_request(slot, sid)
-        var resp = handler.serve(req^)
+        var resp = handler.serve(req)
         listener.emit_http3_response(slot, sid, resp^)
 
     var egress_a = listener.take_http3_response_egress(slot, 0)
@@ -365,13 +365,13 @@ def test_multiple_connections_dispatch_independently() raises:
     var ready_a = listener.take_http3_completed_streams(slot_a)
     assert_equal(len(ready_a), 1)
     var req_a_recv = listener.take_http3_request(slot_a, ready_a[0])
-    var resp_a = handler.serve(req_a_recv^)
+    var resp_a = handler.serve(req_a_recv)
     listener.emit_http3_response(slot_a, ready_a[0], resp_a^)
 
     var ready_b = listener.take_http3_completed_streams(slot_b)
     assert_equal(len(ready_b), 1)
     var req_b_recv = listener.take_http3_request(slot_b, ready_b[0])
-    var resp_b = handler.serve(req_b_recv^)
+    var resp_b = handler.serve(req_b_recv)
     listener.emit_http3_response(slot_b, ready_b[0], resp_b^)
 
     var egress_a = listener.take_http3_response_egress(slot_a, 0)
@@ -512,7 +512,7 @@ def test_buffered_response_not_registered_as_stream() raises:
     _ = listener.take_http3_completed_streams(slot)
     var req = listener.take_http3_request(slot, Int(sid))
     var handler = _OkHandler(body=String("hello"))
-    var resp = handler.serve(req^)
+    var resp = handler.serve(req)
     listener.emit_http3_response(slot, Int(sid), resp^)
 
     ref st = listener.connections[slot].h3_tx[Int(sid)]
@@ -646,7 +646,7 @@ def test_http3_config_reaches_each_connection() raises:
     cfg.host = String("127.0.0.1")
     cfg.port = UInt16(0)
     cfg.http3.max_field_section_size = UInt64(1234)
-    var listener = QuicListener.bind(cfg^)
+    var listener = QuicListener.bind(cfg)
     var slot = _seed_slot(listener)
     assert_equal(
         listener.http3_connections[slot].config.max_field_section_size,
@@ -663,7 +663,7 @@ def test_a_gap_within_flow_control_keeps_the_connection() raises:
     cfg.host = String("127.0.0.1")
     cfg.port = UInt16(0)
     cfg.initial_max_data = UInt64(8 * 1024 * 1024)
-    var listener = QuicListener.bind(cfg^)
+    var listener = QuicListener.bind(cfg)
     var slot = _seed_slot(listener)
     var body = List[UInt8](length=3 * 1024 * 1024, fill=UInt8(0x42))
     var req = _build_post_request("/up", body)

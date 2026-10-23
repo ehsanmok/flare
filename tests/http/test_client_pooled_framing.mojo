@@ -175,7 +175,7 @@ def _two_requests(
         var c = HttpClient().with_pool().with_read_timeout(1500)
         _ = c.get(url)
         var req = Request(method=second_method, url=url)
-        out = c.send(req^).text()
+        out = c.send(req).text()
     except e:
         out = "raised: " + String(e)
     _ = kill(srv[0], SIGKILL)

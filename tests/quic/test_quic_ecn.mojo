@@ -78,7 +78,7 @@ def _pair(
     cfg.rustls_config.cert_chain_pem = Path(_FIXDIR + "cert.pem").read_text()
     cfg.rustls_config.private_key_pem = Path(_FIXDIR + "key.pem").read_text()
     cfg.rustls_config.alpn_protocols = alpn.copy()
-    var listener = QuicListener.bind(cfg^)
+    var listener = QuicListener.bind(cfg)
     var quic = QuicClientConnection.start(
         listener.local_addr(),
         RustlsQuicConnector(Path(_FIXDIR + "ca.pem").read_text(), alpn^),

@@ -96,7 +96,7 @@ def main() raises:
     # Path 1: handler runs to completion under Cancel.never().
     var req = Request.test_get("/work")
     print("[1] SlowHandler with Cancel.never():")
-    var resp1 = slow.serve(req^, Cancel.never())
+    var resp1 = slow.serve(req, Cancel.never())
     print(" status =", resp1.status, "body =", resp1.text())
     print()
 
@@ -104,7 +104,7 @@ def main() raises:
     print("[2] WithCancel[PlainGreeter].serve(req, Cancel.never()):")
     var req2 = Request.test_get("/")
     var wrapped = WithCancel[PlainGreeter](inner=PlainGreeter("hi"))
-    var resp2 = wrapped.serve(req2^, Cancel.never())
+    var resp2 = wrapped.serve(req2, Cancel.never())
     print(" status =", resp2.status, "body =", resp2.text())
     print()
 

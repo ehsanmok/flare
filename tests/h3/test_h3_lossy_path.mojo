@@ -118,7 +118,7 @@ def test_handshake_download_and_upload_survive_loss() raises:
     cfg.rustls_config.cert_chain_pem = Path(_FIXDIR + "cert.pem").read_text()
     cfg.rustls_config.private_key_pem = Path(_FIXDIR + "key.pem").read_text()
     cfg.rustls_config.alpn_protocols = _alpn()
-    var server = QuicListener.bind(cfg^)
+    var server = QuicListener.bind(cfg)
     var relay = _Relay(server.local_addr())
     var connector = RustlsQuicConnector(
         Path(_FIXDIR + "ca.pem").read_text(), _alpn()

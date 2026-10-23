@@ -119,7 +119,7 @@ def test_peer_control_stream_settings_round_trip() raises:
             value=UInt64(1),
         )
     )
-    var bytes = _build_peer_control_prefix(settings^)
+    var bytes = _build_peer_control_prefix(settings)
     c.feed_uni_stream_chunk(3, bytes^)
     assert_true(c.peer_settings_received)
     assert_equal(c.peer_control_stream_id, 3)
@@ -146,7 +146,7 @@ def test_uni_stream_type_varint_split_across_chunks() raises:
             value=UInt64(8192),
         )
     )
-    c.feed_uni_stream_chunk(3, _build_peer_control_prefix(settings^))
+    c.feed_uni_stream_chunk(3, _build_peer_control_prefix(settings))
     assert_equal(c.peer_control_stream_id, 3)
     assert_true(c.peer_settings_received)
     assert_equal(c.peer_settings_max_field_section_size, UInt64(8192))
@@ -237,7 +237,7 @@ def test_settings_twice_is_frame_unexpected() raises:
     c.feed_uni_stream_chunk(3, _build_peer_control_prefix(settings))
     # Second SETTINGS on the *same* stream:
     var dup_payload = List[UInt8]()
-    encode_http3_settings(settings^, dup_payload)
+    encode_http3_settings(settings, dup_payload)
     var dup_frame = List[UInt8]()
     encode_http3_frame(
         H3_FRAME_TYPE_SETTINGS, Span[UInt8, _](dup_payload), dup_frame
@@ -277,7 +277,7 @@ def test_goaway_records_peer_max_stream_id() raises:
             value=UInt64(1024),
         )
     )
-    c.feed_uni_stream_chunk(3, _build_peer_control_prefix(settings^))
+    c.feed_uni_stream_chunk(3, _build_peer_control_prefix(settings))
     var goaway = _build_goaway_frame(UInt64(16))
     c.feed_uni_stream_chunk(3, goaway^)
     assert_equal(c.peer_goaway_max_stream_id, UInt64(16))
@@ -305,7 +305,7 @@ def test_second_peer_control_stream_raises() raises:
             value=UInt64(1024),
         )
     )
-    c.feed_uni_stream_chunk(3, _build_peer_control_prefix(settings^))
+    c.feed_uni_stream_chunk(3, _build_peer_control_prefix(settings))
     var second = List[UInt8]()
     second.append(UInt8(0x00))
     var raised = False
@@ -401,7 +401,7 @@ def _settings_prefix() raises -> List[UInt8]:
             value=UInt64(1024),
         )
     )
-    return _build_peer_control_prefix(settings^)
+    return _build_peer_control_prefix(settings)
 
 
 def test_control_frame_header_split_across_chunks() raises:

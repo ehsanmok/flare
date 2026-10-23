@@ -53,7 +53,7 @@ def _bind(idle_ms: UInt64, with_tls: Bool = False) raises -> QuicListener:
             _FIXDIR + "key.pem"
         ).read_text()
         cfg.rustls_config.alpn_protocols = _alpn()
-    return QuicListener.bind(cfg^)
+    return QuicListener.bind(cfg)
 
 
 def _cid(seed: UInt8) -> ConnectionId:

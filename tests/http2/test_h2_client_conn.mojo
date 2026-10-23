@@ -508,7 +508,7 @@ def test_goaway_received_flag() raises:
         p.append(UInt8(0))
     ga.payload = p^
     ga.header.length = len(ga.payload)
-    var gb = encode_frame(ga^)
+    var gb = encode_frame(ga)
     client.feed(Span[UInt8, _](gb))
 
     assert_true(client.goaway_received())
@@ -549,7 +549,7 @@ def test_push_promise_is_a_connection_error() raises:
         payload.append(enc_bytes[i])
     pp.payload = payload^
     pp.header.length = len(pp.payload)
-    var ppb = encode_frame(pp^)
+    var ppb = encode_frame(pp)
     client.feed(Span[UInt8, _](ppb))
 
     # The client queues GOAWAY(PROTOCOL_ERROR) and no RST_STREAM.

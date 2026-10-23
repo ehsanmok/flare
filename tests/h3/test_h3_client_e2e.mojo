@@ -59,7 +59,7 @@ def _h3_alpn() -> List[String]:
 
 def _make_connector() raises -> RustlsQuicConnector:
     var ca = _read_file(_FIXDIR + "ca.pem")
-    return RustlsQuicConnector(ca^, _h3_alpn())
+    return RustlsQuicConnector(ca, _h3_alpn())
 
 
 def _bind_server() raises -> QuicListener:
@@ -71,7 +71,7 @@ def _bind_server() raises -> QuicListener:
     cfg.rustls_config.cert_chain_pem = cert^
     cfg.rustls_config.private_key_pem = key^
     cfg.rustls_config.alpn_protocols = _h3_alpn()
-    return QuicListener.bind(cfg^)
+    return QuicListener.bind(cfg)
 
 
 @fieldwise_init
@@ -96,7 +96,7 @@ def _server_dispatch(mut server: QuicListener) raises:
         for i in range(len(ready)):
             var sid = ready[i]
             var req = server.take_http3_request(slot, sid)
-            var resp = handler.serve(req^)
+            var resp = handler.serve(req)
             server.emit_http3_response(slot, sid, resp^)
 
 

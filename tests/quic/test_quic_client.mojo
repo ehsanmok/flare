@@ -50,7 +50,7 @@ def _h3_alpn() -> List[String]:
 
 def _make_connector() raises -> RustlsQuicConnector:
     var ca = _read_file(_FIXDIR + "ca.pem")
-    return RustlsQuicConnector(ca^, _h3_alpn())
+    return RustlsQuicConnector(ca, _h3_alpn())
 
 
 def _bind_server() raises -> QuicListener:
@@ -62,7 +62,7 @@ def _bind_server() raises -> QuicListener:
     cfg.rustls_config.cert_chain_pem = cert^
     cfg.rustls_config.private_key_pem = key^
     cfg.rustls_config.alpn_protocols = _h3_alpn()
-    return QuicListener.bind(cfg^)
+    return QuicListener.bind(cfg)
 
 
 def test_client_handshake_completes() raises:
@@ -138,7 +138,7 @@ def _bind_validating_server() raises -> QuicListener:
     cfg.rustls_config.private_key_pem = key^
     cfg.rustls_config.alpn_protocols = _h3_alpn()
     cfg.require_address_validation = True
-    return QuicListener.bind(cfg^)
+    return QuicListener.bind(cfg)
 
 
 def test_client_handshake_through_retry() raises:
@@ -388,7 +388,7 @@ def test_client_uses_the_servers_shorter_idle_timeout() raises:
     cfg.rustls_config.cert_chain_pem = _read_file(_FIXDIR + "cert.pem")
     cfg.rustls_config.private_key_pem = _read_file(_FIXDIR + "key.pem")
     cfg.rustls_config.alpn_protocols = _h3_alpn()
-    var server = QuicListener.bind(cfg^)
+    var server = QuicListener.bind(cfg)
     var connector = _make_connector()
     var client = _client_with_idle(server, connector, UInt64(30_000))
     assert_true(

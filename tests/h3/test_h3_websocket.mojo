@@ -283,7 +283,7 @@ def test_another_protocol_gets_501() raises:
 def test_stale_tunnel_handle_is_refused() raises:
     var cfg = _server_cfg()
     cfg.http3.enable_connect_protocol = True
-    var listener = QuicListener.bind(cfg^)
+    var listener = QuicListener.bind(cfg)
     var addr = listener.local_addr()
     var connector = RustlsQuicConnector(
         Path(_FIXDIR + "ca.pem").read_text(), _alpn()

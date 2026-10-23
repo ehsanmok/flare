@@ -72,7 +72,7 @@ def test_from_h2c_upgrade_creates_stream_1_with_request_headers() raises:
 
     var settings_payload = _build_settings_payload(131072)
     var conn = Http2Connection.from_h2c_upgrade(
-        Http2Config(), req, settings_payload^
+        Http2Config(), req, settings_payload
     )
 
     var ready = conn.take_completed_streams()
@@ -95,7 +95,7 @@ def test_from_h2c_upgrade_applies_settings_payload() raises:
 
     var settings_payload = _build_settings_payload(131072)
     var conn = Http2Connection.from_h2c_upgrade(
-        Http2Config(), req, settings_payload^
+        Http2Config(), req, settings_payload
     )
 
     # The client's INITIAL_WINDOW_SIZE is *its* receive window: what we
@@ -115,7 +115,7 @@ def test_from_h2c_upgrade_seeds_outbox_with_server_settings() raises:
     var settings_payload = _build_settings_payload(65535)
 
     var conn = Http2Connection.from_h2c_upgrade(
-        Http2Config(), req, settings_payload^
+        Http2Config(), req, settings_payload
     )
 
     var preface = conn.drain()
@@ -138,7 +138,7 @@ def test_from_h2c_upgrade_rejects_misaligned_settings_payload() raises:
 
     var raised = False
     try:
-        var _conn = Http2Connection.from_h2c_upgrade(Http2Config(), req, bad^)
+        var _conn = Http2Connection.from_h2c_upgrade(Http2Config(), req, bad)
     except:
         raised = True
     assert_true(
@@ -155,7 +155,7 @@ def test_from_h2c_upgrade_stream_1_state_is_half_closed_remote() raises:
     var settings_payload = _build_settings_payload(65535)
 
     var conn = Http2Connection.from_h2c_upgrade(
-        Http2Config(), req, settings_payload^
+        Http2Config(), req, settings_payload
     )
     var s = conn.conn.streams[1].copy()
     assert_equal(s.state.value, StreamState.HALF_CLOSED_REMOTE().value)
@@ -176,7 +176,7 @@ def test_from_h2c_upgrade_carries_request_body() raises:
 
     var settings_payload = _build_settings_payload(65535)
     var conn = Http2Connection.from_h2c_upgrade(
-        Http2Config(), req, settings_payload^
+        Http2Config(), req, settings_payload
     )
 
     var ready = conn.take_completed_streams()

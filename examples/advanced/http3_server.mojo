@@ -78,7 +78,7 @@ struct SharedHandler(Copyable, Handler):
             r.body_stream = req.body_stream()
             return r^
         var body = String("you reached ") + req.method + String(" ") + req.url
-        return ok(body^)
+        return ok(body)
 
 
 # ── Walkthrough ───────────────────────────────────────────────────────
@@ -148,7 +148,7 @@ def main() raises:
     var req = Request(
         method=String("GET"), url=String("/hello"), body=List[UInt8]()
     )
-    var resp = handler.serve(req^)
+    var resp = handler.serve(req)
     print("    response status:", resp.status)
     print(
         "    response body:",

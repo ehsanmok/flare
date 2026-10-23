@@ -63,7 +63,7 @@ def _serve_forever(mut server: QuicListener):
                 for i in range(len(ready)):
                     var req = server.take_http3_request(slot, ready[i])
                     server.emit_http3_response(
-                        slot, ready[i], handler.serve(req^)
+                        slot, ready[i], handler.serve(req)
                     )
             _ = server.drain_all_egress()
             _ = server.advance_timers(_monotonic_ms())
@@ -79,7 +79,7 @@ def _start(mut pid: Int) raises -> Http3ClientConnection:
     cfg.rustls_config.cert_chain_pem = Path(_FIXDIR + "cert.pem").read_text()
     cfg.rustls_config.private_key_pem = Path(_FIXDIR + "key.pem").read_text()
     cfg.rustls_config.alpn_protocols = _alpn()
-    var server = QuicListener.bind(cfg^)
+    var server = QuicListener.bind(cfg)
     var addr = server.local_addr()
     pid = fork()
     if pid == 0:
@@ -158,7 +158,7 @@ def test_server_stops_at_the_client_window() raises:
     cfg.rustls_config.cert_chain_pem = Path(_FIXDIR + "cert.pem").read_text()
     cfg.rustls_config.private_key_pem = Path(_FIXDIR + "key.pem").read_text()
     cfg.rustls_config.alpn_protocols = _alpn()
-    var server = QuicListener.bind(cfg^)
+    var server = QuicListener.bind(cfg)
     var connector = RustlsQuicConnector(
         Path(_FIXDIR + "ca.pem").read_text(), _alpn()
     )
@@ -184,7 +184,7 @@ def test_server_stops_at_the_client_window() raises:
         var ready = server.take_http3_completed_streams(0)
         for i in range(len(ready)):
             var req = server.take_http3_request(0, ready[i])
-            server.emit_http3_response(0, ready[i], handler.serve(req^))
+            server.emit_http3_response(0, ready[i], handler.serve(req))
             emitted = True
         if emitted:
             break

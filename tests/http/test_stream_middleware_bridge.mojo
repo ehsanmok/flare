@@ -54,7 +54,7 @@ def test_send_response_frames_handler_output() raises:
     var req = Request(method=Method.GET, url="/status")
     req.headers.set("X-Request-Id", "rid-77")
     var resp = stack.serve(req)
-    conn.send_response(resp^)
+    conn.send_response(resp)
     conn.flush_blocking()
 
     var wire = _read_some(client, 512)
@@ -80,7 +80,7 @@ def test_send_response_then_stream_tail() raises:
     var resp = Response(status=200, reason="OK")
     resp.headers.set("Content-Type", "text/event-stream")
     resp.headers.set("Transfer-Encoding", "chunked")
-    conn.send_response(resp^, keep_alive=True)
+    conn.send_response(resp, keep_alive=True)
     conn.send("data: hi\n\n")
     conn.flush_blocking()
 

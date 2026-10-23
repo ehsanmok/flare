@@ -52,7 +52,7 @@ def _server() raises -> QuicListener:
     cfg.rustls_config.cert_chain_pem = Path(_FIXDIR + "cert.pem").read_text()
     cfg.rustls_config.private_key_pem = Path(_FIXDIR + "key.pem").read_text()
     cfg.rustls_config.alpn_protocols = _alpn()
-    return QuicListener.bind(cfg^)
+    return QuicListener.bind(cfg)
 
 
 def _retire(mut client: QuicClientConnection, seq: UInt64) raises:

@@ -158,7 +158,7 @@ def _start_server(static: Bool) raises -> Tuple[Int, UInt16]:
                     content_type="text/plain; charset=utf-8",
                     body="OK",
                 )
-                srv.serve_static(resp^)
+                srv.serve_static(resp)
             else:
                 srv.serve(_OkHandler(0))
         except:

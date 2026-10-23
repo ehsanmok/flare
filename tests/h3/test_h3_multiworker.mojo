@@ -61,7 +61,7 @@ def test_issued_cids_name_their_worker() raises:
     cfg.num_workers = 4
     cfg.worker_id = 2
     cfg.cid_route_key = key.copy()
-    var listener = QuicListener.bind(cfg^)
+    var listener = QuicListener.bind(cfg)
     for _ in range(16):
         var cid = listener._new_local_cid()
         assert_equal(cid_owner(key, cid.bytes, 4), 2)

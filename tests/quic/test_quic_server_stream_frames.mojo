@@ -129,7 +129,7 @@ def _bind_no_tls() raises -> QuicListener:
     cfg.host = String("127.0.0.1")
     cfg.port = UInt16(0)
     cfg.rustls_config = RustlsQuicConfig()
-    return QuicListener.bind(cfg^)
+    return QuicListener.bind(cfg)
 
 
 def _seed(mut listener: QuicListener) raises -> Int:
@@ -194,7 +194,7 @@ def test_state_error_reaches_the_client_as_connection_close() raises:
     cfg.rustls_config.cert_chain_pem = Path(_FIXDIR + "cert.pem").read_text()
     cfg.rustls_config.private_key_pem = Path(_FIXDIR + "key.pem").read_text()
     cfg.rustls_config.alpn_protocols = _alpn()
-    var server = QuicListener.bind(cfg^)
+    var server = QuicListener.bind(cfg)
     var connector = RustlsQuicConnector(
         Path(_FIXDIR + "ca.pem").read_text(), _alpn()
     )
@@ -243,7 +243,7 @@ def test_max_stream_data_for_the_control_stream_keeps_the_connection() raises:
     cfg.rustls_config.cert_chain_pem = Path(_FIXDIR + "cert.pem").read_text()
     cfg.rustls_config.private_key_pem = Path(_FIXDIR + "key.pem").read_text()
     cfg.rustls_config.alpn_protocols = _alpn()
-    var server = QuicListener.bind(cfg^)
+    var server = QuicListener.bind(cfg)
     var connector = RustlsQuicConnector(
         Path(_FIXDIR + "ca.pem").read_text(), _alpn()
     )

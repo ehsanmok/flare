@@ -119,7 +119,7 @@ def test_peer_via_extracted_handler() raises:
     var p = SocketAddr(IpAddr("203.0.113.99", False), UInt16(13579))
     var req = Request(method=Method.GET, url="/", peer=p)
     var h = Extracted[PeerEcho]()
-    var resp = h.serve(req^)
+    var resp = h.serve(req)
     assert_equal(resp.status, 200)
     assert_equal(resp.text(), "13579")
 

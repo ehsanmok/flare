@@ -247,7 +247,7 @@ def test_serve_static_with_workers_spawns_them() raises:
                 content_type="text/plain; charset=utf-8",
                 body="Hello, static workers!",
             )
-            srv.serve_static(resp^, num_workers=4, pin_cores=False)
+            srv.serve_static(resp, num_workers=4, pin_cores=False)
         except:
             pass
         exit()

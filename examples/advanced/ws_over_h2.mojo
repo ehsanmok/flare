@@ -50,7 +50,7 @@ def _peer_settings_advertise_8441(mut conn: Http2ClientConnection) raises:
     p.append(UInt8(1))
     sf.payload = p^
     sf.header.length = len(sf.payload)
-    var sb = encode_frame(sf^)
+    var sb = encode_frame(sf)
     conn.feed(Span[UInt8, _](sb))
 
 

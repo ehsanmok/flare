@@ -37,7 +37,7 @@ def echo_json(req: Request) raises -> Response:
     handler code.
     """
     var parsed = loads(req.text())
-    return ok_json_value(parsed^)
+    return ok_json_value(parsed)
 
 
 def home(req: Request) raises -> Response:
@@ -60,7 +60,7 @@ def main() raises:
         "/echo", '{"id":42,"name":"alice"}', content_type="application/json"
     )
 
-    var resp = echo_json(fake^)
+    var resp = echo_json(fake)
     print("status:", resp.status)
     print("Content-Type:", resp.headers.get("Content-Type"))
     print("body:", resp.text())

@@ -234,10 +234,10 @@ def test_authorised_response_not_served_to_another_client() raises:
     )
     var alice = _req(String("GET"), String("/me"))
     alice.headers.set(String("Authorization"), String("Bearer alice"))
-    _ = cache.serve(alice^)
+    _ = cache.serve(alice)
     var bob = _req(String("GET"), String("/me"))
     bob.headers.set(String("Authorization"), String("Bearer bob"))
-    _ = cache.serve(bob^)
+    _ = cache.serve(bob)
     assert_equal(cache.inner._count(), 2)
 
 
@@ -249,10 +249,10 @@ def test_authorised_response_marked_public_is_cached() raises:
     )
     var a = _req(String("GET"), String("/pub"))
     a.headers.set(String("Authorization"), String("Bearer a"))
-    _ = cache.serve(a^)
+    _ = cache.serve(a)
     var b = _req(String("GET"), String("/pub"))
     b.headers.set(String("Authorization"), String("Bearer b"))
-    _ = cache.serve(b^)
+    _ = cache.serve(b)
     assert_equal(cache.inner._count(), 1)
 
 
@@ -263,10 +263,10 @@ def test_cookie_request_not_cached_unless_vary_cookie() raises:
     )
     var a = _req(String("GET"), String("/c"))
     a.headers.set(String("Cookie"), String("sid=a"))
-    _ = cache.serve(a^)
+    _ = cache.serve(a)
     var b = _req(String("GET"), String("/c"))
     b.headers.set(String("Cookie"), String("sid=b"))
-    _ = cache.serve(b^)
+    _ = cache.serve(b)
     assert_equal(cache.inner._count(), 2)
 
     var inner2 = _CountingHandler()
@@ -276,10 +276,10 @@ def test_cookie_request_not_cached_unless_vary_cookie() raises:
     )
     var c = _req(String("GET"), String("/c"))
     c.headers.set(String("Cookie"), String("sid=a"))
-    _ = cache2.serve(c^)
+    _ = cache2.serve(c)
     var d = _req(String("GET"), String("/c"))
     d.headers.set(String("Cookie"), String("sid=a"))
-    _ = cache2.serve(d^)
+    _ = cache2.serve(d)
     assert_equal(cache2.inner._count(), 1)
 
 

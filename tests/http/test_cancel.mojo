@@ -88,7 +88,7 @@ def test_slow_handler_runs_to_completion_with_never_cancel() raises:
     """
     var h = _SlowHandler(max_steps=5)
     var req = Request(method=Method.GET, url="/")
-    var resp = h.serve(req^, Cancel.never())
+    var resp = h.serve(req, Cancel.never())
     assert_equal(resp.status, Status.OK)
     assert_equal(resp.text(), "done")
 
@@ -105,7 +105,7 @@ def test_slow_handler_short_circuits_on_pre_flip() raises:
     # heap address as a plain ``Int``; ``cell`` must outlive the
     # ``serve`` call so the handler still observes a live cell.
     var c = cell.handle()
-    var resp = h.serve(req^, c)
+    var resp = h.serve(req, c)
     _ = cell^
     assert_equal(resp.text(), "partial:0")
 
@@ -163,14 +163,14 @@ def test_with_cancel_ignores_cancel_token() raises:
     # the inner handler — the inner Handler does not know about
     # cancellation, so it runs to completion and returns "hello".
     cell.flip(CancelReason.PEER_CLOSED)
-    var resp = wrapped.serve(req^, cell.handle())
+    var resp = wrapped.serve(req, cell.handle())
     assert_equal(resp.text(), "hello")
 
 
 def test_with_cancel_with_never_token() raises:
     var wrapped = WithCancel[_PlainGreeter](inner=_PlainGreeter("x"))
     var req = Request(method=Method.GET, url="/")
-    var resp = wrapped.serve(req^, Cancel.never())
+    var resp = wrapped.serve(req, Cancel.never())
     assert_equal(resp.text(), "x")
 
 
@@ -187,7 +187,7 @@ def test_root_package_re_exports() raises:
 
     var w = RootWithCancel[_PlainGreeter](inner=_PlainGreeter("hi"))
     var req = Request(method=Method.GET, url="/")
-    var resp = w.serve(req^, RootCancel.never())
+    var resp = w.serve(req, RootCancel.never())
     assert_equal(resp.text(), "hi")
 
 

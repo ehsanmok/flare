@@ -87,8 +87,8 @@ def _close_code(f: WsFrame) -> Int:
 
 def test_echo_text_and_binary() raises:
     var s = _serve()
-    var text = String("")
-    var bin = List[UInt8]()
+    var text: String
+    var bin: List[UInt8]
     try:
         var ws = WsClient.connect(_url(s[1]))
         ws.send_text("hello")
@@ -104,7 +104,7 @@ def test_echo_text_and_binary() raises:
 
 def test_fragments_are_reassembled() raises:
     var s = _serve()
-    var got = String("")
+    var got: String
     try:
         var ws = WsClient.connect(_url(s[1]))
         var a = WsFrame(
@@ -126,7 +126,7 @@ def test_fragments_are_reassembled() raises:
 
 def test_invalid_utf8_is_closed_with_1007() raises:
     var s = _serve()
-    var code = 0
+    var code: Int
     try:
         var ws = WsClient.connect(_url(s[1]))
         ws.send_frame(
@@ -142,7 +142,7 @@ def test_invalid_utf8_is_closed_with_1007() raises:
 
 def test_close_is_echoed() raises:
     var s = _serve()
-    var code = 0
+    var code: Int
     try:
         var ws = WsClient.connect(_url(s[1]))
         ws.send_frame(WsFrame.close(3000))
@@ -156,8 +156,8 @@ def test_close_is_echoed() raises:
 
 def test_each_connection_has_its_own_handler() raises:
     var s = _serve()
-    var first = String("")
-    var second = String("")
+    var first: String
+    var second: String
     try:
         var a = WsClient.connect(_url(s[1]))
         a.send_text("x")
@@ -175,7 +175,7 @@ def test_each_connection_has_its_own_handler() raises:
 
 def test_http_is_still_served_on_the_port() raises:
     var s = _serve()
-    var body = String("")
+    var body: String
     try:
         with HttpClient() as c:
             body = c.get("http://127.0.0.1:" + String(Int(s[1])) + "/").text()
@@ -211,7 +211,7 @@ def _dropped_after_idle(url: String) raises -> Bool:
 
 def test_idle_connection_is_dropped() raises:
     var s = _serve(idle_ms=200)
-    var dropped = False
+    var dropped: Bool
     try:
         dropped = _dropped_after_idle(_url(s[1]))
     finally:

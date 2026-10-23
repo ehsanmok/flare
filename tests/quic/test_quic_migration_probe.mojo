@@ -100,7 +100,7 @@ def test_unauthenticated_packet_does_not_start_a_probe() raises:
     var cfg = QuicServerConfig()
     cfg.host = String("127.0.0.1")
     cfg.port = UInt16(0)
-    var listener = QuicListener.bind(cfg^)
+    var listener = QuicListener.bind(cfg)
     var lh = LongHeader(
         packet_type=PACKET_TYPE_INITIAL,
         version=QUIC_VERSION_1,

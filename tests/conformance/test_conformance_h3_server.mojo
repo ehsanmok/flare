@@ -127,7 +127,7 @@ def _build_get_minimal() raises -> List[UInt8]:
     headers.append(QpackHeader(":scheme", "https"))
     headers.append(QpackHeader(":authority", "example.com"))
     var field_section = List[UInt8]()
-    encode_field_section(headers^, field_section)
+    encode_field_section(headers, field_section)
     var frame = List[UInt8]()
     encode_http3_frame(
         H3_FRAME_TYPE_HEADERS,
@@ -148,7 +148,7 @@ def _build_post_with_body() raises -> List[UInt8]:
     headers.append(QpackHeader("content-length", "5"))
     headers.append(QpackHeader("content-type", "text/plain"))
     var hf = List[UInt8]()
-    encode_field_section(headers^, hf)
+    encode_field_section(headers, hf)
     var out = List[UInt8]()
     encode_http3_frame(H3_FRAME_TYPE_HEADERS, Span[UInt8, _](hf), out)
     var body = _bytes_from_string("hello")
@@ -166,7 +166,7 @@ def _build_multi_data_chunks() raises -> List[UInt8]:
     headers.append(QpackHeader(":authority", "example.com"))
     headers.append(QpackHeader("content-length", "9"))
     var hf = List[UInt8]()
-    encode_field_section(headers^, hf)
+    encode_field_section(headers, hf)
     var out = List[UInt8]()
     encode_http3_frame(H3_FRAME_TYPE_HEADERS, Span[UInt8, _](hf), out)
     encode_http3_frame(

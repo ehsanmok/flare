@@ -76,7 +76,7 @@ def main() raises:
     var sreq = Request(method=Method.GET, url="/status")
     sreq.headers.set("X-Request-Id", "stream-1")
     var shead = stack.serve(sreq)
-    conn.send_response(shead^, keep_alive=True)
+    conn.send_response(shead, keep_alive=True)
     conn.send("\n--- streamed tail follows ---\n")
     conn.flush_blocking()
 

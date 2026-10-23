@@ -29,7 +29,7 @@ def _h2_head(
     )
     f.payload = encoder.encode(Span(fields))
     f.header.length = len(f.payload)
-    var wire = encode_frame(f^)
+    var wire = encode_frame(f)
     conn.feed(Span(wire))
 
 
@@ -55,7 +55,7 @@ def test_h2_informationals_and_length_survives_body_drains() raises:
         f.header.stream_id = 1
         f.payload.resize(8000, 97)
         f.header.length = len(f.payload)
-        var wire = encode_frame(f^)
+        var wire = encode_frame(f)
         conn.feed(Span(wire))
         assert_equal(len(conn.drain_body(1)), 8000)
         _ = conn.drain()
@@ -120,7 +120,7 @@ def _h2_data(
     for _ in range(padding):
         f.payload.append(0)
     f.header.length = len(f.payload)
-    var wire = encode_frame(f^)
+    var wire = encode_frame(f)
     conn.feed(Span(wire))
 
 
@@ -159,7 +159,7 @@ def _bdp_data(mut conn: Http2ClientConnection, size: Int) raises:
     f.header.stream_id = 1
     f.payload = List[UInt8](length=size, fill=97)
     f.header.length = size
-    conn.receive(Span(encode_frame(f^)))
+    conn.receive(Span(encode_frame(f)))
 
 
 def _bdp_round(
@@ -174,7 +174,7 @@ def _bdp_round(
         _bdp_data(conn, sizes[i])
     var ack = pings[0].copy()
     ack.header.flags = FrameFlags(FrameFlags.ACK())
-    conn.receive(Span(encode_frame(ack^)))
+    conn.receive(Span(encode_frame(ack)))
     return conn.drain()
 
 
@@ -323,7 +323,7 @@ def test_h2_no_error_reset_only_preserves_complete_response() raises:
             rst.payload.resize(4, 0)
             rst.payload[3] = UInt8(code)
             rst.header.length = 4
-            var wire = encode_frame(rst^)
+            var wire = encode_frame(rst)
             conn.feed(Span(wire))
             assert_equal(Bool(conn.stream_error(1)), code != 0 or not complete)
             assert_false(conn.has_pending_body(1))
@@ -346,7 +346,7 @@ def test_h2_window_update_before_rejection_does_not_resume_upload() raises:
         update.header.stream_id = sid
         update.payload = [0, 0, 4, 0]
         update.header.length = 4
-        wire.extend(encode_frame(update^))
+        wire.extend(encode_frame(update))
     var encoder = HpackEncoder()
     var fields: List[HpackHeader] = [HpackHeader(":status", "413")]
     var head = Frame()
@@ -357,13 +357,13 @@ def test_h2_window_update_before_rejection_does_not_resume_upload() raises:
     )
     head.payload = encoder.encode(Span(fields))
     head.header.length = len(head.payload)
-    wire.extend(encode_frame(head^))
+    wire.extend(encode_frame(head))
     var rst = Frame()
     rst.header.type = FrameType.RST_STREAM()
     rst.header.stream_id = 1
     rst.payload.resize(4, 0)
     rst.header.length = 4
-    wire.extend(encode_frame(rst^))
+    wire.extend(encode_frame(rst))
     conn.feed(Span(wire))
     assert_false(Bool(conn.stream_error(1)))
     assert_true(conn.response_ready(1))
@@ -388,7 +388,7 @@ def _h2_head_on(
     )
     f.payload = encoder.encode(Span(fields))
     f.header.length = len(f.payload)
-    var wire = encode_frame(f^)
+    var wire = encode_frame(f)
     conn.feed(Span(wire))
 
 
@@ -467,7 +467,7 @@ def test_h2_goaway_marks_unprocessed_streams_refused() raises:
     for _ in range(4):
         f.payload.append(0)
     f.header.length = len(f.payload)
-    var wire = encode_frame(f^)
+    var wire = encode_frame(f)
     conn.feed(Span(wire))
 
     var refused = conn.stream_error(3)

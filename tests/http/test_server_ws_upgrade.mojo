@@ -93,8 +93,8 @@ def test_a_16_mib_message_is_received_in_linear_time() raises:
             pass
         exit()
     usleep(300000)
-    var got = String("")
-    var ms = 0
+    var got: String
+    var ms: Int
     try:
         var ws = WsClient.connect("ws://127.0.0.1:" + String(Int(port)) + "/ws")
         var payload = List[UInt8](length=16 * 1024 * 1024, fill=7)

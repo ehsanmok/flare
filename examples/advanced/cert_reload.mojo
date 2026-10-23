@@ -1,4 +1,4 @@
-"""Example 25 — TLS certificate reload without restart
+"""Example 25 — TLS certificate reload without restart.
 
 Production TLS deployments rotate certificates on a regular
 cadence (Let's Encrypt: 60-90 days; internal PKI: weeks). The

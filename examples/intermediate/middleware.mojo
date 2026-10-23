@@ -101,7 +101,7 @@ struct RequestID[Inner: Handler](Handler):
         )
         tagged.headers = req.headers.copy()
         tagged.headers.set("X-Request-ID", rid)
-        var resp = self.inner.serve(tagged^).lower()
+        var resp = self.inner.serve(tagged).lower()
         resp.headers.set("X-Request-ID", rid)
         return resp^
 

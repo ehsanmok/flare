@@ -179,7 +179,7 @@ def _build_synth_initial_with_crypto(
     rustls will reject them as not-a-valid-ClientHello but the
     QUIC packet itself decrypts cleanly because the AEAD key is
     derived from the DCID per RFC 9001 §5.2."""
-    var crypto_bytes = _crypto_frame_bytes(crypto_payload^)
+    var crypto_bytes = _crypto_frame_bytes(crypto_payload)
     var plaintext = _padded_plaintext(crypto_bytes, 80)
     var prefix = _build_initial_prefix(dcid, scid, 1, len(plaintext))
     var dg = protect_initial_packet(

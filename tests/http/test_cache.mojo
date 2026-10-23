@@ -174,7 +174,7 @@ def test_in_memory_store_remove() raises:
         body=List[UInt8](),
         inserted_at_ms=Int64(0),
     )
-    store.put(key, entry^)
+    store.put(key, entry)
     assert_equal(store.len(), 1)
     store.remove(key)
     assert_equal(store.len(), 0)
