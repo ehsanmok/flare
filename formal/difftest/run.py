@@ -190,7 +190,16 @@ def g_utf8(r, m):
     return bytes(out[:m])
 
 
-CHUNK_CAP = 4096
+def mojo_const(path, name):
+    """`comptime NAME: Int = N` from a Mojo source, so a generator's
+    boundary follows the limit it probes."""
+    m = re.search(rf"^comptime {name}: Int = (\d+)$", (REPO / path).read_text(), re.M)
+    if not m:
+        raise SystemExit(f"difftest: {name} not found in {path}")
+    return int(m[1])
+
+
+CHUNK_CAP = mojo_const("flare/http/proto/chunked.mojo", "CHUNK_LINE_MAX")
 
 
 def _chunk_line(r, body, cuts, at):

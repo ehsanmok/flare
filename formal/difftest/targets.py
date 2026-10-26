@@ -69,7 +69,16 @@ TARGETS = {
         models=["Flare/L1_Encoding/Huffman.lean", "Flare/L1_Encoding/HuffmanTable.lean"],
         fuzz=["fuzz_huffman_simd.mojo"],
         gen="bytes",
-        max_len=24,
+        max_len=512,
+        derive="huffman.encode",
+    ),
+    "huffman.decode_simd": dict(
+        driver="dt_huffman",
+        symbols=["flare/http/hpack_huffman_simd.mojo#huffman_decode_simd"],
+        models=["Flare/L1_Encoding/Huffman.lean", "Flare/L1_Encoding/HuffmanTable.lean"],
+        fuzz=["fuzz_huffman_simd.mojo"],
+        gen="bytes",
+        max_len=512,
         derive="huffman.encode",
     ),
     "huffman.encode": dict(
@@ -78,7 +87,7 @@ TARGETS = {
         models=["Flare/L1_Encoding/Huffman.lean", "Flare/L1_Encoding/HuffmanTable.lean"],
         fuzz=[],
         gen="text",
-        max_len=24,
+        max_len=512,
     ),
     "huffman.length": dict(
         driver="dt_huffman",
@@ -86,7 +95,7 @@ TARGETS = {
         models=["Flare/L1_Encoding/Huffman.lean", "Flare/L1_Encoding/HuffmanTable.lean"],
         fuzz=[],
         gen="text",
-        max_len=24,
+        max_len=512,
     ),
     "bufring_ledger.trace": dict(
         driver="dt_bufring_ledger",

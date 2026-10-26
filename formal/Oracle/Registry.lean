@@ -128,6 +128,8 @@ def targets : List Target := [
   { name := "utf8.lossy", impl := utf8Lossy },
   { name := "huffman.decode", impl := fun b => errOr (Huffman.decodeImpl b),
     spec := some fun b => errOr (Huffman.decodeFull b), specMax := 24 },
+  { name := "huffman.decode_simd", impl := fun b => errOr (Huffman.decodeSimdImpl b),
+    spec := some fun b => errOr (Huffman.decodeFull b), specMax := 24 },
   { name := "huffman.encode", impl := fun b => okHex (Huffman.encodeImpl b),
     spec := some fun b => okHex (Huffman.encode b), specMax := 24 },
   { name := "huffman.length", impl := fun b => s!"OK:{Huffman.encodedLengthImpl b}",
