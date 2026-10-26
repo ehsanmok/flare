@@ -53,10 +53,13 @@ kernel-checked `bit_blast` macro, not `bv_decide`. -/
 #print axioms Flare.L1.QuicVarint.encode_minimal
 #print axioms Flare.L1.QuicVarint.decode_bound
 #print axioms Flare.L1.QuicVarint.decode_le_max
+#print axioms Flare.L1.QuicVarint.decode_accepts
+#print axioms Flare.L1.QuicVarint.decode_none_iff
 -- HPACK integer
 #print axioms Flare.L1.HpackInt.decode_encode
 #print axioms Flare.L1.HpackInt.encode_flags
 #print axioms Flare.L1.HpackInt.decode_bounds
+#print axioms Flare.L1.HpackInt.decode_digits
 -- io_uring tags and CQE fields
 #print axioms Flare.L1.UringTag.unpack_pack
 #print axioms Flare.L1.UringTag.pack_unpack

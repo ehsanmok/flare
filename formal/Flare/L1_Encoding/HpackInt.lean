@@ -16,6 +16,8 @@ Theorems (prefixes `1 ≤ N ≤ 8`):
 * `decode_encode`: decoding `encode v N flags` (with any bytes before and
   after) returns `v` and the offset just past the encoding, for all
   `v ≤ 2^31`.
+* `decode_digits`: every multi-byte representation within those limits,
+  shortest or padded with zero digits, decodes to its value.
 * `encode_flags`: the encoder preserves the flag bits above the prefix.
 * `decode_bounds`: any accepted integer is `≤ 2^31`, consumes at least one
   and at most six bytes, and stays inside the buffer.
@@ -237,6 +239,103 @@ theorem decode_encode (pre rest : Bytes) (value N : Nat) (flags : UInt8) (h1 : 1
     rw [this]
     simp only [Nat.pow_zero, Nat.mul_one, Option.some.injEq, Prod.mk.injEq, List.length_cons]
     omega
+
+/-! ## Every representation within the limits decodes
+
+RFC 7541 §5.1 does not require the shortest form: a peer may send redundant
+zero digits. `decode_digits` covers every multi-byte representation, minimal
+or not, with at most five continuation bytes and a value `≤ 2^31`, which are
+exactly flare's two limits. A value below the prefix has only the one-byte
+form, which `decode_encode` covers. -/
+
+/-- Value of little-endian base-128 digits `ds` then a last digit `y`,
+starting at bit `m`. -/
+def digitsVal : List Nat → Nat → Nat → Nat
+  | [], y, m => y * 2 ^ m
+  | d :: ds, y, m => d * 2 ^ m + digitsVal ds y (m + 7)
+
+/-- The continuation bytes: each digit of `ds` with the high bit set, then `y`. -/
+def contBytes (ds : List Nat) (y : Nat) : Bytes :=
+  ds.map (fun d => UInt8.ofNat (128 ||| d)) ++ [UInt8.ofNat y]
+
+theorem go_digits : ∀ (ds : List Nat) (pre rest : Bytes) (acc m y : Nat),
+    (∀ d ∈ ds, d < 128) → y < 128 → m + 7 * ds.length ≤ 28 →
+    acc + digitsVal ds y m ≤ 2 ^ 31 →
+    go (pre ++ contBytes ds y ++ rest) pre.length acc m =
+      some (acc + digitsVal ds y m, pre.length + ds.length + 1) := by
+  intro ds
+  induction ds with
+  | nil =>
+    intro pre rest acc m y _ hy _ hv
+    rw [go.eq_1]
+    have hlen : pre.length < (pre ++ contBytes [] y ++ rest).length := by simp [contBytes]
+    rw [if_neg (by omega)]
+    dsimp only
+    obtain ⟨c1, c2⟩ := last_byte y hy
+    have hb : (Bytes.getD (pre ++ contBytes [] y ++ rest) pre.length).toNat = y := by
+      have := getD_mid pre (contBytes [] y) rest 0 (by simp [contBytes])
+      rw [Nat.add_zero] at this
+      rw [this]
+      simp only [contBytes, List.map_nil, List.nil_append, Bytes.getD, List.getElem?_cons_zero,
+        Option.getD_some, UInt8.toNat_ofNat']
+      exact Nat.mod_eq_of_lt (by omega)
+    simp only [digitsVal] at hv ⊢
+    rw [hb, c1, c2, Nat.shiftLeft_eq, if_neg (by omega), if_pos rfl]
+    simp
+  | cons d ds ih =>
+    intro pre rest acc m y hd hy hm hv
+    rw [go.eq_1]
+    have e0 : contBytes (d :: ds) y = UInt8.ofNat (128 ||| d) :: contBytes ds y := by
+      simp [contBytes]
+    have hlen : pre.length < (pre ++ contBytes (d :: ds) y ++ rest).length := by
+      rw [e0]; simp
+    rw [if_neg (by omega)]
+    dsimp only
+    have hd0 : d < 128 := hd d (List.mem_cons_self ..)
+    obtain ⟨c1, c2, c3⟩ := cont_byte d hd0
+    have hb : (Bytes.getD (pre ++ contBytes (d :: ds) y ++ rest) pre.length).toNat = 128 ||| d := by
+      have := getD_mid pre (contBytes (d :: ds) y) rest 0 (by rw [e0]; simp)
+      rw [Nat.add_zero] at this
+      rw [this, e0]
+      simp only [Bytes.getD, List.getElem?_cons_zero, Option.getD_some, UInt8.toNat_ofNat']
+      exact Nat.mod_eq_of_lt c3
+    simp only [digitsVal, List.length_cons] at hv hm ⊢
+    rw [hb, c1, c2, Nat.shiftLeft_eq, if_neg (by omega), if_neg (by decide), if_neg (by omega)]
+    have ih' := ih (pre ++ [UInt8.ofNat (128 ||| d)]) rest (acc + d * 2 ^ m) (m + 7) y
+      (fun x hx => hd x (List.mem_cons_of_mem _ hx)) hy (by omega) (by omega)
+    have ea : pre ++ [UInt8.ofNat (128 ||| d)] ++ contBytes ds y ++ rest =
+        pre ++ contBytes (d :: ds) y ++ rest := by rw [e0]; simp
+    rw [ea, List.length_append, List.length_singleton] at ih'
+    rw [ih']
+    simp only [Option.some.injEq, Prod.mk.injEq]
+    omega
+
+/-- **Completeness.** A full prefix followed by any digits within flare's
+limits decodes to their value, whatever the flag bits and surrounding
+bytes. -/
+theorem decode_digits (pre rest : Bytes) (N : Nat) (flags : UInt8) (h1 : 1 ≤ N) (h2 : N ≤ 8)
+    (ds : List Nat) (y : Nat) (hd : ∀ d ∈ ds, d < 128) (hy : y < 128) (hn : ds.length ≤ 4)
+    (hv : maxPrefix N + digitsVal ds y 0 ≤ 2 ^ 31) :
+    decode (pre ++ (((flags &&& UInt8.ofNat (0xFF - maxPrefix N)) ||| UInt8.ofNat (maxPrefix N)) ::
+        contBytes ds y) ++ rest) pre.length N =
+      some (maxPrefix N + digitsVal ds y 0, pre.length + ds.length + 2) := by
+  unfold decode
+  rw [if_neg (by simp)]
+  dsimp only
+  have hb := getD_mid pre (((flags &&& UInt8.ofNat (0xFF - maxPrefix N)) |||
+    UInt8.ofNat (maxPrefix N)) :: contBytes ds y) rest 0 (by simp)
+  rw [Nat.add_zero] at hb
+  rw [hb]
+  simp only [Bytes.getD, List.getElem?_cons_zero, Option.getD_some]
+  simp only [first_byte flags N (maxPrefix N) h1 h2 (Nat.le_refl _), Nat.lt_irrefl, if_false]
+  have := go_digits ds (pre ++ [(flags &&& UInt8.ofNat (0xFF - maxPrefix N)) |||
+    UInt8.ofNat (maxPrefix N)]) rest (maxPrefix N) 0 y hd hy (by omega) hv
+  simp only [List.length_append, List.length_singleton, List.append_assoc,
+    List.singleton_append, List.cons_append, List.nil_append] at this
+  simp only [List.append_assoc, List.cons_append]
+  rw [this]
+  simp only [Option.some.injEq, Prod.mk.injEq, true_and]
+  omega
 
 /-! ## Decoder bounds -/
 

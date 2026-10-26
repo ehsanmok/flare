@@ -18,6 +18,8 @@ Theorems:
 * `decode_le_max`, `decode_length`: every decoded value is `≤ 2^62 - 1`,
   the consumed length is 1/2/4/8 and fits in the buffer.
 * `decode_nonminimal`: a padded encoding of 1 decodes to 1 (allowed).
+* `decode_accepts` / `decode_none_iff`: every buffer holding a whole varint
+  decodes, padded or not; only a truncated one is rejected.
 -/
 namespace Flare.L1.QuicVarint
 
@@ -272,5 +274,32 @@ theorem decode_le_max (buf : Bytes) (v : UInt64) (n : Nat) (h : decode buf = som
 theorem decode_nonminimal : decode [0x40, 0x01] = some (1, 2) ∧ decode [0x00] = some (0, 1) ∧
     decode [0xC0, 0, 0, 0, 0, 0, 0, 0x01] = some (1, 8) := by
   decide
+
+/-- **Completeness.** Every buffer that holds the whole varint its first
+byte announces decodes, padded or not, and consumes exactly that length:
+the decoder rejects only a truncated varint. -/
+theorem decode_accepts (first : UInt8) (rest : Bytes) (h : tagLength first ≤ rest.length + 1) :
+    ∃ v, decode (first :: rest) = some (v, tagLength first) := by
+  unfold decode
+  simp only [List.length_cons]
+  rw [if_neg (by omega)]
+  exact ⟨_, rfl⟩
+
+theorem decode_none_iff (buf : Bytes) :
+    decode buf = none ↔ ∀ first rest, buf = first :: rest → rest.length + 1 < tagLength first := by
+  cases buf with
+  | nil => simp [decode]
+  | cons first rest =>
+    constructor
+    · intro hn f r he
+      cases he
+      refine Nat.lt_of_not_le fun hle => ?_
+      obtain ⟨v, hv⟩ := decode_accepts first rest hle
+      rw [hv] at hn; cases hn
+    · intro hlt
+      have := hlt first rest rfl
+      unfold decode
+      simp only [List.length_cons]
+      rw [if_pos this]
 
 end Flare.L1.QuicVarint
