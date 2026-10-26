@@ -86,7 +86,7 @@ pixi run -e formal difftest        # Lean models vs the Mojo code on generated i
 | `Flare/MachineWorkers.lean` | several workers sharing one fd table; worker progress |
 | `Flare/MachineWheel.lean` | that machine on the real timer wheel (`L2_Machine/TimerWheel`), any firing order |
 | `Flare/Core/TrustSurface.lean` | `#trust_surface T`: the `Flare` definitions theorem `T`'s statement reaches, run over the audit by `scripts/trust_surface.py` |
-| `Flare/Witness.lean` | concrete instances of every environment contract and parameter bundle a headline theorem assumes, so none of them holds vacuously |
+| `Flare/Witness.lean` | concrete instances of every environment contract and parameter bundle a headline theorem assumes, and traces that reach a live connection, an idle close, two busy workers or an open breaker, so no headline theorem holds vacuously |
 | `Flare/Kernels/` | verified kernels: small sans-I/O pieces of a larger change, with a spec, proofs and a difftest (see `obligations/`) |
 | `Flare/Audit.lean`, `Flare/Audit/*.lean` | `#print axioms` lines for the headline theorems |
 | `report/` | per-layer report sections, stitched into `REPORT.md` by `scripts/stitch_report.py` |

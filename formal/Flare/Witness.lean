@@ -2,6 +2,8 @@ import Flare.Core
 import Flare.L1_Encoding
 import Flare.L2_Machine
 import Flare.L4_App
+import Flare.MachineHttp
+import Flare.MachineWorkers
 
 /-!
 # Witnesses: the hypotheses of the headline theorems can hold
@@ -9,7 +11,10 @@ import Flare.L4_App
 A theorem under hypotheses that no environment satisfies is vacuously true,
 and `lake build` cannot tell. Every environment contract and parameter bundle
 that a headline theorem takes as a hypothesis gets a concrete instance here,
-so each of those theorems says something about at least one model.
+so each of those theorems says something about at least one model. Where a
+conclusion quantifies over live connections, idle closes or an open breaker,
+a concrete trace reaches such a state, so it is not only about the empty
+case.
 
 A witness shows only that the hypotheses are consistent. Whether the real
 libc, kernel or framer satisfies them is the trust base (`Flare/Core/Assumptions.lean`)
@@ -27,6 +32,8 @@ theorem recvContract_sat (cap : Nat) : RecvContract cap cap := by
 theorem sendContractStrong_sat (len : Nat) (h : 0 < len) : SendContractStrong len len := by
   unfold SendContractStrong; omega
 
+/-- No audited theorem assumes `MonotoneClock` (`ServerConfig.closeTime_le`
+does, and is not audited); the witness keeps the contract honest anyway. -/
 theorem monotoneClock_sat (n : Nat) : MonotoneClock (List.range n) :=
   (List.pairwise_lt_range (n := n)).imp Nat.le_of_lt
 
@@ -188,5 +195,143 @@ theorem toyInet_valid : toyInet.Valid where
     · rcases enc8_digits x c hc with rfl | rfl <;> exact Or.inl (by decide)
 
 end Inet
+
+/-! ## Other parameter and environment bundles -/
+
+/-- `StatusError.parse_render` holds for a decimal parser that reads every
+`dec n`. flare's `atol10` stops at `2^63` (`MojoAtol.atol10_rejects`), so it
+does not meet `AtolDec`; `parse_render_mojo` is the statement about it. -/
+theorem atolDec_sat : L1.StatusError.AtolDec (fun b => some (L1.Decimal.decVal b : Int)) := by
+  intro n; simp [L1.Decimal.decVal_dec]
+
+theorem drawOk_sat : L4.Retry.DrawOk id := by
+  intro n h; simp only [id]; omega
+
+theorem rateLimit_sane : L4.RateLimit.Sane 10 100 ⟨0, 0⟩ 1000 := by
+  constructor <;> decide
+
+theorem rateLimit_saneFix : L4.RateLimit.SaneFix 10 100 ⟨0, 0⟩ 1000 := by
+  constructor <;> decide
+
+theorem recvfromFills_sat (bufLen saLen : Nat) (sa stack : Nat → UInt8) :
+    L2.Udp.RecvfromFills bufLen saLen sa stack
+      (fun i => if i < min bufLen saLen then sa i else if i < bufLen then 0 else stack i) :=
+  fun _ => rfl
+
+theorem connectFacts_sat (p : L2.UdsListener.Peer) : L2.UdsListener.ConnectFacts p .ok := by
+  refine ⟨fun h => ?_, fun _ => rfl⟩; cases h
+
+theorem inodesUnique_sat (mine : Nat × Nat) (fs : L2.UdsListener.FS) :
+    L2.UdsListener.InodesUnique mine fs (fs = some mine) := Iff.rfl
+
+theorem powMask_sat : L2.IoUring.PowMask 4095 := ⟨12, by decide, by decide⟩
+
+theorem clockBound_sat : L2.TimerWheel.ClockBound [.schedule 5 10, .advance 20] := by
+  simp [L2.TimerWheel.ClockBound]
+
+/-- `ServerConfig.default` meets `body_timer_le_request`'s premises. -/
+theorem serverConfig_default :
+    L4.ServerConfig.check L4.ServerConfig.default ∧ L4.ServerConfig.default.requestTimeoutMs > 0 ∧
+      L4.ServerConfig.default.readBodyTimeoutMs > 0 := by decide
+
+/-! ## Reachable states with something to say
+
+`runFn f s0 ls` runs an `LTS.ofFn` step function along `ls`; a state it
+returns is reachable. -/
+
+def runFn {S L : Type} (f : S → L → Option S) : S → List L → Option S
+  | s, [] => some s
+  | s, l :: ls => (f s l).bind (runFn f · ls)
+
+theorem runFn_run {S L : Type} (init : S → Prop) (f : S → L → Option S) :
+    ∀ (ls : List L) (s s' : S), runFn f s ls = some s' → (LTS.ofFn init f).Run s ls s'
+  | [], s, s', h => by cases h; exact .nil _
+  | l :: ls, s, s', h => by
+    simp only [runFn] at h
+    cases e : f s l with
+    | none => rw [e] at h; cases h
+    | some s1 => rw [e] at h; exact .cons e (runFn_run init f ls s1 s' h)
+
+theorem runFn_reachable {S L : Type} {init : S → Prop} {f : S → L → Option S} {s0 s : S}
+    (h0 : init s0) (ls : List L) (h : runFn f s0 ls = some s) : (LTS.ofFn init f).Reachable s :=
+  ⟨s0, ls, h0, runFn_run init f ls s0 s h⟩
+
+/-- Reachable from `s0` along `ls`, and `p` holds there. -/
+theorem reach_of {S L : Type} {init : S → Prop} {f : S → L → Option S} {s0 : S} (h0 : init s0)
+    (ls : List L) (p : S → Bool) (h : (runFn f s0 ls).map p = some true) :
+    ∃ s, (LTS.ofFn init f).Reachable s ∧ p s = true := by
+  cases e : runFn f s0 ls with
+  | none => rw [e] at h; cases h
+  | some s => rw [e] at h; exact ⟨s, runFn_reachable h0 ls e, by simpa using h⟩
+
+section Traces
+open Machine
+
+/-- The breaker opens and then admits a half-open probe, so
+`cooldown_respected` and `single_probe` are not only about the closed
+state. -/
+theorem breaker_opens_then_probes :
+    ∃ s s', (L4.CircuitBreaker.lts 1 10).Reachable s ∧ (L4.CircuitBreaker.lts 1 10).step s (.arrive 2 10) s' ∧
+      s.cell.st = .opn ∧ s'.cell.st = .half := by
+  obtain ⟨s, hr, hp⟩ := reach_of (f := L4.CircuitBreaker.step 1 10) (init := (· = L4.CircuitBreaker.initS))
+    rfl [.arrive 1 0, .finish 1 0 true]
+    (fun s => s.cell.st == .opn && (L4.CircuitBreaker.step 1 10 s (.arrive 2 10)).any (·.cell.st == .half))
+    (by decide)
+  simp only [Bool.and_eq_true, beq_iff_eq, Option.any_eq_true] at hp
+  obtain ⟨ho, s', hs, hh⟩ := hp
+  exact ⟨s, s', hr, hs, ho, hh⟩
+
+/-- An idle timer closes a connection under flare's parameters, so the
+`∀ k ∈ c.kills` conclusions of `no_stale_timer` and `no_early_close` are
+exercised. -/
+theorem machine_kills :
+    ∃ c, (lts counter flareP).Reachable c ∧ c.kills ≠ [] := by
+  obtain ⟨c, hr, hp⟩ := reach_of (f := step counter flareP) (init := (· = initCfg)) rfl
+    [.poll 0 [listenerToken], .accept 5 true, .acceptDone, .poll 10 [], .poll 11 []]
+    (fun c => !c.kills.isEmpty) (by decide)
+  exact ⟨c, hr, by simpa using hp⟩
+
+/-- The HTTP server with `fixedParams 1` reaches a live connection that has
+dispatched a request and queued its response, so `server_conns_inv`,
+`server_responses_fifo` and `server_ka_bound` hold of a connection that did
+something. -/
+theorem http_served :
+    ∃ c l, (lts (MachineHttp.http (fixedParams 1) 10 10) flareP).Reachable c ∧
+      c.conns 5 = some l ∧ l.st.segs ≠ [] ∧ l.st.log ≠ [] := by
+  obtain ⟨c, hr, hp⟩ := reach_of (f := step (MachineHttp.http (fixedParams 1) 10 10) flareP)
+    (init := (· = initCfg)) rfl
+    [.poll 0 [listenerToken], .accept 5 true, .acceptDone, .poll 1 [5], .dispatch (.arrive [7]),
+     .poll 2 [5], .dispatch (.readable false)]
+    (fun c => (c.conns 5).any (fun l => !l.st.segs.isEmpty && !l.st.log.isEmpty)) (by decide)
+  simp only [Option.any_eq_true, Bool.and_eq_true, Bool.not_eq_true', List.isEmpty_eq_false_iff] at hp
+  obtain ⟨l, hl, hs, hg⟩ := hp
+  exact ⟨c, l, hr, hl, hs, hg⟩
+
+/-- Two workers each hold a live connection, so `sys_disjoint` is not only
+about empty fd tables. -/
+theorem workers_both_live :
+    ∃ w, (sysLts counter (fun (_ : Fin 2) => flareP)).Reachable w ∧
+      ((w 0).conns 5).isSome = true ∧ ((w 1).conns 6).isSome = true := by
+  obtain ⟨w, hr, hp⟩ := reach_of (f := sysStep counter (fun (_ : Fin 2) => flareP))
+    (init := (· = fun _ => initCfg)) rfl
+    [(0, .poll 0 [listenerToken]), (0, .accept 5 true), (0, .acceptDone),
+     (1, .poll 0 [listenerToken]), (1, .accept 6 true), (1, .acceptDone)]
+    (fun w => ((w 0).conns 5).isSome && ((w 1).conns 6).isSome) (by decide)
+  simp only [Bool.and_eq_true] at hp
+  exact ⟨w, hr, hp⟩
+
+end Traces
+
+/-- Every premise of `ConnLive.eventually_served` at once: a connection that
+has received one byte, with `fixedParams 1` and alternating readiness, has a
+whole request available at step 0. -/
+theorem eventually_served_premises :
+    let P := fixedParams 1
+    let s0 := L4.ConnSM.step P L4.ConnSM.init (.arrive [7])
+    L4.ConnSM.Oracle.WF P ∧ L4.ConnSM.Inv P s0 ∧ L4.ConnLive.Oracle.Ext P ∧
+      L4.ConnLive.Fair P s0 alternating ∧ L4.ConnLive.Avail P () (L4.ConnLive.trace P s0 alternating 0) :=
+  ⟨fixedParams_wf 1,
+   L4.ConnSM.inv_step _ (fixedParams_wf 1) _ _ (L4.ConnSM.inv_init _),
+   fixedParams_ext 1, alternating_fair _ _, by decide, by decide, 1, by decide⟩
 
 end Flare.Witness
