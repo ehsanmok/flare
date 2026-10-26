@@ -11,3 +11,4 @@ import Flare.Machine
 import Flare.MachineHttp
 import Flare.MachineWorkers
 import Flare.MachineWheel
+import Flare.Witness
