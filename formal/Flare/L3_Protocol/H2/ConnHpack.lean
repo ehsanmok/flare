@@ -1,5 +1,6 @@
 import Flare.L3_Protocol.H2.ConnSeq
 import Flare.L3_Protocol.H2.HpackPeer
+import Flare.L3_Protocol.H2.HpackCodec
 
 /-!
 # The connection with its stateful HPACK decoder
@@ -236,5 +237,22 @@ theorem lookup_sound_conn (C : Codec) (hC : C.Correct) (henc : Bytes → Bytes)
   refine ⟨hlog, ?_⟩
   rw [hlog]
   exact (decFold_blocks C hC henc hH budget rss Peer.init p' fss Table.init pinv_init hpeer hv).1
+
+/-- `lookup_sound_conn` on flare's own codecs (`Hpack.real`): the peer's
+Huffman-coded or raw literals go through the L1 integer and Huffman
+decoders, not an assumed-correct codec. -/
+theorem real_lookup_sound_conn (budget : Nat) (es : List Ev) (c0 c'' : Conn)
+    (tr : List (Ev × List Out)) (rss : List (List Rep)) (pd : Option (Nat × Bytes)) (p' : Peer)
+    (fss : List (List Entry))
+    (hr : runD (decAt real budget) c0 es = some (c'', tr))
+    (hg : c0.goawaySent = false) (hd : c0.decLog = []) (hc : c0.continuing = 0)
+    (hno : tr.all (fun p => !hasGoaway p.2) = true)
+    (hfr : rrun (none, []) (framesOf es) = (pd, rss.map (encBlock real Flare.L1.Huffman.encode)))
+    (hpeer : pblocks Peer.init rss = some (p', fss))
+    (hv : ∀ rs ∈ rss, ∀ r ∈ rs, RepOK Flare.L1.Huffman.encode r) :
+    c''.decLog = rss.map (encBlock real Flare.L1.Huffman.encode) ∧
+    Sound fss (decFold real budget Table.init c''.decLog).2 :=
+  lookup_sound_conn real real_correct _ real_huff budget es c0 c'' tr rss pd p' fss
+    hr hg hd hc hno hfr hpeer hv
 
 end Flare.L3.H2.Conn

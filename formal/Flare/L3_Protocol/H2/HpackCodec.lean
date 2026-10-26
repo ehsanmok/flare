@@ -65,4 +65,22 @@ theorem real_correct : real.Correct where
 theorem real_huff (s : Bytes) : real.huff (Huffman.encode s) = some s := by
   simp only [real, Huffman.okOnly_decodeSimdImpl, Huffman.decode_encode]
 
+/-! ## The headline results on flare's codecs
+
+`decode_encode` and `decode_block` hold for any codec meeting
+`Codec.Correct`; these are the same statements for `real`, so they are
+about flare's own integer and Huffman decoders. -/
+
+theorem real_decode_encode (ah : Bool) (t : Table) (hs acc : List Entry) (d fuel : Nat)
+    (hst : ∀ h ∈ hs, Stable h.name ∧ Stable h.value) (hf : (encode real hs).length ≤ fuel) :
+    decodeLoop real ah 0 fuel t acc d (encode real hs) = .ok (t, acc ++ hs) :=
+  decode_encode real real_correct ah t hs acc d fuel hst hf
+
+theorem real_decode_block (budget : Nat) (rs : List Rep) (p p' : Peer) (fs : List Entry)
+    (t t' : Table) (hs : List Entry) (hv : ∀ r ∈ rs, RepOK Huffman.encode r) (hp : PInv p t)
+    (hb : pblock p rs = some (p', fs))
+    (h : decode real true t (encBlock real Huffman.encode rs) budget = .ok (t', hs)) :
+    Pw fs hs ∧ PInv p' t' :=
+  decode_block real real_correct Huffman.encode real_huff budget rs p p' fs t t' hs hv hp hb h
+
 end Flare.L3.H2.Hpack

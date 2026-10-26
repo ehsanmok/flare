@@ -69,6 +69,9 @@ import Flare.L3_Protocol.H2
 #print axioms Flare.L3.H2.Conn.decFold_blocks
 #print axioms Flare.L3.H2.Conn.seq_runD
 #print axioms Flare.L3.H2.Conn.lookup_sound_conn
+#print axioms Flare.L3.H2.Conn.real_lookup_sound_conn
+#print axioms Flare.L3.H2.Hpack.real_decode_encode
+#print axioms Flare.L3.H2.Hpack.real_decode_block
 -- RFC 9113 §5.1: spec LTS and the connection's refinement of it
 #print axioms Flare.L3.H2.StreamSpec.closed_no_send_wu
 #print axioms Flare.L3.H2.Refine.fixed_handleW
