@@ -244,6 +244,11 @@ H2_INVALID = [b"\x40\x01X\x01y", b"\x40\x0aconnection\x02hi", b"\x20", b"\x3f\xe
 H2_REGULAR = H2_VALID * 3 + H2_INVALID
 H2_FIELDS = H2_PSEUDO + H2_REGULAR
 H2_SIDS = [1, 1, 1, 3, 3, 5, 0, 2, 7, 255]
+# Dynamic table size updates at the limits: 40 and 64 hold one or two
+# `x: y` entries (34 octets each) and 40 cannot hold `te: trailers` (42), so
+# later insertions evict or empty the table (RFC 7541 §4.4); 4096 is the
+# cap and 4097 one over it.
+H2_SIZES = [b"\x3f\x09", b"\x3f\x21", b"\x3f\xe1\x1f", b"\x3f\xe2\x1f"]
 
 
 def _h2(ty, flags, sid, payload):
@@ -258,6 +263,8 @@ def _h2_block(r):
             r.shuffle(fs)
     else:
         fs = [r.choice(H2_FIELDS) for _ in range(r.randint(0, 4))]
+    if r.random() < 0.2:
+        fs.insert(0, r.choice(H2_SIZES))
     return b"".join(fs)
 
 
