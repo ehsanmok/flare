@@ -31,6 +31,7 @@ cd "$repo_root"
 #
 # v0.8 baseline (the parser surface re-exported by ``flare.http.proto``):
 SANS_IO_FILES=(
+    "flare/net/cstr.mojo"
     "flare/http/proto/__init__.mojo"
     "flare/http/cookie.mojo"
     "flare/http/form.mojo"

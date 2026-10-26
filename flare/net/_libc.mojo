@@ -33,6 +33,7 @@ from std.sys.info import CompilationTarget, platform_map
 from std.os import getenv
 
 from ..utils.dylib import find_flare_lib
+from .cstr import CSTR_PASS, EMPTY_REJECT, c_str_verdict
 from ._libc_cloexec import (
     F_GETFD,
     F_SETFD,
@@ -826,7 +827,7 @@ def _getaddrinfo(
     host: String,
     hints: Pointer[UInt8, _],
     res_slot: Pointer[UInt8, _],
-) -> c_int:
+) raises -> c_int:
     """Wrapper around ``getaddrinfo(3)``.
 
     Resolves *host* with no service constraint (port is not set). The caller
@@ -843,6 +844,8 @@ def _getaddrinfo(
     Returns:
         0 on success, non-zero ``EAI_*`` error code on failure.
     """
+    if c_str_verdict(host.as_bytes(), EMPTY_REJECT) != CSTR_PASS:
+        raise Error("getaddrinfo host: empty or contains a NUL byte")
     var host_copy = host
     return external_call["getaddrinfo", c_int](
         host_copy.as_c_string_span(),
@@ -903,6 +906,9 @@ def _inet_pton(family: c_int, src: String, dst: Pointer[UInt8, _]) -> c_int:
     Returns:
         1 on success, 0 if the input is not valid, -1 on error.
     """
+    # An empty address, or one C would read cut short at a NUL, is invalid.
+    if c_str_verdict(src.as_bytes(), EMPTY_REJECT) != CSTR_PASS:
+        return 0
     # as_c_string_span() is mutating; copy into a local var first.
     var src_copy = src
     return external_call["inet_pton", c_int](

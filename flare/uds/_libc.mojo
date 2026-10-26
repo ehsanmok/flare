@@ -34,6 +34,8 @@ from std.ffi import c_char, c_int, c_uint, external_call, get_errno, ErrNo
 from std.memory import Pointer
 from std.sys.info import CompilationTarget
 
+from ..net.cstr import CSTR_PASS, EMPTY_REJECT, c_str_verdict
+
 
 comptime AF_UNIX: c_int = 1
 """POSIX-defined constant for the AF_UNIX / AF_LOCAL address family.
@@ -146,6 +148,8 @@ def unlink_path(var path: String) -> c_int:
 
     ``as_c_string_span`` is mutating, so we ask for an owning
     ``var`` to avoid silently mutating the caller's string."""
+    if c_str_verdict(path.as_bytes(), EMPTY_REJECT) != CSTR_PASS:
+        return -1
     return external_call["unlink", c_int](path.as_c_string_span())
 
 

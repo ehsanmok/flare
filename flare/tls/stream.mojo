@@ -58,6 +58,7 @@ from ..tcp.stream import _connect_with_fallback
 from ..io import Readable
 from .config import TlsConfig, TlsVerify
 from ..net.error import Timeout
+from ..net.cstr import EMPTY_NULL, EMPTY_REJECT, c_str_addr
 from ._server_ffi import (
     SSL_IO_EOF_UNCLEAN,
     SSL_IO_WANT_READ,
@@ -136,23 +137,14 @@ def _do_ssl_ctx_load_ca_bundle(
     var f = dl_sym[def(Int, Int) thin abi("C") -> c_int](
         lib, "flare_ssl_ctx_load_ca_bundle"
     )
-    # Empty means "system default": pass NULL, which the C wrapper routes to
-    # SSL_CTX_set_default_verify_paths. `ptr()` of an empty String's C span
-    # is not a pointer to "" (on Linux it pointed into unrelated static
-    # data), so OpenSSL was handed a garbage path (issue #42).
-    if ca_path.byte_length() == 0:
-        return Int(f(ctx, 0))
-    # NUL-terminate in place before the C call. A path materialized from
-    # a StringSlice is not NUL-terminated under unsafe_ptr, so OpenSSL's
-    # file open would read past it (same defect as the SNI host fixed in
-    # _do_ssl_connect). `ca_path` is owned and outlives the call; `ca_c`
-    # views its now-terminated buffer.
-    var ca_c = ca_path.as_c_string_span()
-    var rc = Int(f(ctx, Int(ca_c.ptr())))
-    # The C-string pointer escapes as raw Int; anchor the owned buffer
-    # past the synchronous call so it is not ASAP-destroyed before
-    # OpenSSL reads the path (heap-use-after-free under asan when
-    # as_c_string_slice had to reallocate a slice-derived path).
+    # Empty means "system default": NULL, which the C wrapper routes to
+    # SSL_CTX_set_default_verify_paths (issue #42). `c_str_addr`
+    # NUL-terminates in place, so `ca_path` is owned; its address escapes as
+    # a raw Int, so anchor the buffer past the synchronous call (otherwise
+    # it is ASAP-destroyed before OpenSSL reads it: heap-use-after-free
+    # under asan when a slice-derived path had to be reallocated).
+    var ca_c = c_str_addr(ca_path, EMPTY_NULL, "TlsConfig.ca_bundle")
+    var rc = Int(f(ctx, ca_c))
     _ = ca_path^
     return rc
 
@@ -166,11 +158,10 @@ def _do_ssl_ctx_load_cert_key(
     var f = dl_sym[def(Int, Int, Int) thin abi("C") -> c_int](
         lib, "flare_ssl_ctx_load_cert_key"
     )
-    # See _do_ssl_ctx_load_ca_bundle: NUL-terminate slice-derived paths
-    # in place. Both owned args outlive the single FFI call.
-    var cert_c = cert_path.as_c_string_span()
-    var key_c = key_path.as_c_string_span()
-    var rc = Int(f(ctx, Int(cert_c.ptr()), Int(key_c.ptr())))
+    # See _do_ssl_ctx_load_ca_bundle. Both owned args outlive the call.
+    var cert_c = c_str_addr(cert_path, EMPTY_REJECT, "TlsConfig.cert_file")
+    var key_c = c_str_addr(key_path, EMPTY_REJECT, "TlsConfig.key_file")
+    var rc = Int(f(ctx, cert_c, key_c))
     # Anchor the owned buffers past the call (see _do_ssl_ctx_load_ca_bundle).
     _ = cert_path^
     _ = key_path^
@@ -208,9 +199,9 @@ def _do_ssl_connect(
     # common case — `Url.parse(...).host`) is not NUL-terminated under
     # `unsafe_ptr`, so OpenSSL's SSL_set_tlsext_host_name would read past the
     # hostname and send a corrupted SNI (some servers reply handshake_failure).
-    # `as_c_string_slice` is mutating and `sni` is owned + lives across the call.
-    var cstr = sni.as_c_string_span()
-    var rc = Int(f(ssl, Int(cstr.ptr())))
+    # Never NULL: the C side skips hostname verification for an empty name.
+    var cstr = c_str_addr(sni, EMPTY_REJECT, "TLS server name")
+    var rc = Int(f(ssl, cstr))
     # Anchor the owned SNI buffer past the call (see
     # _do_ssl_ctx_load_ca_bundle); Url.parse(...).host is slice-derived.
     _ = sni^
@@ -229,9 +220,9 @@ def _do_ssl_connect_ex(
     var f = dl_sym[def(Int, Int) thin abi("C") -> c_int](
         lib, "flare_ssl_connect_ex"
     )
-    # Same NUL-termination dance as _do_ssl_connect; see the note there.
-    var cstr = sni.as_c_string_span()
-    var rc = Int(f(ssl, Int(cstr.ptr())))
+    # Same as _do_ssl_connect; see the note there.
+    var cstr = c_str_addr(sni, EMPTY_REJECT, "TLS server name")
+    var rc = Int(f(ssl, cstr))
     _ = sni^
     return rc
 
