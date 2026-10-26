@@ -15,7 +15,7 @@ flare uses six pixi environments:
 | `fuzz` | `dev` + `mozz` | `fuzz-*` / `prop-*` |
 | `bench` | `dev` + `go`, `nginx`, `wrk`, `wrk2`, `rust` | `bench-vs-baseline*`, `bench-tail-quick`, `bench-mixed-keepalive`, `bench-soak-*` |
 | `metrics` | `lizard` | `complexity`, `coverage`, `metrics` |
-| `formal` | `lean4` | `formal-build`, `formal-check`, `formal-status`, `difftest*` (see [`formal/`](../formal/)) |
+| `formal` | `lean4` | `formal-build`, `formal-check`, `formal-status`, `formal-trust`, `difftest*` (see [`formal/`](../formal/)) |
 
 Common tasks (run with `pixi run [--environment <env>] <task>`):
 
@@ -26,7 +26,7 @@ Common tasks (run with `pixi run [--environment <env>] <task>`):
 | `check-sans-io` / `check-no-http-http2-cycle` / `check-reactor-size` / `check-example-tasks` | `default` | The four structural lints CI runs on a bare checkout: the sans-io core imports no I/O, `flare.http` and `flare.http2` stay acyclic, per-file size caps with a dated allowlist, and every example is run by something. A few seconds each, no toolchain needed |
 | `interop-smoke` | `default` | Talk to flare with software we did not write: curl and h2load on every wire, plus flare's own streaming client pulling a megabyte on each |
 | `conformance` | `default` | h2spec and the Autobahn WebSocket suite, each gated against a documented known-fail list; a leg whose binary is not provisioned skips rather than passing |
-| `formal-check` / `difftest` / `formal-status` | `formal` | Build the Lean models and audit their axioms; run them against the Mojo code on generated inputs; show stale anchors, unlocked specs and verified kernels on one screen |
+| `formal-check` / `difftest` / `formal-status` / `formal-trust` | `formal` | Build the Lean models and audit their axioms; run them against the Mojo code on generated inputs; show stale anchors, unlocked specs and verified kernels on one screen; list the definitions each audited theorem's statement depends on |
 | `docs` / `docs-build` | `dev` | mojodoc-rendered package docstring (live or static) |
 | `fuzz-all` | `fuzz` | Every harness in [`fuzz/`](../fuzz/) (63 harnesses, 9M+ runs combined) |
 | `fuzz-<name>` / `prop-<name>` | `fuzz` | Single harness - see [`pixi.toml`](../pixi.toml) for the full list |

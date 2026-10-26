@@ -67,6 +67,7 @@ pixi run -e formal formal-build    # lake build (core Lean 4.33, no Mathlib)
 pixi run -e formal formal-check    # no sorry/axiom/native_decide, #print axioms audit
 python3 formal/scripts/stitch_report.py   # rebuild REPORT.md from report/ (formal-check fails if stale)
 pixi run -e formal formal-status   # anchors, spec guard, difftest, verified kernels on one screen
+pixi run -e formal formal-trust    # what a reader must trust: definitions each audited statement reaches
 pixi run -e formal difftest        # Lean models vs the Mojo code on generated inputs
 ```
 
@@ -84,6 +85,7 @@ pixi run -e formal difftest        # Lean models vs the Mojo code on generated i
 | `Flare/MachineHttp.lean` | that machine running the HTTP/1.1 connection state machine (`L4_App/ConnSM`) |
 | `Flare/MachineWorkers.lean` | several workers sharing one fd table; worker progress |
 | `Flare/MachineWheel.lean` | that machine on the real timer wheel (`L2_Machine/TimerWheel`), any firing order |
+| `Flare/Core/TrustSurface.lean` | `#trust_surface T`: the `Flare` definitions theorem `T`'s statement reaches, run over the audit by `scripts/trust_surface.py` |
 | `Flare/Witness.lean` | concrete instances of every environment contract and parameter bundle a headline theorem assumes, so none of them holds vacuously |
 | `Flare/Kernels/` | verified kernels: small sans-I/O pieces of a larger change, with a spec, proofs and a difftest (see `obligations/`) |
 | `Flare/Audit.lean`, `Flare/Audit/*.lean` | `#print axioms` lines for the headline theorems |

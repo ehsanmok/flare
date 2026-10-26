@@ -338,6 +338,7 @@ formal-spec-lock = "python3 formal/scripts/spec_guard.py --lock"
 formal-precommit = "bash formal/scripts/precommit.sh"
 formal-anchors = "python3 formal/scripts/anchors.py check"   # every stale anchor, by tier
 formal-status  = "python3 formal/scripts/status.py"          # anchors, spec guard, difftest, obligations
+formal-trust   = "python3 formal/scripts/trust_surface.py"   # definitions each audited theorem statement depends on
 # Differential testing: Lean impl/spec models vs the Mojo code (formal/difftest/).
 # The runner builds the oracle here and the Mojo drivers in the default env.
 formal-oracle-build = { cmd = "lake build flare-oracle", cwd = "formal" }
