@@ -173,7 +173,9 @@ Every tier has runnable, tested equivalents:
 
 ## Performance
 
-TFB plaintext, `wrk2 -t8 -c256 -d30s`, 48-vCPU Xeon Platinum 8488C, Linux 6.12, one run for all rows, flare workers pinned, all servers built without debug asserts (`mojo build -D ASSERT=none`, `cargo build --release --locked`). Each row is the highest rate that survives the harness's sustainable-peak finder.
+flare is on [HttpArena](https://http-arena.com/#type=emerging&tuned=0), an independent benchmark that runs every framework through the same test profiles on one machine. Among emerging, untuned frameworks it ranks near the top for HTTP/2, HTTP/3, WebSocket and gRPC.
+
+Below is TFB plaintext: `wrk2 -t8 -c256 -d30s`, 48-vCPU Xeon Platinum 8488C, Linux 6.12, one run for all rows, flare workers pinned, all servers built without debug asserts (`mojo build -D ASSERT=none`, `cargo build --release --locked`). Each row is the highest rate that survives the harness's sustainable-peak finder.
 
 | Server (4 workers) | Req/s | p99 (ms) |
 |---|---:|---:|
