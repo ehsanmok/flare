@@ -9,7 +9,7 @@ needed.
 | `flare.net` | Rejects null bytes, CRLF, `@` in IP strings before they reach libc. |
 | `flare.dns` | Blocks injection in hostnames (null / CRLF / `@`, length limits). |
 | `flare.tls` | TLS 1.2+ only, weak ciphers disabled, SNI always sent. Client and server both supported. The server handshake runs non-blocking on the reactor (`TlsConnHandle`), so a slow or stalled handshake occupies a connection slot bounded by `ServerConfig.idle_timeout_ms` rather than a worker. The blocking `TlsAcceptor.handshake_fd(fd)` path remains for callers driving TLS outside the reactor. |
-| `flare.http` | RFC 7230 token validation on header names and values; CR / LF / `\0` rejected at parse time. |
+| `flare.http` | RFC 7230 token validation on header names and values; CR / LF / `\0` rejected at parse time. A chunk-size line with whitespace before `;` is refused, although RFC 9112 §7.1.1 allows it (fail closed; see `formal/report/L3_h1_ws.md`). |
 | `flare.http` | Configurable limits on headers (8 KB), body (10 MB), URI (8 KB). |
 | `flare.http` | **Sanitised error responses**: 4xx bodies do not echo extractor `raise Error(...)` messages by default. Logs carry the full message + request id; the client gets a fixed status reason. |
 | `flare.http` (sessions) | Signed session cookies (HMAC-SHA256) **expire server-side**: `CookieSessionStore` signs an absolute expiry into the cookie and refuses an expired one or one without; `InMemorySessionStore` and `BackedSessionStore` expire the stored entry. Default lifetime one day (`DEFAULT_SESSION_TTL_S`), `ttl_s=0` opts out. |
