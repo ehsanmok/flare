@@ -136,6 +136,12 @@ def _do_ssl_ctx_load_ca_bundle(
     var f = dl_sym[def(Int, Int) thin abi("C") -> c_int](
         lib, "flare_ssl_ctx_load_ca_bundle"
     )
+    # Empty means "system default": pass NULL, which the C wrapper routes to
+    # SSL_CTX_set_default_verify_paths. `ptr()` of an empty String's C span
+    # is not a pointer to "" (on Linux it pointed into unrelated static
+    # data), so OpenSSL was handed a garbage path (issue #42).
+    if ca_path.byte_length() == 0:
+        return Int(f(ctx, 0))
     # NUL-terminate in place before the C call. A path materialized from
     # a StringSlice is not NUL-terminated under unsafe_ptr, so OpenSSL's
     # file open would read past it (same defect as the SNI host fixed in

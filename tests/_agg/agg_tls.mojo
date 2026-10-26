@@ -179,6 +179,9 @@ from test_tls import (
 )
 from test_tls import test_custom_ca_bundle as test_tls__test_custom_ca_bundle
 from test_tls import (
+    test_default_ca_bundle_builds_ctx as test_tls__test_default_ca_bundle_builds_ctx,
+)
+from test_tls import (
     test_custom_server_name as test_tls__test_custom_server_name,
 )
 from test_tls import (
@@ -520,6 +523,7 @@ def main() raises:
     suite.test[test_tls__test_default_config_verify_required]()
     suite.test[test_tls__test_insecure_config_no_verify]()
     suite.test[test_tls__test_custom_ca_bundle]()
+    suite.test[test_tls__test_default_ca_bundle_builds_ctx]()
     suite.test[test_tls__test_custom_server_name]()
     suite.test[test_tls__test_tls_handshake_error_str]()
     suite.test[test_tls__test_certificate_expired_str]()

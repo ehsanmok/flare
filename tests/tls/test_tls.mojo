@@ -40,6 +40,7 @@ from flare.tls import (
     CertificateHostnameMismatch,
     CertificateUntrusted,
 )
+from flare.tls.stream import _build_ssl_ctx, _do_ssl_ctx_free
 
 # ── Paths to test certs ───────────────────────────────────────────────────────
 comptime _CA_CRT: String = "tests/certs/ca.crt"
@@ -174,6 +175,15 @@ def test_custom_ca_bundle() raises:
     """Explicit ca_bundle must be stored verbatim."""
     var cfg = TlsConfig(ca_bundle="/etc/ssl/ca.pem")
     assert_equal(cfg.ca_bundle, "/etc/ssl/ca.pem")
+
+
+def test_default_ca_bundle_builds_ctx() raises:
+    """The default (empty) ca_bundle loads the system trust store instead
+    of handing OpenSSL a garbage path (issue #42)."""
+    var lib = OwnedDLHandle(_find_flare_lib())
+    var ctx = _build_ssl_ctx(lib, TlsConfig())
+    assert_true(ctx != 0)
+    _do_ssl_ctx_free(lib, ctx)
 
 
 def test_custom_server_name() raises:
