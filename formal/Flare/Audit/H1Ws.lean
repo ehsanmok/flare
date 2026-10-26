@@ -35,10 +35,17 @@ import Flare.L3_Protocol.H1Ws
 #print axioms Flare.L3.H1.Framing.framing_agrees
 #print axioms Flare.L3.H1.Framing.no_smuggling_strict
 #print axioms Flare.L3.H1.Framing.lf_fixed_agrees
+#print axioms Flare.L3.H1.Text.classify_chunked
+#print axioms Flare.L3.H1.Framing.parserFraming_chunked
+#print axioms Flare.L3.H1.Framing.parserFraming_length
+#print axioms Flare.L3.H1.Framing.reactorFraming_chunked
+#print axioms Flare.L3.H1.Framing.reactorFraming_length
 -- Field values and the String invariant
 #print axioms Flare.L3.H1.FieldValue.strict_value_ascii
 #print axioms Flare.L3.H1.FieldValue.strict_value_utf8
 #print axioms Flare.L3.H1.FieldValue.fixed_value_utf8
+#print axioms Flare.L3.H1.FieldValue.valueOk_complete
+#print axioms Flare.L3.H1.FieldValue.valueAccepted_complete
 -- WebSocket frame codec
 #print axioms Flare.L3.Ws.maskFrom_involutive
 #print axioms Flare.L3.Ws.appendMasked_eq
@@ -79,6 +86,8 @@ import Flare.L3_Protocol.H1Ws
 #print axioms Flare.L3.H1.ClientResponse.framing_length_iff
 #print axioms Flare.L3.H1.ClientResponse.framing_close_iff
 #print axioms Flare.L3.H1.ClientResponse.parseStatus_delimited
+#print axioms Flare.L3.H1.ClientResponse.parseStatus_complete
+#print axioms Flare.L3.H1.ClientResponse.headImpl_complete
 #print axioms Flare.L3.H1.ClientResponse.canReuse_ok
 #print axioms Flare.L3.H1.ClientResponse.splitGo_join
 #print axioms Flare.L3.H1.ClientResponse.lfGo_join

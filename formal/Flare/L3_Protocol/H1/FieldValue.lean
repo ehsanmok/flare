@@ -13,6 +13,10 @@ every obs-fold continuation, with `_check_field_value` and then keeps the value 
   value is ASCII, so the contract holds and the `String` is valid UTF-8.
 * With `accept_obs_text_in_field_value` the byte check alone is not enough;
   `valueAccepted` adds a UTF-8 check: `fixed_value_utf8`.
+* `valueOk_complete`, `valueAccepted_complete`: the converse. Every value of
+  RFC 9110 §5.5 field-vchars, SP and HTAB passes the byte check (ASCII only
+  in strict mode), and with obs-text also the UTF-8 check when it is valid
+  UTF-8.
 -/
 namespace Flare.L3.H1.FieldValue
 open Flare Flare.L3.H1.Text
@@ -60,5 +64,29 @@ theorem fixed_value_utf8 (obsText : Bool) : Utf8Safe (valueAccepted obsText) := 
   intro v h
   simp only [valueAccepted, Bool.and_eq_true] at h
   exact (Flare.L1.Utf8.isValidUtf8_iff v).mp h.2
+
+/-! ## Completeness -/
+
+set_option maxRecDepth 8000 in
+theorem byteOk_of_vchar (o : Bool) (c : UInt8) (h : isFieldVchar c = true)
+    (ho : o = true ∨ c.toNat < 128) : byteOk o c = true := by
+  have key : ∀ n, n < 256 → ∀ o : Bool, isFieldVchar (UInt8.ofNat n) = true →
+      (o = true ∨ n < 128) → byteOk o (UInt8.ofNat n) = true := by decide
+  have := key c.toNat c.toNat_lt o (by simpa using h) ho
+  simpa using this
+
+/-- **Every field-vchar value passes the byte check** (only ASCII ones in
+strict mode). -/
+theorem valueOk_complete (o : Bool) (v : Bytes)
+    (h : ∀ c ∈ v, isFieldVchar c = true ∧ (o = true ∨ c.toNat < 128)) : valueOk o v = true :=
+  List.all_eq_true.mpr fun c hc => byteOk_of_vchar o c (h c hc).1 (h c hc).2
+
+/-- **The shipped check accepts every field-vchar value that is valid
+UTF-8**, with obs-text enabled. -/
+theorem valueAccepted_complete (v : Bytes) (h : ∀ c ∈ v, isFieldVchar c = true)
+    (hw : Flare.L1.Utf8.WF v) : valueAccepted true v = true := by
+  simp only [valueAccepted, Bool.and_eq_true]
+  exact ⟨valueOk_complete true v (fun c hc => ⟨h c hc, .inl rfl⟩),
+    (Flare.L1.Utf8.isValidUtf8_iff v).mpr hw⟩
 
 end Flare.L3.H1.FieldValue

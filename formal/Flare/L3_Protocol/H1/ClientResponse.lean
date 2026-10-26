@@ -184,6 +184,47 @@ theorem parseStatus_delimited (line : Bytes) (code : Nat) (h : parseStatus line 
     · cases h
   · cases h
 
+set_option maxRecDepth 8000 in
+theorem dig_not_sws (a : UInt8) (h : isDig a = true) : isSWS a = false := by
+  have key : ∀ n, n < 256 → isDig (UInt8.ofNat n) = true → isSWS (UInt8.ofNat n) = false := by decide
+  simpa using key a.toNat a.toNat_lt (by simpa using h)
+
+/-- **Completeness**: every status line `HTTP/<version> SP <ws> DIGIT{3}`
+followed by the end of line or SP is accepted with that code. `<version>`
+holds no SP, so the first SP is the delimiter; `<ws>` is the extra
+whitespace flare skips before the code. -/
+theorem parseStatus_complete (v ws r : Bytes) (a b c : UInt8) (hv : 32 ∉ v)
+    (hws : ws.all isSWS = true) (ha : isDig a = true) (hb : isDig b = true) (hc : isDig c = true)
+    (hr : r = [] ∨ r.head? = some 32) :
+    parseStatus (HTTP_ ++ v ++ 32 :: ws ++ a :: b :: c :: r) =
+      some ((a.toNat - 48) * 100 + (b.toNat - 48) * 10 + (c.toNat - 48)) := by
+  have hH : HTTP_ = [72, 84, 84, 80, 47] := by decide +kernel
+  have e : HTTP_ ++ v ++ 32 :: ws ++ a :: b :: c :: r =
+      (HTTP_ ++ v ++ [32]) ++ (ws ++ a :: b :: c :: r) := by simp
+  have hsp : findB 32 (HTTP_ ++ v ++ 32 :: ws ++ a :: b :: c :: r) = some (HTTP_ ++ v).length := by
+    apply findB_of
+    · simp
+    · simp [Bytes.getD]
+    · rw [e, List.append_assoc (HTTP_ ++ v), List.take_left' rfl, hH]
+      simp only [List.mem_append, not_or]; exact ⟨by decide, hv⟩
+  have hdrop : (HTTP_ ++ v ++ 32 :: ws ++ a :: b :: c :: r).drop ((HTTP_ ++ v).length + 1) =
+      ws ++ a :: b :: c :: r := by
+    rw [e, List.drop_left' (by simp; omega)]
+  have hw0 : ∀ l : Bytes, l.all isSWS = true → l.dropWhile isSWS = [] := by
+    intro l hl
+    induction l with
+    | nil => rfl
+    | cons x xs ih =>
+      simp only [List.all_cons, Bool.and_eq_true] at hl
+      simp [hl.1, ih hl.2]
+  have hdw : (ws ++ a :: b :: c :: r).dropWhile isSWS = a :: b :: c :: r := by
+    rw [List.dropWhile_append, hw0 ws hws]
+    simp [dig_not_sws a ha]
+  unfold parseStatus
+  rw [if_neg (by rw [hH]; simp), hsp]
+  simp only [hdrop, hdw, ha, hb, hc, Bool.true_and]
+  rcases hr with rfl | h <;> simp_all
+
 /-! ## Connection reuse (RFC 9112 §9.3) -/
 
 def CLOSE : Bytes := Bytes.ofString "close"
@@ -499,6 +540,125 @@ theorem headImpl_agrees : HeadAgrees headImpl := by
   rw [lfHead]
   conv => lhs; rw [hm]
   exact lfGo_join _ _ hne'.1 (fun s hs => ⟨fun e => hne'.2 (e ▸ hs), j2 s hs⟩)
+
+/-! ## Completeness of the head parser
+
+A head of nonempty field lines, each free of CR and LF (RFC 9112 §5 field
+lines cannot hold either), CRLF-terminated and ended by an empty line, is
+accepted with exactly those lines. -/
+
+theorem findCRLF2_skip {c : UInt8} (hc : c ≠ 13) (t : Bytes) :
+    findCRLF2 (c :: t) = (findCRLF2 t).map (· + 1) := by
+  match t with
+  | [] | [_] | [_, _] => rfl
+  | x :: y :: z :: t => simp [findCRLF2, hc]
+
+theorem findCRLF2_crlf {y : UInt8} (hy : y ≠ 13) (t : Bytes) :
+    findCRLF2 (13 :: 10 :: y :: t) = (findCRLF2 (y :: t)).map (· + 2) := by
+  match t with
+  | [] => rfl
+  | d :: t =>
+    rw [findCRLF2.eq_1, if_neg (by simp [hy]), findCRLF2_skip (by decide)]
+    cases findCRLF2 (y :: d :: t) <;> simp
+
+theorem findCRLF2_append : ∀ (x t : Bytes), 13 ∉ x →
+    findCRLF2 (x ++ t) = (findCRLF2 t).map (· + x.length)
+  | [], t, _ => by simp
+  | c :: x, t, h => by
+    simp only [List.mem_cons, not_or] at h
+    rw [List.cons_append, findCRLF2_skip (Ne.symm h.1), findCRLF2_append x t h.2]
+    cases findCRLF2 t <;> simp; omega
+
+theorem joinL_cons_head {s : Bytes} (ss : List Bytes) (hs : s ≠ []) :
+    ∃ y t, joinL (s :: ss) = y :: t ∧ y ∈ s := by
+  obtain ⟨y, ys, rfl⟩ : ∃ y ys, s = y :: ys := by
+    cases s with
+    | nil => exact absurd rfl hs
+    | cons y ys => exact ⟨y, ys, rfl⟩
+  cases ss with
+  | nil => exact ⟨y, ys, rfl, by simp⟩
+  | cons _ _ => exact ⟨y, _, rfl, by simp⟩
+
+theorem findCRLF2_joinL : ∀ (ss : List Bytes) (b : Bytes), ss ≠ [] → (∀ s ∈ ss, s ≠ [] ∧ 10 ∉ s ∧ 13 ∉ s) →
+    findCRLF2 (joinL ss ++ [13, 10, 13, 10] ++ b) = some (joinL ss).length
+  | [], _, h, _ => absurd rfl h
+  | [s], b, _, hs => by
+    simp only [joinL, List.append_assoc]
+    rw [findCRLF2_append s _ (hs s (by simp)).2.2]
+    simp [findCRLF2]
+  | s :: s2 :: ss, b, _, hs => by
+    have h1 := hs s (by simp)
+    have h2 := hs s2 (by simp)
+    obtain ⟨y, t, ht, hy⟩ := joinL_cons_head ss h2.1
+    have hy13 : y ≠ 13 := fun e => h2.2.2 (e ▸ hy)
+    have ih := findCRLF2_joinL (s2 :: ss) b (by simp) (fun x hx => hs x (by simp [hx]))
+    rw [joinL_cons _ _ (by simp)]
+    simp only [CRLF, List.append_assoc]
+    rw [findCRLF2_append s _ h1.2.2]
+    simp only [List.cons_append, List.nil_append]
+    rw [ht] at ih ⊢
+    simp only [List.cons_append, List.append_assoc, List.nil_append] at ih ⊢
+    rw [findCRLF2_crlf hy13, ih]
+    simp; omega
+
+theorem hasBareLF_append : ∀ (x t : Bytes), 10 ∉ x → 13 ∉ x → hasBareLF (x ++ t) = hasBareLF t
+  | [], _, _, _ => rfl
+  | c :: x, t, h10, h13 => by
+    simp only [List.mem_cons, not_or] at h10 h13
+    rw [List.cons_append, hasBareLF_cons, if_neg (Ne.symm h10.1), if_neg (fun h => h13.1 h.1.symm),
+      hasBareLF_append x t h10.2 h13.2]
+
+theorem hasBareLF_joinL : ∀ ss : List Bytes, (∀ s ∈ ss, s ≠ [] ∧ 10 ∉ s ∧ 13 ∉ s) → hasBareLF (joinL ss) = false
+  | [], _ => by simp [joinL, hasBareLF]
+  | [s], hs => by
+    have := hs s (by simp)
+    simpa [joinL, hasBareLF] using hasBareLF_append s [] this.2.1 this.2.2
+  | s :: s2 :: ss, hs => by
+    have h1 := hs s (by simp)
+    rw [joinL_cons _ _ (by simp), List.append_assoc, hasBareLF_append _ _ h1.2.1 h1.2.2]
+    simp only [CRLF, List.cons_append, List.nil_append]
+    rw [hasBareLF_cons, if_neg (by decide), if_pos ⟨rfl, rfl⟩, List.tail_cons]
+    exact hasBareLF_joinL (s2 :: ss) (fun x hx => hs x (by simp [hx]))
+
+theorem splitGo_append : ∀ (acc x t : Bytes), 10 ∉ x → 13 ∉ x →
+    splitGo acc (x ++ t) = splitGo (x.reverse ++ acc) t
+  | _, [], _, _, _ => rfl
+  | acc, c :: x, t, h10, h13 => by
+    simp only [List.mem_cons, not_or] at h10 h13
+    rw [List.cons_append, splitGo_cons, if_neg (Ne.symm h10.1), if_neg (fun h => h13.1 h.1.symm),
+      splitGo_append (c :: acc) x t h10.2 h13.2]
+    simp
+
+theorem splitLines_joinL : ∀ ss : List Bytes, (∀ s ∈ ss, s ≠ [] ∧ 10 ∉ s ∧ 13 ∉ s) → splitLines (joinL ss) = ss
+  | [], _ => by simp [splitLines, joinL, splitGo]
+  | [s], hs => by
+    have := hs s (by simp)
+    have e := splitGo_append [] s [] this.2.1 this.2.2
+    simp only [List.append_nil] at e
+    simp [splitLines, joinL, e, splitGo, this.1]
+  | s :: s2 :: ss, hs => by
+    have h1 := hs s (by simp)
+    unfold splitLines
+    rw [joinL_cons _ _ (by simp), List.append_assoc, splitGo_append _ _ _ h1.2.1 h1.2.2]
+    simp only [CRLF, List.cons_append, List.nil_append, List.append_nil]
+    rw [splitGo_cons, if_neg (by decide), if_pos ⟨rfl, rfl⟩, List.tail_cons, List.reverse_reverse]
+    exact congrArg (s :: ·) (splitLines_joinL (s2 :: ss) (fun x hx => hs x (by simp [hx])))
+
+/-- **Completeness**: a head of CR/LF-free nonempty lines, CRLF-terminated
+and closed by an empty line, is accepted with those lines (through
+`_bytes_to_str`) and the body after it. -/
+theorem headImpl_complete (ss : List Bytes) (b : Bytes) (hne : ss ≠ []) (hs : ∀ s ∈ ss, s ≠ [] ∧ 10 ∉ s ∧ 13 ∉ s) :
+    headImpl (joinL ss ++ [13, 10, 13, 10] ++ b) = some (ss.map (·.map san), b) := by
+  have hf := findCRLF2_joinL ss b hne hs
+  have htake : (joinL ss ++ [13, 10, 13, 10] ++ b).take (joinL ss).length = joinL ss := by
+    rw [List.append_assoc, List.take_left' rfl]
+  have hdrop : (joinL ss ++ [13, 10, 13, 10] ++ b).drop ((joinL ss).length + 4) = b := by
+    rw [List.drop_left' (by simp)]
+  have hnil : [] ∉ ss := fun h => (hs [] h).1 rfl
+  unfold headImpl
+  rw [hf]
+  simp only [htake, hasBareLF_joinL ss hs, splitLines_joinL ss hs, hdrop]
+  simp [hne, hnil]
 
 /-! ## TLS end of stream (finding H1-11) -/
 

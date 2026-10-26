@@ -77,6 +77,9 @@ File: `H1/Framing.lean`.
 | `framing_agrees` | For either `ows`, any `allowCL` and `maxBody`: if the parser accepts, the shipped reactor frames the request the same way. | proved |
 | `no_smuggling_strict` | Strict mode (`ows = false`): parser acceptance implies the same framing as the shipped reactor. | proved |
 | `lf_fixed_agrees` | The shipped reactor splits lines with the parser's LF splitter (`reactorLines`), so the two agree whenever the parser accepts. | proved |
+| `classify_chunked` | A Transfer-Encoding value whose list elements, stripped and lowercased with empty elements dropped, are exactly `chunked` is accepted (RFC 9110 §5.6.1). | proved |
+| `parserFraming_chunked`, `reactorFraming_chunked` | Completeness: well-formed field lines with a Transfer-Encoding that classifies as `chunked` and no Content-Length are framed as chunked, by the parser and the reactor. | proved |
+| `parserFraming_length`, `reactorFraming_length` | Completeness: well-formed field lines with no Transfer-Encoding and Content-Length values that all equal one `n` with `0 ≤ n ≤ maxBody` are framed by `n`, by both. | proved |
 
 ### Header values and the String invariant
 
@@ -88,6 +91,7 @@ File: `H1/FieldValue.lean`.
 |---|---|---|
 | `strict_value_ascii`, `strict_value_utf8` | In strict mode every accepted value is ASCII, and hence valid UTF-8 (RFC 3629 `WF`). | proved |
 | `fixed_value_utf8` | With the UTF-8 check (the shipped `valueAccepted`), every accepted value is valid UTF-8, with or without obs-text. | proved |
+| `valueOk_complete`, `valueAccepted_complete` | Completeness: a value of field-vchars, SP and HTAB (RFC 9110 §5.5) passes the byte check, ASCII only in strict mode; with obs-text the shipped check accepts it whenever it is valid UTF-8. | proved |
 
 ### WebSocket frame codec
 
@@ -161,7 +165,9 @@ Files: `H1/ClientChunked.lean`, `H1/ClientResponse.lean`.
 | `cDec_agree`, `framed_chunked_agrees` | On any buffer the shipped scanner accepts at `e`, the client decoder either raises or returns exactly the server decoder's bytes, reading nothing past `e`. So the pooled reader's chunked path is right. | proved |
 | `cRead_complete` | On the read-to-EOF path (`cRead`), a returned body is always a complete chunked body. | proved |
 | `parseStatus_delimited` | The code is three digits followed by SP or the end of the line (`CodeDelimited`). | proved |
+| `parseStatus_complete` | Completeness: `HTTP/<version> SP [whitespace] DIGIT{3}`, then SP or the end of the line, is accepted with that code, for any version without SP. | proved |
 | `splitGo_join`, `lfGo_join`, `headImpl_agrees` | With bare LF and empty lines refused, the head lines and body start equal those of the LF-recognising recipient. | proved |
+| `headImpl_complete` | Completeness: a head of nonempty lines without CR or LF, each ended by CRLF and closed by an empty line, is accepted with those lines and the body after it. | proved |
 | `canReuse_ok` | Reuse implies HTTP/1.1 without `close` (RFC 9112 §9.3). | proved |
 | `bufferedClose_safe` | The guard never returns a close-delimited TLS body that ended without close_notify, on the buffered and the streaming path. | proved |
 

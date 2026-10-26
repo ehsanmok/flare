@@ -465,4 +465,9 @@ theorem parseCL_strip (l : Bytes) : parseCL (strip l) = parseCL l := by
     rw [List.append_assoc, dropWhile_ws_prefix p _ hp]
   rw [e1, parseCL_append_term _ _ (term_ws hs)]
 
+/-- **A coding list that is exactly `chunked` is accepted**, in any case,
+with any SP/HTAB around it and any empty list elements (RFC 9110 §5.6.1). -/
+theorem classify_chunked (v : Bytes) (h : tokens v = [CHK]) : classify v = 1 := by
+  simp [classify, h, classifyT]
+
 end Flare.L3.H1.Text

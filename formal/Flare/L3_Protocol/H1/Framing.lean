@@ -401,4 +401,52 @@ theorem lf_fixed_agrees (allowCL : Bool) (maxBody : Nat) (blk : Bytes)
       parserFraming false allowCL maxBody (linesLF blk) :=
   framing_agrees false allowCL maxBody _ hacc
 
+/-! ## Completeness
+
+The converse direction: requests the RFC frames, within flare's rules
+(Transfer-Encoding exactly `chunked` and no Content-Length beside it; equal
+Content-Length values within `maxBody`), are accepted, by the parser and so
+by the reactor (`framing_agrees`). -/
+
+/-- **A well-formed chunked request is framed as chunked.** -/
+theorem parserFraming_chunked (ows allowCL : Bool) (maxBody : Nat) (lines : List Bytes)
+    (hwf : lines.all (wfB ows) = true) (hS : lines.filterMap (parserField ows TEn) ≠ [])
+    (hc : classify (joinP (lines.filterMap (parserField ows TEn))) = 1)
+    (hC : lines.filterMap (parserField ows CLn) = []) :
+    parserFraming ows allowCL maxBody lines = .chunked := by
+  simp [parserFraming, hwf, hS, hc, hC]
+
+/-- **A well-formed request with agreeing Content-Lengths within the cap is
+framed by that length.** -/
+theorem parserFraming_length (ows allowCL : Bool) (maxBody : Nat) (lines : List Bytes) (n : Int)
+    (ns : List Int) (hwf : lines.all (wfB ows) = true) (hS : lines.filterMap (parserField ows TEn) = [])
+    (hC : (lines.filterMap (parserField ows CLn)).map parseCL = n :: ns) (hn : 0 ≤ n)
+    (hns : ∀ m ∈ ns, m = n) (hmax : n ≤ maxBody) :
+    parserFraming ows allowCL maxBody lines = .length n.toNat := by
+  have hneg : ((n :: ns).any (· < 0)) = false := by
+    simp only [List.any_cons, List.any_eq_false, decide_eq_true_eq, Bool.or_eq_false_iff,
+      decide_eq_false_iff_not, Int.not_lt]
+    exact ⟨hn, fun m hm => by rw [hns m hm]; exact hn⟩
+  have hall : ((n :: ns).all (· = (n :: ns).headD 0)) = true := by
+    simp only [List.all_cons, List.headD_cons, decide_true, Bool.true_and, List.all_eq_true]
+    exact fun m hm => decide_eq_true (hns m hm)
+  simp only [parserFraming, hwf, hS, hC, hneg, hall]
+  simp [Int.not_lt.mpr hmax]
+
+theorem reactorFraming_chunked (ows allowCL : Bool) (maxBody : Nat) (lines : List Bytes)
+    (hwf : lines.all (wfB ows) = true) (hS : lines.filterMap (parserField ows TEn) ≠ [])
+    (hc : classify (joinP (lines.filterMap (parserField ows TEn))) = 1)
+    (hC : lines.filterMap (parserField ows CLn) = []) :
+    reactorFraming allowCL maxBody lines = .chunked := by
+  have h := parserFraming_chunked ows allowCL maxBody lines hwf hS hc hC
+  rw [framing_agrees ows allowCL maxBody lines (by rw [h]; decide), h]
+
+theorem reactorFraming_length (ows allowCL : Bool) (maxBody : Nat) (lines : List Bytes) (n : Int)
+    (ns : List Int) (hwf : lines.all (wfB ows) = true) (hS : lines.filterMap (parserField ows TEn) = [])
+    (hC : (lines.filterMap (parserField ows CLn)).map parseCL = n :: ns) (hn : 0 ≤ n)
+    (hns : ∀ m ∈ ns, m = n) (hmax : n ≤ maxBody) :
+    reactorFraming allowCL maxBody lines = .length n.toNat := by
+  have h := parserFraming_length ows allowCL maxBody lines n ns hwf hS hC hn hns hmax
+  rw [framing_agrees ows allowCL maxBody lines (by rw [h]; simp), h]
+
 end Flare.L3.H1.Framing
