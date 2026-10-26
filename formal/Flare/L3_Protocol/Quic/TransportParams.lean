@@ -397,7 +397,7 @@ strings through `_emit_bytes_param`, the flag as `varint(0x0c) 00`. It raises
 on a reset token that is not 16 bytes, ack_delay_exponent > 20,
 max_ack_delay ≥ 2^14 and active_connection_id_limit < 2, and
 `encode_varint` raises on a value ≥ 2^62. Stated for any varint encoder
-`enc` with `VarintCodec enc` (flare's is proved in L1). -/
+`enc` with `VarintCodec enc`; `H3/RealVarint.lean` proves flare's meets it. -/
 
 /-- mirrors flare/quic/transport_params.mojo#_emit_varint_param sha=771c20d31510 at=59bda50f (the value) -/
 def optP (enc : Nat → Bytes) (id : Nat) : Option Nat → List (Nat × Bytes)

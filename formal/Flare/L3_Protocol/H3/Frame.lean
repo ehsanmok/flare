@@ -11,8 +11,8 @@ Mojo `UInt64`/`Int` conversions on them (`Int(len_var.value)`,
 `payload_start + Int(len)`) cannot wrap (`decVarint_lt`).
 
 The varint *encoder* belongs to the L1 layer; round trips here are stated
-for any encoder `enc` satisfying `VarintCodec enc`, a hypothesis the L1
-proof discharges for flare's `encode_varint`.
+for any encoder `enc` satisfying `VarintCodec enc`; `RealVarint.lean`
+proves flare's `encode_varint` meets it and restates them on that encoder.
 -/
 namespace Flare.L3.H3
 
@@ -116,7 +116,7 @@ theorem decVarint_lt {b : Bytes} {v k : Nat} (h : decVarint b = some (v, k)) : v
 
 /-- Hypothesis on an encoder: decoding its output (followed by anything)
 gives the value back and consumes exactly the encoding. Discharged for
-`flare/quic/varint.mojo:encode_varint` by the L1 layer. -/
+`flare/quic/varint.mojo:encode_varint` by `RealVarint.realEnc_codec`. -/
 def VarintCodec (enc : Nat → Bytes) : Prop :=
   ∀ v rest, v < 2 ^ 62 → decVarint (enc v ++ rest) = some (v, (enc v).length)
 

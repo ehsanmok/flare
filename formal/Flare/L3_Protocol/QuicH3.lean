@@ -19,6 +19,7 @@ import Flare.L3_Protocol.H3.RequestReader
 import Flare.L3_Protocol.H3.Grammar
 import Flare.L3_Protocol.H3.Control
 import Flare.L3_Protocol.H3.ControlStart
+import Flare.L3_Protocol.H3.RealVarint
 
 /-!
 # L3: QUIC, QPACK and HTTP/3

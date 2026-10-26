@@ -43,9 +43,9 @@ flare's security documentation and its code (section 6).
 
 | | |
 |---|---|
-| Lean files | 164 (52992 lines) |
-| Theorems | 2624 |
-| Headline theorems in the axiom audit | 691 |
+| Lean files | 165 (53164 lines) |
+| Theorems | 2636 |
+| Headline theorems in the axiom audit | 700 |
 | Confirmed findings | 138 (6 high, 50 medium, 81 low, 1 info) |
 | Resolved (fix landed, regression test in `tests/`) | 138 of 138 |
 
@@ -1696,7 +1696,7 @@ Files: `Quic/TransportParams.lean`, `Quic/PeerParams.lean`.
 - `decode` / `decodeLoop` mirror `decode_transport_parameters` (`quic/transport_params.mojo`): the `varint(id) varint(len) value` loop, its truncation checks, the duplicate list and the per-id branches, including the initial_max_streams_* ≤ 2^60 bound (QUIC-10) and the preferred_address layout check `paValid` (QUIC-13). `readVar` mirrors `_read_param_varint`.
 - The spec `specDecode` is RFC 9000 §7.4 and §18: a TLV sequence with pairwise distinct ids, each value valid by §18.2, folded into the record. `specFrom` is the same spec processed one parameter at a time.
 - `clientCheck` mirrors `check_server_transport_params` (QUIC-12): presence scans of 0x00, 0x0f, 0x10 and 0x0d on the raw blob, next to the comparisons on the decoded record. `serverCheck` mirrors `transport_parameter_present` and `check_client_transport_params`, which the server runs on the client's blob once the 1-RTT keys are installed (`QuicListener._dispatch_crypto_frames`, `_client_params_ok`; QUIC-11). `clientSpec` and `serverSpec` are RFC 9000 §7.3 and §18.2, stated over the raw TLV list (`present`) so that an absent parameter differs from a zero-length one.
-- `encode`, `params` and `wire` mirror `encode_transport_parameters` and its three emitters `_emit_varint_param`, `_emit_bytes_param` and `_emit_flag_param`, for any varint encoder `enc` with `VarintCodec enc` (the same hypothesis as the H3 frame round trips; L1 discharges it for flare's `encode_varint`).
+- `encode`, `params` and `wire` mirror `encode_transport_parameters` and its three emitters `_emit_varint_param`, `_emit_bytes_param` and `_emit_flag_param`, for any varint encoder `enc` with `VarintCodec enc` (the same hypothesis as the H3 frame round trips). `H3/RealVarint.lean` discharges it for flare's `encode_varint`: `decVarint_eq` shows the H3 `decVarint` and `L1.QuicVarint.decode`, both models of `decode_varint`, agree, `realEnc_codec` and `realEnc_pos` show `L1.QuicVarint.encode` meets `VarintCodec` and `hpos`, and `real_decodeFrame_encode`, `real_decodeSettings_encode`, `real_emit_control_start`, `real_implOut_spec`, `real_tlvs_wire` and `real_encode_roundtrip` restate the six round trips on it.
 
 | Lean name | Statement | Status |
 |---|---|---|

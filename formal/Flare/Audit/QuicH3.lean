@@ -47,6 +47,11 @@ import Flare.L3_Protocol.QuicH3
 -- HTTP/3
 #print axioms Flare.L3.H3.decodeFrame_encode
 #print axioms Flare.L3.H3.decodeSettings_encode
+#print axioms Flare.L3.H3.decVarint_eq
+#print axioms Flare.L3.H3.realEnc_codec
+#print axioms Flare.L3.H3.realEnc_pos
+#print axioms Flare.L3.H3.real_decodeFrame_encode
+#print axioms Flare.L3.H3.real_decodeSettings_encode
 #print axioms Flare.L3.H3.feedChunks_chunking_independent
 #print axioms Flare.L3.H3.run_accept_impl
 #print axioms Flare.L3.H3.feed_bounded
@@ -59,6 +64,8 @@ import Flare.L3_Protocol.QuicH3
 #print axioms Flare.L3.H3.Control.runClassifyFixed_unique
 #print axioms Flare.L3.H3.ControlStart.emit_control_start
 #print axioms Flare.L3.H3.ControlStart.implOut_spec
+#print axioms Flare.L3.H3.ControlStart.real_emit_control_start
+#print axioms Flare.L3.H3.ControlStart.real_implOut_spec
 #print axioms Flare.L3.H3.ControlStart.control_stream_sendable
 #print axioms Flare.L3.H3.ControlStart.control_classified
 -- Fixed findings
@@ -110,3 +117,5 @@ import Flare.L3_Protocol.QuicH3
 -- Transport-parameter encoder
 #print axioms Flare.L3.Quic.TransportParams.tlvs_wire
 #print axioms Flare.L3.Quic.TransportParams.encode_roundtrip
+#print axioms Flare.L3.Quic.TransportParams.real_tlvs_wire
+#print axioms Flare.L3.Quic.TransportParams.real_encode_roundtrip
