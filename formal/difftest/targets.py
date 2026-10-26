@@ -108,6 +108,14 @@ TARGETS = {
         gen="bytes",
         max_len=48,
     ),
+    "cstr.cross": dict(
+        driver="dt_cstr",
+        symbols=["flare/net/cstr.mojo#c_str_verdict+c_str_addr+CSTR_PASS+CSTR_NULL+CSTR_REJECT"],
+        models=["Flare/Kernels/CStr.lean"],
+        fuzz=[],
+        gen="cstr",
+        max_len=300,
+    ),
     "ws_protocol.trace": dict(
         driver="dt_ws",
         symbols=[

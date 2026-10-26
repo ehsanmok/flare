@@ -31,6 +31,14 @@ a52f4597a68d thm Flare/Kernels/BufLedger.lean::run_inRing_le
 0e860b7630d0 thm Flare/Kernels/BufLedger.lean::run_ringSize
 ad2c2aed19ee thm Flare/Kernels/BufLedger.lean::step_conserved
 62dab29660db thm Flare/Kernels/BufLedger.lean::step_ringSize
+5ca31144611c spec Flare/Kernels/CStr.lean::CrossOK
+3ef7edefa61d thm Flare/Kernels/CStr.lean::any_nul_iff
+9df4300b1f2d spec Flare/Kernels/CStr.lean::cRead
+5a5dd658786b thm Flare/Kernels/CStr.lean::cRead_append_nul
+f49d30f06845 thm Flare/Kernels/CStr.lean::cRead_prefix
+dda7579bafac thm Flare/Kernels/CStr.lean::pass_complete
+25e821d73630 thm Flare/Kernels/CStr.lean::pass_exact
+31d96f3bb010 thm Flare/Kernels/CStr.lean::verdict_ok
 bcbe7320e2e4 spec Flare/Kernels/WsProtocol.lean::CapRule
 0424e68bdf9a spec Flare/Kernels/WsProtocol.lean::CloseReplyRule
 d9fa47dbb5bd spec Flare/Kernels/WsProtocol.lean::Inv

@@ -1,0 +1,30 @@
+# Verified kernel: strings crossing into C as NUL-terminated char*.
+# Follow-up to issue #42 (fixed in 6cf4db1f): an empty CA bundle path reached
+# OpenSSL as a pointer into unrelated static data. The kernel covers every
+# char* flare hands C, and the difftest and fuzz harness check the stdlib's
+# terminator against real libc, which the proof cannot see.
+id = "ffi-cstr"
+issue = "https://github.com/ehsanmok/flare/issues/42"
+summary = "Every string flare hands C as char* is read by C as exactly the Mojo string, or is passed as NULL or refused as the call site requires."
+
+kernel = ["flare/net/cstr.mojo#c_str_verdict+CSTR_PASS+CSTR_NULL+CSTR_REJECT+EMPTY_REJECT+EMPTY_NULL+EMPTY_PASS"]
+call_sites = [
+    "flare/tls/stream.mojo#_do_ssl_ctx_load_ca_bundle+_do_ssl_ctx_load_cert_key+_do_ssl_connect+_do_ssl_connect_ex",
+    "flare/tls/_server_ffi.mojo#_do_ssl_ctx_new_server+_do_ssl_ctx_reload+_do_ssl_ctx_set_cert+_do_ssl_ctx_set_verify_client_cert",
+    "flare/net/_libc.mojo#_getaddrinfo+_inet_pton",
+    "flare/uds/_libc.mojo#unlink_path",
+]
+
+model = "Flare/Kernels/CStr.lean"
+specs = ["cRead", "CrossOK"]
+theorems = ["cRead_append_nul", "cRead_prefix", "verdict_ok", "pass_exact", "pass_complete"]
+difftest = ["cstr.cross"]
+tests = ["tests/net/test_cstr.mojo", "tests/tls/test_tls.mojo", "fuzz/fuzz_cstr.mojo"]
+
+status = "proved"
+
+out_of_scope = [
+    "That as_c_string_span appends exactly one NUL after the bytes: stdlib behaviour, checked against libc strlen/memcmp by cstr.cross and fuzz_cstr, including on the string of issue #42.",
+    "Buffer lifetime across the call (each call site anchors the owned string with `_ = s^` after the C call; reviewed, and an early free shows up under ASan).",
+    "Strings passed with an explicit length (crypto, iovecs, ALPN): not NUL-terminated, so not in this kernel.",
+]

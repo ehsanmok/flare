@@ -4,6 +4,7 @@ import Flare.L1_Encoding.QuicVarint
 import Flare.L1_Encoding.Utf8
 import Flare.L1_Encoding.Huffman
 import Flare.Kernels.BufLedger
+import Flare.Kernels.CStr
 import Flare.L3_Protocol.H1.Chunked
 import Oracle.H2
 import Oracle.Ws
@@ -119,6 +120,24 @@ def ledgerTrace (check : Bool) : Bytes → String
 
 end Ledger
 
+/-- byte 0: bits 0-1 pick what an empty value means, `% 3` (refused, NULL,
+`""`); bits 2-3 only change how the Mojo driver builds the string. The rest
+is the string. Output: what C reads (`PASS:<hex>`), `NULL`, or `REJECT`. The
+spec answers from `cRead` alone: pass exactly what C reads back unchanged. -/
+def cstrCross (spec : Bool) : Bytes → String
+  | [] => "ERR"
+  | f :: s =>
+    let empty := (f.toNat % 4) % 3
+    if spec then
+      if Kernels.CStr.cRead (s ++ [0]) == s && (!s.isEmpty || empty == 2) then
+        "PASS:" ++ toHex s
+      else if s.isEmpty && empty == 1 then "NULL" else "REJECT"
+    else
+      match Kernels.CStr.ofCode (Kernels.CStr.verdict s empty) with
+      | .pass => "PASS:" ++ toHex (Kernels.CStr.cRead (s ++ [0]))
+      | .null => "NULL"
+      | .reject => "REJECT"
+
 def targets : List Target := [
   { name := "hpack_int.decode", impl := hpackIntDecode },
   { name := "hpack_int.encode", impl := hpackIntEncode },
@@ -135,6 +154,7 @@ def targets : List Target := [
   { name := "huffman.length", impl := fun b => s!"OK:{Huffman.encodedLengthImpl b}",
     spec := some fun b => s!"OK:{(Huffman.encode b).length}", specMax := 24 },
   { name := "bufring_ledger.trace", impl := ledgerTrace false, spec := some (ledgerTrace true) },
+  { name := "cstr.cross", impl := cstrCross false, spec := some (cstrCross true) },
   { name := "h1_chunked.resume", impl := chunkedResume },
   { name := "h2_conn.frames", impl := Oracle.H2.frames },
   { name := "ws_protocol.trace", impl := Oracle.Ws.trace }

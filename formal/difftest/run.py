@@ -359,7 +359,31 @@ def g_h2(r, m):
     return bytes(out[:m])
 
 
-GENERATORS = {"bytes": g_bytes, "text": g_text, "hpack_int_decode": g_hpack_int_decode,
+def g_cstr(r, m):
+    """byte 0: bits 0-1 what an empty value means (% 3), bit 2 slice-derived,
+    bit 3 (empty only) the default TlsConfig().ca_bundle. Then a string of
+    every length up to 64 (around Mojo's inline-string capacity) or longer,
+    mostly text, with a NUL at the start, the end, inside, or alone."""
+    n = r.randint(0, 64) if r.random() < 0.85 else r.randint(65, m - 1)
+    out = bytearray()
+    while len(out) < n:
+        x = r.random()
+        out += (bytes([r.randrange(0x21, 0x7F)]) if x < 0.8 else
+                "\u00e9".encode() if x < 0.9 else "\u20ac".encode())
+    out = out[:n]
+    x = r.random()
+    if out and x < 0.15:
+        out[r.randrange(len(out))] = 0
+    elif x < 0.2:
+        out = bytearray([0]) + out
+    elif x < 0.25:
+        out += b"\x00"
+    elif x < 0.28:
+        out = bytearray(b"\x00")
+    return bytes([r.randrange(16)]) + bytes(out)
+
+
+GENERATORS = {"cstr": g_cstr, "bytes": g_bytes, "text": g_text, "hpack_int_decode": g_hpack_int_decode,
               "hpack_int_encode": g_hpack_int_encode, "quic_decode": g_quic_decode,
               "quic_encode": g_quic_encode, "utf8": g_utf8, "chunked": g_chunked, "h2": g_h2}
 

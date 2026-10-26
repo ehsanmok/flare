@@ -1,0 +1,5 @@
+00  # empty string where C needs a value: refused, not passed
+08  # issue #42: the default TlsConfig().ca_bundle, required: refused
+09  # issue #42: the default TlsConfig().ca_bundle as a CA path: NULL (C read "String span starts on" before the fix)
+0a  # issue #42: the default TlsConfig().ca_bundle as a meaningful "": C reads ""
+006c6f63616c686f7374002e6576696c  # localhost\0.evil: C would read "localhost"; refused

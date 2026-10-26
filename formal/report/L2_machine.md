@@ -158,6 +158,20 @@ overfills the ring, and refills it once every held completion is processed.
 The kernel is differential-tested against the Mojo code by the `formal/difftest`
 target `bufring_ledger.trace`.
 
+Strings flare hands C as NUL-terminated `char*` go through a second verified
+kernel, `Flare/Kernels/CStr.lean` (namespace `Flare.Kernels.CStr`), which
+mirrors `net/cstr.mojo` (`c_str_verdict`). It covers the TLS client and
+server paths, `getaddrinfo`, `inet_pton` and `unlink`. The spec defs are
+`cRead` (C reads the bytes before the first NUL) and `CrossOK` (pass exactly
+the strings C reads back unchanged, NULL only for an empty value where the
+parameter reads NULL as a default, `""` only where the parameter gives it a
+meaning). `verdict_ok` proves every verdict meets `CrossOK`;
+`cRead_append_nul`, `pass_exact` and `pass_complete` follow. That the
+stdlib's `as_c_string_span` appends one NUL is outside the proof, so the
+difftest target `cstr.cross` reads back what real libc sees (`strlen`,
+`memcpy`), including the empty `TlsConfig().ca_bundle` of issue #42, and
+`fuzz/fuzz_cstr.mojo` asserts the same properties under mozz.
+
 ### UringReactor wakeup (`UringWakeup.lean`)
 
 `runtime/uring_reactor.mojo` (`UringReactor.poll`, `_try_arm_wakeup`,
@@ -932,6 +946,7 @@ timer wheel's fired lists record ids, not tokens.
 | `Flare.L2.IoUring.cqeCount`, `reapCqe` | flare/runtime/io_uring_driver.mojo `IoUringDriver.cqe_count`, `reap_cqe` | `reap_count`, `reap_keeps_bound` | proved |
 | `Flare.L2.IoUring.pbufIdx` | flare/runtime/_pbuf_ring.mojo `_pbuf_ring_add` | `pbufIdx_wrap`, `pbuf_add_preserves_tail` | proved |
 | `Flare.Kernels.BufLedger.classify`, `Ledger.onFill`, `Ledger.onComplete` | flare/http/_bufring_ledger.mojo `classify_recv`, `BufLedger.on_fill`, `on_complete` | `classify_ok`, `run_conserved`, `run_inRing_le`, `run_drained` | proved; difftest `bufring_ledger.trace` |
+| `Flare.Kernels.CStr.verdict` | flare/net/cstr.mojo `c_str_verdict` | `verdict_ok`, `cRead_append_nul`, `pass_exact`, `pass_complete` | proved; difftest `cstr.cross`, fuzz `fuzz-cstr` |
 | `Flare.L2.UringWakeup.lazyArm`, `drain`, `poll` | flare/runtime/uring_reactor.mojo `UringReactor.poll`, `_try_arm_wakeup`, `_arm_wakeup_recv`, `_drain_into_tracking` | `poll_inv`, `poll_never_blocks_unarmed` | proved (RT-03, resolved) |
 | `Flare.L2.TimerWheel.init`, `schedule`, `cancel` | flare/runtime/timer_wheel.mojo `TimerWheel.__init__`, `schedule`, `cancel` | `inv_schedule`, `schedule_spec`, `cancel_spec` | proved |
 | `Flare.L2.TimerWheel.stepTick`, `drainOne`, `jump`, `jumpIds`, `rebucketOne`, `advance` | flare/runtime/timer_wheel.mojo `TimerWheel.advance`, `_jump` | `advance_spec`, `jump_equiv_ticks`, `run_nodup` | proved |
