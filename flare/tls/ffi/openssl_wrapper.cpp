@@ -15,6 +15,7 @@
 #include <openssl/x509_vfy.h>
 #include <openssl/x509v3.h>
 #include <openssl/pem.h>
+#include <dlfcn.h>
 #include <pthread.h>
 #include <string.h>
 #include <string>
@@ -44,6 +45,20 @@
  * TLS access (the allocator's included) on __tls_get_addr's slow path. */
 static pthread_key_t last_error_key;
 static pthread_once_t last_error_once = PTHREAD_ONCE_INIT;
+
+/* This library must never be unloaded: the error key's destructor and the
+ * callbacks it hands OpenSSL are code in this image, and both can run after
+ * the caller's handle is gone. Callers load it with dlopen and dlclose it
+ * when their handle drops. Linux builds link with -z nodelete; macOS has no
+ * such flag, and since the shim lost its TLS segment (which dyld refuses to
+ * unload) the last dlclose really unmaps it, and the next call into it
+ * crashes. A RTLD_NODELETE reference taken at load time is the portable
+ * spelling of -z nodelete. */
+__attribute__((constructor)) static void pin_self() {
+    Dl_info info;
+    if (dladdr(reinterpret_cast<void*>(&pin_self), &info) && info.dli_fname)
+        (void)dlopen(info.dli_fname, RTLD_NOW | RTLD_NOLOAD | RTLD_NODELETE);
+}
 
 static void last_error_key_init() {
     pthread_key_create(&last_error_key, [](void* p) {
