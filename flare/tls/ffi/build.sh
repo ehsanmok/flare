@@ -98,7 +98,7 @@ if $CXX -O2 -std=c++17 -fPIC -DNDEBUG -shared \
     "$SOURCE" \
     -I"$CONDA_PREFIX/include" \
     -L"$CONDA_PREFIX/lib" \
-    -lssl -lcrypto \
+    -lssl -lcrypto -ldl \
     $NODELETE \
     -Wl,-rpath,"$CONDA_PREFIX/lib"; then
     echo ""
