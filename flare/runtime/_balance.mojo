@@ -140,7 +140,11 @@ def _wake(fd: Int):
     """Make a sleeping ``Reactor.poll`` on the eventfd ``fd`` return."""
     if fd <= 0:
         return
-    _ = external_call["eventfd_write", c_int](c_int(fd), UInt64(1))
+    # Linux only, like the group: ``eventfd_write`` does not exist on macOS,
+    # and an unguarded call leaves it undefined at link time even though no
+    # balancer is ever enabled there.
+    comptime if CompilationTarget.is_linux():
+        _ = external_call["eventfd_write", c_int](c_int(fd), UInt64(1))
 
 
 struct Balancer(Copyable, ImplicitlyCopyable):
