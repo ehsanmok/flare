@@ -18,11 +18,17 @@ Test cases
 4. drop_n == 1 -> 1-byte shift, trailing bytes preserved.
 5. drop_n large enough to be defensive (>= len) -> empty result.
 6. defensive over-shoot (drop_n > len) -> empty result, no crash.
+7. a fully consumed buffer gives its capacity back, and a fresh
+   ``ConnHandle`` holds no read buffer, so idle keep-alive
+   connections cost no per-connection read buffer.
 """
 
 from std.testing import assert_equal, assert_true, TestSuite
 
 from flare.http._server_reactor_impl import _compact_read_buf_drop_prefix
+from flare.http._reactor.conn_handle import ConnHandle
+from flare.net import SocketAddr
+from flare.tcp import TcpListener, TcpStream
 
 
 def test_drop_zero_keeps_full_buffer() raises:
@@ -83,6 +89,39 @@ def test_drop_more_than_len_clears_buffer() raises:
     assert_equal(len(buf), 0)
 
 
+def test_drop_all_releases_capacity() raises:
+    """Full consumption frees the allocation, not just the length."""
+    var buf = List[UInt8](capacity=8192)
+    for _ in range(40):
+        buf.append(UInt8(ord("x")))
+    assert_true(buf.capacity() >= 8192)
+    _compact_read_buf_drop_prefix(buf, 40)
+    assert_equal(len(buf), 0)
+    assert_equal(buf.capacity(), 0)
+
+
+def test_drop_prefix_keeps_pipelined_tail_and_data() raises:
+    """A partial drop still keeps the pipelined bytes."""
+    var buf = List[UInt8](capacity=8192)
+    for i in range(10):
+        buf.append(UInt8(i))
+    _compact_read_buf_drop_prefix(buf, 4)
+    assert_equal(len(buf), 6)
+    assert_equal(Int(buf[0]), 4)
+    assert_equal(Int(buf[5]), 9)
+
+
+def test_new_conn_handle_has_no_read_buffer() raises:
+    """An accepted connection holds no read buffer until bytes arrive."""
+    var listener = TcpListener.bind(SocketAddr.localhost(0))
+    var port = UInt16(listener.local_addr().port)
+    var client = TcpStream.connect(SocketAddr.localhost(port))
+    var handle = ConnHandle(listener.accept())
+    assert_equal(len(handle.read_buf), 0)
+    assert_equal(handle.read_buf.capacity(), 0)
+    _ = client^
+
+
 def test_drop_from_empty_is_noop() raises:
     """Empty input + any drop_n -> still empty, no crash."""
     var buf = List[UInt8]()
@@ -114,6 +153,9 @@ def main() raises:
     suite.test[test_drop_prefix_keeps_trailing]()
     suite.test[test_drop_all_clears_buffer]()
     suite.test[test_drop_more_than_len_clears_buffer]()
+    suite.test[test_drop_all_releases_capacity]()
+    suite.test[test_drop_prefix_keeps_pipelined_tail_and_data]()
+    suite.test[test_new_conn_handle_has_no_read_buffer]()
     suite.test[test_drop_from_empty_is_noop]()
     suite.test[test_drop_long_buffer_preserves_byte_order]()
     suite^.run()

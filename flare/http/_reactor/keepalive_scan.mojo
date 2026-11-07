@@ -329,7 +329,9 @@ def _compact_read_buf_drop_prefix(
     if drop_n >= n:
         # Either exactly consumed (drop_n == n) or over-consumed
         # (defensive). Either way the buffer is empty after this.
-        read_buf.clear()
+        # Reassign instead of clear() so the capacity is freed and an idle
+        # keep-alive connection holds no read buffer between requests.
+        read_buf = List[UInt8]()
         return
     var keep = n - drop_n
     # Non-overlapping memcpy from old buffer into a fresh

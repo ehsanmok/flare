@@ -121,6 +121,15 @@ from test_compact_read_buf import (
     test_drop_more_than_len_clears_buffer as test_compact_read_buf__test_drop_more_than_len_clears_buffer,
 )
 from test_compact_read_buf import (
+    test_drop_all_releases_capacity as test_compact_read_buf__test_drop_all_releases_capacity,
+)
+from test_compact_read_buf import (
+    test_drop_prefix_keeps_pipelined_tail_and_data as test_compact_read_buf__test_drop_prefix_keeps_pipelined_tail_and_data,
+)
+from test_compact_read_buf import (
+    test_new_conn_handle_has_no_read_buffer as test_compact_read_buf__test_new_conn_handle_has_no_read_buffer,
+)
+from test_compact_read_buf import (
     test_drop_from_empty_is_noop as test_compact_read_buf__test_drop_from_empty_is_noop,
 )
 from test_compact_read_buf import (
@@ -872,6 +881,11 @@ def main() raises:
     suite.test[test_compact_read_buf__test_drop_prefix_keeps_trailing]()
     suite.test[test_compact_read_buf__test_drop_all_clears_buffer]()
     suite.test[test_compact_read_buf__test_drop_more_than_len_clears_buffer]()
+    suite.test[test_compact_read_buf__test_drop_all_releases_capacity]()
+    suite.test[
+        test_compact_read_buf__test_drop_prefix_keeps_pipelined_tail_and_data
+    ]()
+    suite.test[test_compact_read_buf__test_new_conn_handle_has_no_read_buffer]()
     suite.test[test_compact_read_buf__test_drop_from_empty_is_noop]()
     suite.test[
         test_compact_read_buf__test_drop_long_buffer_preserves_byte_order

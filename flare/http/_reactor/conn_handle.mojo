@@ -408,7 +408,8 @@ struct ConnHandle(Movable):
             stream: Accepted ``TcpStream`` (non-blocking mode must already
                 be set by the caller). Ownership transfers into the
                 ``ConnHandle``.
-            read_buffer_size: Initial capacity for the read buffer.
+            read_buffer_size: Unused; the read buffer is allocated on the
+                first recv so an idle keep-alive connection holds none.
         """
         # Capture the peer address before moving the stream — ``peer_addr``
         # reads from the stream's internal field, which becomes
@@ -417,7 +418,7 @@ struct ConnHandle(Movable):
         self._stream = stream^
         self.cancel_cell = CancelCell()
         self.state = STATE_READING
-        self.read_buf = List[UInt8](capacity=read_buffer_size)
+        self.read_buf = List[UInt8]()
         self.headers_end = -1
         self.content_length = 0
         self.body_total = -1
