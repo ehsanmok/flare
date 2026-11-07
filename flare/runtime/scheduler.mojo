@@ -584,7 +584,7 @@ struct Scheduler[F: Frontend](Movable):
 
             var spawned = False
             try:
-                var th = ThreadHandle.spawn_serving[_worker_entry[Self.F]](arg)
+                var th = ThreadHandle.spawn_os[_worker_entry[Self.F]](arg)
                 # Move the (non-Copyable) handle into the next slot
                 # of the worker array; bump the live-slot counter.
                 s._workers_ptr.unsafe_offset(s._workers_len).unsafe_write(th^)
@@ -643,11 +643,6 @@ struct Scheduler[F: Frontend](Movable):
                 s._stopping_addr = 0
                 raise Error("pthread_create failed in Scheduler.start")
 
-        # Workers holding a lease are pool tasks. Don't hand back the
-        # scheduler while one is still queued: a donating join elsewhere
-        # could run it inline and never return. No-op for OS threads.
-        for i in range(s._workers_len):
-            s._workers_ptr.unsafe_offset(i)[].wait_started()
         return s^
 
     def _abandon_start(mut self):

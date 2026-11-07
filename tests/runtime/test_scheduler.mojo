@@ -8,8 +8,9 @@ Covers:
 - ``shutdown()`` is idempotent.
 - ``is_running`` goes False after shutdown.
 - Multiple start/shutdown cycles do not leak.
-- Workers past the AsyncRT pool's serving leases run on OS threads,
-  and shutdown gives every lease back.
+- Serving workers are OS threads: they leave every AsyncRT pool thread
+  free for fork/join work (a stdlib ``parallelize`` waits on all of its
+  tasks) while a server with more workers than the pool has threads runs.
 
 Runtime-behaviour tests (actual HTTP round-trips across N workers)
 live in ``test_server_multicore.mojo`` (Step 10). The tests here are
@@ -26,15 +27,16 @@ made this possible.
 from std.atomic import Atomic, Ordering
 from std.ffi import c_int, external_call
 from std.memory import Layout, Pointer, alloc
+from std.runtime import parallelism_level
+from std.time import perf_counter_ns
 from std.testing import assert_true, assert_equal, TestSuite
 
 from flare.net import SocketAddr
 from flare.runtime import Frontend, Scheduler, default_worker_count
 from flare.tcp import TcpListener
 from flare.runtime._balance import _HEADER_SLOTS, _W_STRIDE
-from flare.runtime._asyncrt import asyncrt_leases_held, asyncrt_worker_capacity
 from flare.runtime._libc_time import libc_nanosleep_ms
-from flare.runtime._thread import _KIND_OS
+from flare.runtime._thread import ThreadHandle, _KIND_OS, _OpaquePtr, _null_ptr
 from flare.runtime.scheduler import (
     load_stop_flag,
     store_worker_stat,
@@ -169,26 +171,51 @@ def test_scheduler_multiple_start_cycles() raises:
         s.shutdown()
 
 
-def test_workers_past_the_pool_capacity_run_on_os_threads() raises:
-    """Two more workers than there are free serving leases: start neither
-    raises nor hangs, exactly the two extra workers are OS threads, and
-    shutdown returns every lease."""
-    var base = asyncrt_leases_held()
-    var cap = asyncrt_worker_capacity()
+def _rendezvous(arg: _OpaquePtr) -> _OpaquePtr:
+    """cells[0] arrivals, cells[1] tasks expected, cells[2] tasks that saw
+    them all. Gives up after 3 s so a starved pool fails instead of hanging."""
+    var a = Int(arg)
+    var cells = Pointer[Int64, MutUntrackedOrigin](unsafe_from_address=a)
+    var arrived = cells.unsafe_offset(0).unsafe_bitcast[Scalar[DType.int64]]()
+    var seen = cells.unsafe_offset(2).unsafe_bitcast[Scalar[DType.int64]]()
+    _ = Atomic[Int64].fetch_add(arrived, 1)
+    var t0 = perf_counter_ns()
+    while Atomic[Int64].load(arrived) < cells[unsafe_offset=1]:
+        if perf_counter_ns() - t0 > 3_000_000_000:
+            return _null_ptr()
+    _ = Atomic[Int64].fetch_add(seen, 1)
+    return _null_ptr()
+
+
+def test_serving_workers_do_not_hold_pool_threads() raises:
+    """Serving loops never return, so they must not occupy AsyncRT pool
+    threads. With more workers than the pool has threads running, tasks
+    that all have to run at once (what ``parallelize`` needs) still do."""
+    var level = parallelism_level()
     var s = Scheduler[_NopFrontend].start(
         addr=SocketAddr.localhost(0),
         frontend=_NopFrontend(0),
-        num_workers=cap - base + 2,
+        num_workers=level + 2,
         pin_cores=False,
     )
-    var os_threads = 0
     for i in range(s._workers_len):
-        if s._workers_ptr.unsafe_offset(i)[]._kind == _KIND_OS:
-            os_threads += 1
-    assert_equal(os_threads, 2)
-    assert_equal(asyncrt_leases_held(), cap)
+        assert_equal(
+            Int(s._workers_ptr.unsafe_offset(i)[]._kind), Int(_KIND_OS)
+        )
+    var n = level - 1 if level > 2 else 2
+    var cells = alloc(Layout[Int64](count=3)).unsafe_leak()
+    cells.unsafe_offset(0).unsafe_write(Int64(0))
+    cells.unsafe_offset(1).unsafe_write(Int64(n))
+    cells.unsafe_offset(2).unsafe_write(Int64(0))
+    var arg = _OpaquePtr(unsafe_from_address=Int(cells))
+    var hs = List[ThreadHandle]()
+    for _ in range(n):
+        hs.append(ThreadHandle.spawn[_rendezvous](arg))
+    for i in range(n):
+        hs[i].join()
+    assert_equal(Int(cells[unsafe_offset=2]), n)
+    cells.unsafe_free()
     s.shutdown()
-    assert_equal(asyncrt_leases_held(), base)
 
 
 def test_scheduler_pin_cores_flag_default_no_crash() raises:

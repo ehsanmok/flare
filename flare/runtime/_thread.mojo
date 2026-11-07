@@ -29,13 +29,11 @@ Platform notes (``spawn_os``, pinning):
 
 Thread engine. ``spawn`` enqueues a task on Mojo's AsyncRT pool
 (``flare.runtime._asyncrt``), the same pool the stdlib uses, so a flare
-process has one thread engine. ``spawn_serving`` does the same for
-server workers while a serving lease is free. ``spawn_os`` creates a
+process has one thread engine for short tasks. ``spawn_os`` creates a
 dedicated OS thread, for the work a fixed-size pool can't host: threads
-that never return, threads that live as long as a connection, serving
-loops beyond the pool's capacity, and every spawn in a forked child,
-which has no pool workers. All kinds share ``join`` / ``detach`` / the
-move-only handle.
+that never return (every serving loop), threads that live as long as a
+connection, and every spawn in a forked child, which has no pool
+workers. Both kinds share ``join`` / ``detach`` / the move-only handle.
 
 This file is *internal* — it is used by the runtime, the WebSocket
 server, async DNS and the H3/H2 connect race.
@@ -56,7 +54,6 @@ from ._asyncrt import (
     asyncrt_join,
     asyncrt_pool_alive,
     asyncrt_spawn,
-    asyncrt_try_lease,
     asyncrt_wait_started,
 )
 
@@ -159,36 +156,6 @@ struct ThreadHandle(Movable):
         if asyncrt_pool_alive():
             return ThreadHandle(
                 _thread_id=asyncrt_spawn[start](arg), _kind=_KIND_ASYNCRT
-            )
-        return ThreadHandle.spawn_os[start](arg)
-
-    @staticmethod
-    def spawn_serving[
-        start: def(_OpaquePtr) thin -> _OpaquePtr
-    ](arg: _OpaquePtr,) raises -> ThreadHandle:
-        """Run a serving loop: ``start(arg)`` returns only at shutdown.
-
-        A pool task while a serving lease is free (see
-        ``asyncrt_try_lease``), otherwise a dedicated OS thread. Call
-        ``wait_started`` on every handle before letting anything else
-        join on the pool.
-
-        Parameters:
-            start: Entry function; same contract as ``spawn_os``.
-
-        Args:
-            arg: Opaque pointer delivered to the start function.
-
-        Returns:
-            A handle the caller must ``join()`` or ``detach()``.
-
-        Raises:
-            Error: If ``pthread_create`` fails (OS-thread case only).
-        """
-        if asyncrt_pool_alive() and asyncrt_try_lease():
-            return ThreadHandle(
-                _thread_id=asyncrt_spawn[start, leased=True](arg),
-                _kind=_KIND_ASYNCRT,
             )
         return ThreadHandle.spawn_os[start](arg)
 
@@ -315,9 +282,8 @@ struct ThreadHandle(Movable):
         A no-op for a pthread, which is running as soon as ``spawn``
         returns. An AsyncRT task sits in the pool's queue until a worker
         takes it, and a joiner elsewhere that donates its worker while
-        waiting could take a queued task. Spawners of tasks that never
-        return on their own (serving loops) call this for each one so
-        none is left in the queue for a donating waiter to run inline.
+        waiting could take a queued task. A caller that must know the task
+        has begun, and is not left in the queue, calls this.
         """
         if self._kind == _KIND_ASYNCRT and self._thread_id != 0:
             asyncrt_wait_started(self._thread_id)
@@ -392,9 +358,9 @@ def save_thread_affinity() -> Int:
     """Snapshot the calling thread's CPU mask, for
     :func:`restore_thread_affinity`.
 
-    A serving loop that pins the pool worker it runs on restores the
-    worker's mask when it returns, so later tasks on that worker are not
-    pinned. Returns the address of a heap ``cpu_set_t``, or 0 when there
+    A task that pins the pool worker it runs on restores the worker's
+    mask when it returns, so later tasks on that worker are not pinned.
+    Returns the address of a heap ``cpu_set_t``, or 0 when there
     is nothing to restore (macOS, or ``pthread_getaffinity_np`` failed).
     """
     comptime if CompilationTarget.is_linux():

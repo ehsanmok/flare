@@ -43,7 +43,7 @@ def requiresPerWorker (linux probe bufring : Bool) (tls : Nat) : Bool :=
 def uringDispatch (linux probe bufring : Bool) (tls extras : Nat) : Bool :=
   linux && probe && bufring && tls == 0 && extras == 0
 
-/-- mirrors flare/runtime/scheduler.mojo#Scheduler.start sha=a1f17c56964f at=12630564 -/
+/-- mirrors flare/runtime/scheduler.mojo#Scheduler.start sha=0bd609184519 at=e7430d69 -/
 def prebind (demands reuseport : Bool) (extras : Nat) : Bool :=
   demands || reuseport || decide (0 < extras)
 

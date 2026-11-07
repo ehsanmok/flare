@@ -134,7 +134,7 @@ inductive Lbl where
 def w0 : WS := ⟨.start, false, false, false, false, false, false, false⟩
 
 /-- State right after `Scheduler.start` returned with `n` workers.
-mirrors flare/runtime/scheduler.mojo#Scheduler.start sha=a1f17c56964f at=c738a911 -/
+mirrors flare/runtime/scheduler.mojo#Scheduler.start sha=0bd609184519 at=e7430d69 -/
 def init (n : Nat) : St := ⟨List.replicate n w0, false, false, .signal, false⟩
 
 def Freed (w : WS) : Bool := w.ctxF || w.statsF || w.lisF

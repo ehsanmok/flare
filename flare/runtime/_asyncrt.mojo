@@ -25,19 +25,8 @@ chain is ready. That is what makes nested fork/join work on a fixed
 pool (a parent that blocked its worker outright would deadlock once
 every worker held a parent waiting on a queued child). The cost is
 that a donating waiter may pick up any queued task. For a short task
-that only delays the waiter; for a serving loop that never returns it
-would never get back. So serving loops (``Scheduler`` and WebSocket
-workers) are started with ``wait_started``: the spawner waits until
-every loop is running, so none is ever sitting in the queue where a
-waiter could take it.
-
-A serving loop also holds its worker until shutdown, and the pool does
-not grow. Loops therefore take a lease first (``asyncrt_try_lease``):
-at most ``parallelism_level() - 1`` across the process, so one worker
-is always left for short tasks. A loop that finds no lease free runs on
-a dedicated OS thread, the way every worker did before AsyncRT, so
-asking for more workers than the pool holds (or starting several
-servers) neither fails nor hangs.
+that only delays the waiter; for a task that never returns it would never
+get back, so such tasks do not belong on the pool (see below).
 
 A forked child has no pool. ``fork`` copies only the calling thread,
 so the child inherits AsyncRT's queue but none of its workers: a task
@@ -53,9 +42,11 @@ server tests).
 Things that must not run here, and use ``ThreadHandle.spawn_os``
 instead:
 
-- Anything that never returns. Process exit releases the AsyncRT
-  device, which shuts the work queue down and waits for running
-  tasks, so a task that loops forever hangs exit.
+- Anything that never returns, serving loops included. Process exit
+  releases the AsyncRT device, which shuts the work queue down and
+  waits for running tasks, so a task that loops forever hangs exit. A
+  loop that holds a pool worker also stalls every other user of the
+  pool: a stdlib ``parallelize`` never finishes while it runs.
 - Anything that lives as long as a connection. The pool has a fixed
   number of workers (it does not grow when a task blocks), so one
   task per connection starves it.
@@ -136,14 +127,12 @@ def _destroy_cell(cell: Int):
 
 
 def _asyncrt_trampoline[
-    start: def(_OpaquePtr) thin -> _OpaquePtr, leased: Bool
+    start: def(_OpaquePtr) thin -> _OpaquePtr
 ](cell_ptr: _OpaquePtr):
     """AsyncRT work item: run ``start(arg)``, then publish completion.
 
     Must not raise: it runs on an AsyncRT worker with no error channel,
-    the same contract as a pthread start routine. A ``leased`` task
-    (a serving loop, see ``asyncrt_try_lease``) gives its lease back as
-    soon as ``start`` returns.
+    the same contract as a pthread start routine.
 
     The state CAS comes before the chain completes. After
     ``RUNNING -> DONE`` the joiner owns the cell and may free it as soon
@@ -159,8 +148,6 @@ def _asyncrt_trampoline[
     )
     var arg_addr = Int(_load(cell, _CELL_ARG))
     _ = start(_OpaquePtr(unsafe_from_address=arg_addr))
-    comptime if leased:
-        asyncrt_release_lease()
     if _cas_state(cell, _STATE_RUNNING, _STATE_DONE):
         _chain_complete(cell)
     else:
@@ -172,16 +159,13 @@ def _asyncrt_trampoline[
 
 
 def asyncrt_spawn[
-    start: def(_OpaquePtr) thin -> _OpaquePtr, leased: Bool = False
+    start: def(_OpaquePtr) thin -> _OpaquePtr
 ](arg: _OpaquePtr) -> UInt64:
     """Enqueue ``start(arg)`` on the AsyncRT pool.
 
     Returns the task cell's address, which the ``ThreadHandle`` stores
     in place of a ``pthread_t``. Never fails: the work queue is
-    unbounded, and the task runs once a pool worker is free. With
-    ``leased`` the caller already holds a lease from
-    ``asyncrt_try_lease``, and the task releases it when ``start``
-    returns.
+    unbounded, and the task runs once a pool worker is free.
     """
     var raw = alloc(Layout[Int64](count=_CELL_SLOTS)).unsafe_leak()
     for i in range(_CELL_SLOTS):
@@ -199,7 +183,7 @@ def asyncrt_spawn[
         _OpaquePtr,
         Int,
     ](
-        _asyncrt_trampoline[start, leased],
+        _asyncrt_trampoline[start],
         _OpaquePtr(unsafe_from_address=cell),
         -1,
     )
@@ -376,59 +360,3 @@ def asyncrt_pool_alive() -> Bool:
             file=stderr,
         )
     return alive
-
-
-def asyncrt_worker_capacity() -> Int:
-    """Pool workers flare may hold with long-lived tasks (serving loops),
-    across the whole process.
-
-    One below the pool size, so at least one worker stays free for
-    short tasks (``block_in_pool``, DNS, the H3/H2 race) and for
-    whatever else in the process uses AsyncRT. Never below 1.
-    """
-    var n = parallelism_level() - 1
-    return n if n >= 1 else 1
-
-
-# ── Serving-loop leases ─────────────────────────────────────────────────────
-# One process-global Int64: pool workers currently held by serving loops.
-# Process-wide, so two servers side by side can't exhaust the pool together.
-
-
-def _lease_cell_init() -> OptionalPointer[NoneType, UntrackedOrigin[mut=True]]:
-    var raw = alloc(Layout[Int64](count=1)).unsafe_leak()
-    raw.unsafe_write(Int64(0))
-    return Pointer[NoneType, UntrackedOrigin[mut=True]](
-        unsafe_from_address=Int(raw)
-    )
-
-
-def _lease_cell() -> Int:
-    var p = _get_global[
-        "flare_asyncrt_leases", _lease_cell_init, _pool_cell_destroy
-    ]()
-    return Int(p.value())
-
-
-def asyncrt_try_lease() -> Bool:
-    """Claim one of the ``asyncrt_worker_capacity()`` pool workers for a
-    serving loop. False when they are all held; the caller then runs the
-    loop on a dedicated OS thread instead.
-    """
-    var cell = _lease_cell()
-    var cap = Int64(asyncrt_worker_capacity())
-    var held = _load(cell, 0)
-    while held < cap:
-        if Atomic[Int64].compare_exchange(_slot(cell, 0), held, held + 1):
-            return True
-    return False
-
-
-def asyncrt_release_lease():
-    """Give back a lease taken by ``asyncrt_try_lease``."""
-    _ = Atomic[Int64].fetch_add(_slot(_lease_cell(), 0), -1)
-
-
-def asyncrt_leases_held() -> Int:
-    """Pool workers currently held by serving loops."""
-    return Int(_load(_lease_cell(), 0))

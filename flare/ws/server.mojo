@@ -1372,15 +1372,10 @@ def _ws_serve_multicore(
         var arg = ctx_ptr.unsafe_bitcast[UInt8]()
         var addr_int = Int(arg)
         ctx_addrs.append(addr_int)
-        var th = ThreadHandle.spawn_serving[_ws_worker_entry](
+        var th = ThreadHandle.spawn_os[_ws_worker_entry](
             Pointer[UInt8, MutUntrackedOrigin](unsafe_from_address=addr_int)
         )
         (threads_ptr.unsafe_offset(i)).unsafe_write(th^)
-    # See Scheduler.start: no serving loop may stay queued on the
-    # AsyncRT pool. No-op for OS threads.
-    for i in range(num_workers):
-        (threads_ptr.unsafe_offset(i))[].wait_started()
-
     # Workers run forever; this join blocks until each worker
     # exits (normally never, since the per-worker listener
     # stays open). Closing the listener from another thread

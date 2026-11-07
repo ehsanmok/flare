@@ -124,10 +124,9 @@ def _worker_entry[F: Frontend](arg: _OpaquePtr) -> _OpaquePtr:
     # Linux an overly-ambitious CPU index might raise. Pinning
     # happens from the worker itself via pthread_self, so we
     # re-wrap the current thread id into a ThreadHandle just to
-    # reuse the ``pin_to_cpu`` helper. This thread is usually a shared
-    # AsyncRT pool worker; the serving loop holds it until shutdown,
-    # so pinning it is safe as long as the original mask is put back
-    # before the task returns.
+    # reuse the ``pin_to_cpu`` helper. The thread is a dedicated OS
+    # thread (serving loops never run on the AsyncRT pool); the mask is
+    # still put back before the loop returns.
     var saved_mask = 0
     if ctx_ptr[].pin_cores:
         saved_mask = save_thread_affinity()

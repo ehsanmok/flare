@@ -12,9 +12,6 @@ Covers:
   freed exactly once either way).
 - join from inside a spawned task, including one that spawns its own
   child (the path where an AsyncRT chain wait would donate).
-- Serving leases: capped at the pool capacity process-wide, returned
-  when the loop exits, and ``spawn_serving`` falling back to an OS
-  thread when none is free.
 - Pinning a worker the way a serving loop does, then restoring its mask.
 - A forked child, which inherits AsyncRT's queue but none of its
   workers, still gets working threads (``spawn`` falls back to
@@ -27,12 +24,6 @@ from std.memory import Layout, Pointer, alloc
 from std.time import perf_counter_ns
 from std.testing import assert_equal, assert_true, TestSuite
 
-from flare.runtime._asyncrt import (
-    asyncrt_leases_held,
-    asyncrt_release_lease,
-    asyncrt_try_lease,
-    asyncrt_worker_capacity,
-)
 from flare.runtime._thread import (
     ThreadHandle,
     _KIND_ASYNCRT,
@@ -337,49 +328,6 @@ def test_nested_join_under_load() raises:
         assert_equal(Int(_load(cells + i * 4 * 8, 0)), 1)
         assert_equal(Int(_load(cells + i * 4 * 8, 2)), 42)
     handles.unsafe_free()
-    _free_cells(cells)
-
-
-def test_leases_stop_at_capacity() raises:
-    var cap = asyncrt_worker_capacity()
-    assert_true(cap >= 1)
-    var base = asyncrt_leases_held()
-    var taken = 0
-    while asyncrt_try_lease():
-        taken += 1
-    assert_equal(base + taken, cap)
-    for _ in range(taken):
-        asyncrt_release_lease()
-    assert_equal(asyncrt_leases_held(), base)
-
-
-def test_spawn_serving_overflows_to_os_thread() raises:
-    var taken = 0
-    while asyncrt_try_lease():
-        taken += 1
-    var cells = _new_cells(2)
-    var h = ThreadHandle.spawn_serving[_record_thread](
-        _OpaquePtr(unsafe_from_address=cells)
-    )
-    assert_equal(Int(h._kind), Int(_KIND_OS))
-    h.join()
-    assert_equal(Int(_load(cells, 0)), 42)
-    for _ in range(taken):
-        asyncrt_release_lease()
-    _free_cells(cells)
-
-
-def test_spawn_serving_returns_its_lease() raises:
-    var base = asyncrt_leases_held()
-    var cells = _new_cells(2)
-    var h = ThreadHandle.spawn_serving[_record_thread](
-        _OpaquePtr(unsafe_from_address=cells)
-    )
-    assert_equal(Int(h._kind), Int(_KIND_ASYNCRT))
-    h.wait_started()
-    h.join()
-    assert_equal(Int(_load(cells, 0)), 42)
-    assert_equal(asyncrt_leases_held(), base)
     _free_cells(cells)
 
 

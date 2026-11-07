@@ -72,7 +72,7 @@ def joinR : Nat → H → H
   | k + 1, h => join (joinR k h)
 
 /-- Spawns `0..k-1` succeeded: context `i` allocated, thread `i` running.
-mirrors flare/runtime/scheduler.mojo#Scheduler.start sha=a1f17c56964f at=12630564 -/
+mirrors flare/runtime/scheduler.mojo#Scheduler.start sha=0bd609184519 at=e7430d69 -/
 def spawnR : Nat → H → H
   | 0, h => h
   | k + 1, h => { (alloc (.ctx k) (spawnR k h)) with thr := (spawnR k h).thr + 1 }
@@ -80,7 +80,7 @@ def spawnR : Nat → H → H
 /-- Allocation before the first spawn but the balancing group (added by
 `startFail`; counts commute); `pre` is `prebind_per_worker`, `L`
 the number of per-worker listeners (`n * (1 + len(extra_addrs))`).
-mirrors flare/runtime/scheduler.mojo#Scheduler.start sha=a1f17c56964f at=12630564 -/
+mirrors flare/runtime/scheduler.mojo#Scheduler.start sha=0bd609184519 at=e7430d69 -/
 def startAlloc (pre : Bool) (n L : Nat) : H :=
   let h := alloc .stop H.empty
   let h := if pre then h else alloc .shared h
@@ -90,7 +90,7 @@ def startAlloc (pre : Bool) (n L : Nat) : H :=
 
 /-- `start` with spawn `k` failing, then the rollback, which also frees
 `_per_worker_listener_addrs` (CONC-06).
-mirrors flare/runtime/scheduler.mojo#Scheduler.start sha=a1f17c56964f at=12630564 (fixed, CONC-06) -/
+mirrors flare/runtime/scheduler.mojo#Scheduler.start sha=0bd609184519 at=e7430d69 (fixed, CONC-06) -/
 def startFail (pre : Bool) (n L k : Nat) : H :=
   let h := startAlloc pre n L
   let h := if balOn n then alloc .grp h else h
@@ -108,7 +108,7 @@ def startFail (pre : Bool) (n L k : Nat) : H :=
 
 /-- `_abandon_start` after a failed per-worker bind, before any spawn:
 `b` listeners stored so far. `_free_resources` then the worker array.
-mirrors flare/runtime/scheduler.mojo#Scheduler.start+Scheduler._abandon_start+Scheduler._free_resources sha=902b9e98cc9d at=12630564 -/
+mirrors flare/runtime/scheduler.mojo#Scheduler.start+Scheduler._abandon_start+Scheduler._free_resources sha=14d4667bf0f7 at=e7430d69 -/
 def abandon (n b : Nat) : H :=
   let h := alloc .stop H.empty
   let h := alloc .warr h
