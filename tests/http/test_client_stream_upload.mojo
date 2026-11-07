@@ -19,7 +19,7 @@ raw-TCP decoder server instead.)
 from std.collections import Optional
 from std.testing import assert_equal, assert_true, TestSuite
 
-from flare.http import HttpClient
+from flare.http import HttpClient, HttpServer, Request, Response
 from flare.http.body import ChunkSource
 from flare.http.cancel import Cancel
 from flare.http._client.parse import _decode_chunked
@@ -314,6 +314,87 @@ def test_raising_source_does_not_terminate_the_body() raises:
         "producer failed mid-body" in msg,
         "expected the source's own error to propagate, got: " + msg,
     )
+
+
+def test_send_streaming_sends_the_request_body() raises:
+    """``send_streaming`` / ``post_streaming`` write the request body.
+
+    They used to send only the head: no ``Content-Length`` and no body, so
+    the origin saw an empty POST. The raw server replies with the number of
+    body bytes it received.
+    """
+    var listener = TcpListener.bind(SocketAddr.localhost(0))
+    var port = listener.local_addr().port
+    var pid = fork()
+    if pid == 0:
+        try:
+            # Two requests, one connection each (Connection: close).
+            for _ in range(2):
+                var conn = listener.accept()
+                _raw_server(conn^)
+        except:
+            pass
+        exit()
+    listener.close()
+    usleep(200000)
+
+    var url = "http://127.0.0.1:" + String(port) + "/"
+    var raised = False
+    var big = String("")
+    var small = String("")
+    try:
+        var c = HttpClient()
+        var body = List[UInt8](length=70000, fill=UInt8(97))
+        var s1 = c.send_streaming(Request(method="POST", url=url, body=body^))
+        big = String(unsafe_from_utf8=s1.read_chunk(64))
+        s1.close()
+        var s2 = c.post_streaming(url, String('{"messages": [1, 2, 3]}'))
+        small = String(unsafe_from_utf8=s2.read_chunk(64))
+        s2.close()
+    except:
+        raised = True
+    _ = kill(pid, SIGKILL)
+    waitpid(pid)
+    assert_true(not raised, "streaming POST raised")
+    assert_equal(big, "70000")
+    assert_equal(small, "23")
+
+
+def _body_len(req: Request) raises -> Response:
+    return Response(
+        status=200, body=List[UInt8](String(len(req.body)).as_bytes())
+    )
+
+
+def test_send_streaming_sends_the_request_body_h2c() raises:
+    """The h2c wire sends the request body too, past the initial 64 KiB
+    flow-control window."""
+    var srv = HttpServer.bind(SocketAddr.localhost(0))
+    var port = UInt16(srv.local_addr().port)
+    var pid = fork()
+    if pid == 0:
+        try:
+            srv.serve(_body_len)
+        except:
+            pass
+        exit()
+    usleep(200000)
+
+    var got = String("")
+    var raised = False
+    try:
+        var c = HttpClient(prefer_h2c=True)
+        var body = List[UInt8](length=70000, fill=UInt8(97))
+        var url = "http://127.0.0.1:" + String(Int(port)) + "/"
+        var s1 = c.send_streaming(Request(method="POST", url=url, body=body^))
+        got = String(unsafe_from_utf8=s1.read_chunk(64))
+        s1.close()
+    except:
+        raised = True
+    _ = kill(pid, SIGKILL)
+    waitpid(pid)
+    assert_true(not raised, "h2c streaming POST raised")
+    assert_equal(got, "70000")
 
 
 def main() raises:

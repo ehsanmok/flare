@@ -1802,7 +1802,11 @@ struct HttpClient(Movable):
         """
         var u = Url.parse(self._resolve_url(req.url))
         var headers = prepare_stream_headers(
-            req.method, u, req.headers, self._user_agent
+            req.method,
+            u,
+            req.headers,
+            self._user_agent,
+            len(req.body) if len(req.body) > 0 else -1,
         )
         if self._auth_header != "":
             headers.set("authorization", self._auth_header)
@@ -1814,8 +1818,8 @@ struct HttpClient(Movable):
                 headers.set("cookie", cookie)
 
         if u.is_tls():
-            return self._stream_tls(u, req.method, headers^)
-        return self._stream_cleartext(u, req.method, headers^)
+            return self._stream_tls(u, req.method, headers^, req.body)
+        return self._stream_cleartext(u, req.method, headers^, req.body)
 
     def _stream_head_wire(
         self, method: String, u: Url, headers: HeaderMap, default_port: Int
@@ -1833,7 +1837,11 @@ struct HttpClient(Movable):
         return wire^
 
     def _stream_cleartext(
-        self, u: Url, method: String, var headers: HeaderMap
+        self,
+        u: Url,
+        method: String,
+        var headers: HeaderMap,
+        body: List[UInt8],
     ) raises -> HttpStreamResponse:
         """Open a cleartext streaming response, h2c or HTTP/1.1."""
         var wire = self._stream_head_wire(method, u, headers, 80)
@@ -1855,15 +1863,22 @@ struct HttpClient(Movable):
                 method,
                 headers^,
                 String("http"),
+                body,
             )
         var wb = wire.as_bytes()
         tcp.write_all(Span[UInt8, _](wb))
+        if len(body) > 0:
+            tcp.write_all(Span[UInt8, _](body))
         var t = _H2Transport.from_tcp(tcp^)
         var dl = HttpDownload[_H2Transport](t^, method.upper())
         return self._wrap_h1(dl^, String("http/1.1"))
 
     def _stream_tls(
-        self, u: Url, method: String, var headers: HeaderMap
+        self,
+        u: Url,
+        method: String,
+        var headers: HeaderMap,
+        body: List[UInt8],
     ) raises -> HttpStreamResponse:
         """Open a streaming response over TLS, h2 or HTTP/1.1 by ALPN."""
         var wire = self._stream_head_wire(method, u, headers, 443)
@@ -1889,9 +1904,12 @@ struct HttpClient(Movable):
                 method,
                 headers^,
                 String("https"),
+                body,
             )
         var wb = wire.as_bytes()
         stream.write_all(Span[UInt8, _](wb))
+        if len(body) > 0:
+            stream.write_all(Span[UInt8, _](body))
         var t = _H2Transport.from_tls(stream^)
         var dl = HttpDownload[_H2Transport](t^, method.upper())
         return self._wrap_h1(dl^, String("http/1.1"))
@@ -1913,6 +1931,7 @@ struct HttpClient(Movable):
         method: String,
         var headers: HeaderMap,
         scheme: String,
+        body: List[UInt8],
     ) raises -> HttpStreamResponse:
         """Open an h2 stream and read its head, leaving the body unread.
 
@@ -1922,6 +1941,7 @@ struct HttpClient(Movable):
             method: Request method.
             headers: Request headers, already vetted.
             scheme: ``"https"`` after ALPN, ``"http"`` for h2c.
+            body: Request body, sent as DATA after the headers.
         """
         var conn = Http2ClientConnection()
         var preface = conn.drain()
@@ -1939,7 +1959,10 @@ struct HttpClient(Movable):
             u.request_target(),
             extra,
         )
-        conn.finish_upload(sid)
+        if len(body) > 0:
+            conn.send_data(sid, Span[UInt8, _](body), True)
+        else:
+            conn.finish_upload(sid)
         conn.enable_response_streaming(sid)
         var out = conn.drain()
         if len(out) > 0:
