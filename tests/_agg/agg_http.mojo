@@ -561,6 +561,12 @@ from test_client_stream_upload import (
 from test_client_stream_upload import (
     test_raising_source_does_not_terminate_the_body as test_client_stream_upload__test_raising_source_does_not_terminate_the_body,
 )
+from test_client_stream_upload import (
+    test_send_streaming_sends_the_request_body as test_client_stream_upload__test_send_streaming_sends_the_request_body,
+)
+from test_client_stream_upload import (
+    test_send_streaming_sends_the_request_body_h2c as test_client_stream_upload__test_send_streaming_sends_the_request_body_h2c,
+)
 from test_client_ux import (
     test_redirect_follow_all_lands as test_client_ux__test_redirect_follow_all_lands,
 )
@@ -4865,6 +4871,12 @@ def main() raises:
     ]()
     suite.test[
         test_client_stream_upload__test_raising_source_does_not_terminate_the_body
+    ]()
+    suite.test[
+        test_client_stream_upload__test_send_streaming_sends_the_request_body
+    ]()
+    suite.test[
+        test_client_stream_upload__test_send_streaming_sends_the_request_body_h2c
     ]()
     # tests/http/test_client_ux.mojo
     suite.test[test_client_ux__test_redirect_follow_all_lands]()

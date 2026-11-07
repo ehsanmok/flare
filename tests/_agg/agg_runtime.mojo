@@ -494,7 +494,7 @@ from test_scheduler import (
     test_scheduler_multiple_start_cycles as test_scheduler__test_scheduler_multiple_start_cycles,
 )
 from test_scheduler import (
-    test_workers_past_the_pool_capacity_run_on_os_threads as test_scheduler__test_workers_past_the_pool_capacity_run_on_os_threads,
+    test_serving_workers_do_not_hold_pool_threads as test_scheduler__test_serving_workers_do_not_hold_pool_threads,
 )
 from test_scheduler import (
     test_scheduler_pin_cores_flag_default_no_crash as test_scheduler__test_scheduler_pin_cores_flag_default_no_crash,
@@ -615,15 +615,6 @@ from test_thread_engine import (
 )
 from test_thread_engine import (
     test_nested_join_under_load as test_thread_engine__test_nested_join_under_load,
-)
-from test_thread_engine import (
-    test_leases_stop_at_capacity as test_thread_engine__test_leases_stop_at_capacity,
-)
-from test_thread_engine import (
-    test_spawn_serving_overflows_to_os_thread as test_thread_engine__test_spawn_serving_overflows_to_os_thread,
-)
-from test_thread_engine import (
-    test_spawn_serving_returns_its_lease as test_thread_engine__test_spawn_serving_returns_its_lease,
 )
 from test_thread_engine import (
     test_spawn_join_in_forked_child as test_thread_engine__test_spawn_join_in_forked_child,
@@ -1065,9 +1056,7 @@ def main() raises:
     suite.test[test_scheduler__test_scheduler_drain_zero_timeout_is_hard_stop]()
     suite.test[test_scheduler__test_scheduler_shutdown_idempotent]()
     suite.test[test_scheduler__test_scheduler_multiple_start_cycles]()
-    suite.test[
-        test_scheduler__test_workers_past_the_pool_capacity_run_on_os_threads
-    ]()
+    suite.test[test_scheduler__test_serving_workers_do_not_hold_pool_threads]()
     suite.test[test_scheduler__test_scheduler_pin_cores_flag_default_no_crash]()
     suite.test[
         test_scheduler__test_shutdown_closes_the_shared_listener_after_the_workers_join
@@ -1128,9 +1117,6 @@ def main() raises:
     suite.test[test_thread_engine__test_detach_after_completion]()
     suite.test[test_thread_engine__test_join_from_inside_task]()
     suite.test[test_thread_engine__test_nested_join_under_load]()
-    suite.test[test_thread_engine__test_leases_stop_at_capacity]()
-    suite.test[test_thread_engine__test_spawn_serving_overflows_to_os_thread]()
-    suite.test[test_thread_engine__test_spawn_serving_returns_its_lease]()
     suite.test[test_thread_engine__test_spawn_join_in_forked_child]()
     # tests/runtime/test_thread_ffi.mojo
     suite.test[test_thread_ffi__test_num_cpus_at_least_one]()
