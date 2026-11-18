@@ -2203,12 +2203,17 @@ a80a1f4fda69 thm Flare/L3_Protocol/Ws/Frame.lean::parseLen_extLen
 ede5d719a894 thm Flare/L3_Protocol/Ws/Frame.lean::toUInt8_toNat
 9f2cf57d984a thm Flare/L3_Protocol/Ws/Frame.lean::xor_xor_cancel
 d4a0845d6022 spec Flare/L3_Protocol/Ws/Handshake.lean::ClientOK
+d0f0cd6db54d spec Flare/L3_Protocol/Ws/Handshake.lean::ClientOfferOK
 04aa2da5618c spec Flare/L3_Protocol/Ws/Handshake.lean::KeyOK
 986d93549b2e spec Flare/L3_Protocol/Ws/Handshake.lean::ServerOK
+84d8fcc0e9f3 thm Flare/L3_Protocol/Ws/Handshake.lean::clientAcceptsOffer_nil
+984d19e9f475 thm Flare/L3_Protocol/Ws/Handshake.lean::clientAcceptsOffer_ok
 1f834334303e thm Flare/L3_Protocol/Ws/Handshake.lean::clientAccepts_ok
+697b539b873d thm Flare/L3_Protocol/Ws/Handshake.lean::clientRequestOffer_nil
 fc544e83f728 thm Flare/L3_Protocol/Ws/Handshake.lean::genKey_valid
 22384b1300ba thm Flare/L3_Protocol/Ws/Handshake.lean::handshake_complete
 ec8179ab5ffa thm Flare/L3_Protocol/Ws/Handshake.lean::keyOk_iff
+a214492b8d00 thm Flare/L3_Protocol/Ws/Handshake.lean::protoOk_iff
 58256cf012a5 thm Flare/L3_Protocol/Ws/Handshake.lean::qual_ok
 2d7b58ac59d5 thm Flare/L3_Protocol/Ws/Handshake.lean::reactorCapped_ok
 f9bbe8b14e76 thm Flare/L3_Protocol/Ws/Handshake.lean::reactor_ok

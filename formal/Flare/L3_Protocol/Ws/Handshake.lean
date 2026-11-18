@@ -16,7 +16,9 @@ they compare anything; names are compared after `lowerB`.
 * **Client** (`WsClient._connect_impl`). `ClientOK` is the RFC 6455 §4.1
   list (Upgrade `websocket`, Connection token `upgrade`, the accept value,
   no unrequested subprotocol or extension); `clientAccepts` decides exactly
-  `ClientOK`: `clientAccepts_ok`.
+  `ClientOK`: `clientAccepts_ok`. With subprotocols offered,
+  `clientAcceptsOffer` decides `ClientOfferOK` (`clientAcceptsOffer_ok`)
+  and is `clientAccepts` when the offer is empty (`clientAcceptsOffer_nil`).
 * **Standalone server** (`_parse_ws_upgrade_bytes`). `ServerOK` is RFC 6455
   §4.2.1 plus §11.3.1/§11.3.5 (the key and version fields appear once);
   `srv` decides it through `qual`: `srv_ok`.
@@ -27,9 +29,9 @@ they compare anything; names are compared after `lowerB`.
   every SHA-1 and every valid key.
 
 The server never sends `Sec-WebSocket-Protocol` (RFC 6455 lets a server
-select none), so subprotocol selection on the server side is "none", and
-the client's request offers none; `ClientOK` therefore requires that the
-101 names none.
+select none), so subprotocol selection on the server side is "none".
+`ClientOK` covers a request that offers none, so the 101 must name none;
+`ClientOfferOK` lets it name exactly one offered subprotocol.
 -/
 namespace Flare.L3.Ws.Handshake
 
@@ -70,6 +72,9 @@ def VERSION_CAP : Bytes :=
 def ACCEPT_CAP : Bytes :=
   [83, 101, 99, 45, 87, 101, 98, 83, 111, 99, 107, 101, 116, 45, 65, 99, 99, 101, 112, 116]
 def HOST_CAP : Bytes := [72, 111, 115, 116]
+def PROTOCOL_CAP : Bytes :=
+  [83, 101, 99, 45, 87, 101, 98, 83, 111, 99, 107, 101, 116, 45, 80, 114, 111, 116, 111, 99,
+    111, 108]
 /-- `HTTP/1.1 101 Switching Protocols`. -/
 def SWITCHING : Bytes :=
   STATUS101 ++ [32, 83, 119, 105, 116, 99, 104, 105, 110, 103, 32, 80, 114, 111, 116, 111, 99,
@@ -139,8 +144,9 @@ def ClientOK (sha1 : Sha1) (key status : Bytes) (fs : Fields) : Prop :=
   vals fs N_PROTOCOL = [] ∧ vals fs N_EXT = []
 
 /-- The shipped client check (`_UpgradeResponse.verify` after the status-line
-check, both branches): the whole RFC 6455 §4.1 list.
-mirrors flare/ws/client.mojo#WsClient._connect_impl sha=0c780a982b41 at=e767e34c (fixed, WS-04) -/
+check, both branches) with no subprotocol offered: the whole RFC 6455 §4.1
+list. `clientAcceptsOffer_nil` ties it to the general model.
+mirrors flare/ws/client.mojo#WsClient._connect_impl sha=35fabe595019 at=e4831739 (fixed, WS-04) -/
 def clientAccepts (sha1 : Sha1) (key status : Bytes) (fs : Fields) : Bool :=
   STATUS101.isPrefixOf status &&
   (vals fs UPGRADE).any (fun v => lowerB v == WEBSOCKET) &&
@@ -151,6 +157,58 @@ def clientAccepts (sha1 : Sha1) (key status : Bytes) (fs : Fields) : Bool :=
 theorem clientAccepts_ok (sha1 : Sha1) (key status : Bytes) (fs : Fields) :
     clientAccepts sha1 key status fs = true ↔ ClientOK sha1 key status fs := by
   simp only [clientAccepts, ClientOK, Bool.and_eq_true, beq_iff_eq, List.isEmpty_iff, and_assoc]
+
+/-- RFC 6455 §4.1 for a request that offered the subprotocols `offered`
+and no extension: the 101 names none of them or exactly one. -/
+def ClientOfferOK (sha1 : Sha1) (key status : Bytes)
+    (offered : List Bytes) (fs : Fields) : Prop :=
+  STATUS101.isPrefixOf status = true ∧
+  (vals fs UPGRADE).any (fun v => lowerB v == WEBSOCKET) = true ∧
+  (vals fs N_CONNECTION).any (fun v => hasTok v UPGRADE) = true ∧
+  lastVal fs N_ACCEPT = some (acceptOf sha1 key) ∧
+  (vals fs N_PROTOCOL = [] ∨
+     ∃ p ∈ offered, vals fs N_PROTOCOL = [p]) ∧
+  vals fs N_EXT = []
+
+/-- `_UpgradeResponse.selected_protocol`: no field, or one field whose
+value is an offered name. -/
+def protoOk (offered : List Bytes) : List Bytes → Bool
+  | [] => true
+  | [p] => offered.contains p
+  | _ => false
+
+theorem protoOk_iff (offered ps : List Bytes) :
+    protoOk offered ps = true ↔ (ps = [] ∨ ∃ p ∈ offered, ps = [p]) := by
+  match ps with
+  | [] => simp [protoOk]
+  | [p] => simp [protoOk]
+  | _ :: _ :: _ => simp [protoOk]
+
+/-- The shipped client check with the caller's offer (`verify` after the
+status-line check, both branches).
+mirrors flare/ws/client.mojo#WsClient._connect_impl+_UpgradeResponse.selected_protocol+_subprotocol_header sha=971525b29c25 at=e4831739 -/
+def clientAcceptsOffer (sha1 : Sha1) (key status : Bytes) (offered : List Bytes)
+    (fs : Fields) : Bool :=
+  STATUS101.isPrefixOf status &&
+  (vals fs UPGRADE).any (fun v => lowerB v == WEBSOCKET) &&
+  (vals fs N_CONNECTION).any (fun v => hasTok v UPGRADE) &&
+  lastVal fs N_ACCEPT == some (acceptOf sha1 key) &&
+  protoOk offered (vals fs N_PROTOCOL) && (vals fs N_EXT).isEmpty
+
+theorem clientAcceptsOffer_ok (sha1 : Sha1) (key status : Bytes) (offered : List Bytes)
+    (fs : Fields) :
+    clientAcceptsOffer sha1 key status offered fs = true ↔
+      ClientOfferOK sha1 key status offered fs := by
+  simp only [clientAcceptsOffer, ClientOfferOK, Bool.and_eq_true, beq_iff_eq,
+    List.isEmpty_iff, protoOk_iff, and_assoc]
+
+theorem clientAcceptsOffer_nil (sha1 : Sha1) (key status : Bytes) (fs : Fields) :
+    clientAcceptsOffer sha1 key status [] fs = clientAccepts sha1 key status fs := by
+  unfold clientAcceptsOffer clientAccepts
+  congr 2
+  cases h : vals fs N_PROTOCOL with
+  | nil => rfl
+  | cons p t => cases t <;> rfl
 
 /-! ## Server -/
 
@@ -263,11 +321,30 @@ theorem reactorCapped_ok {full : Bool} {r : Req} {key : Bytes}
 
 /-! ## Pairing flare's client with flare's servers -/
 
-/-- mirrors flare/ws/client.mojo#WsClient._connect_impl sha=0c780a982b41 at=e767e34c -/
+/-- The request with no subprotocol offered (`clientRequestOffer_nil`).
+mirrors flare/ws/client.mojo#WsClient._connect_impl sha=35fabe595019 at=e4831739 -/
 def clientRequest (host target key : Bytes) : Req :=
   { method := GET, target := target, version := HTTP11,
     fields := [(HOST_CAP, host), (UPGRADE_CAP, WEBSOCKET), (CONNECTION_CAP, UPGRADE_CAP),
       (KEY_CAP, key), (VERSION_CAP, V13)] }
+
+/-- `", "`-joined names (`_subprotocol_header`). -/
+def joinComma : List Bytes → Bytes
+  | [] => []
+  | [p] => p
+  | p :: ps => p ++ [44, 32] ++ joinComma ps
+
+/-- The request with the caller's offer: the protocol field follows the
+version field only when `offered` is non-empty. Covers offers that
+`_subprotocol_header` accepts (distinct tokens); it raises on any other.
+mirrors flare/ws/client.mojo#WsClient._connect_impl+_UpgradeResponse.selected_protocol+_subprotocol_header sha=971525b29c25 at=e4831739 -/
+def clientRequestOffer (host target key : Bytes) (offered : List Bytes) : Req :=
+  let r := clientRequest host target key
+  if offered.isEmpty then r
+  else { r with fields := r.fields ++ [(PROTOCOL_CAP, joinComma offered)] }
+
+theorem clientRequestOffer_nil (host target key : Bytes) :
+    clientRequestOffer host target key [] = clientRequest host target key := rfl
 
 /-- mirrors flare/ws/server.mojo#_send_upgrade_response sha=c95af78fe8df at=59bda50f -/
 def srvResponse (sha1 : Sha1) (key : Bytes) : Fields :=
