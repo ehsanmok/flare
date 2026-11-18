@@ -28,6 +28,7 @@ from .frame import (
     _DecodeResult,
 )
 from ..crypto.base64 import base64_encode as _base64_encode
+from ..http.header_view import _is_token_char
 from ..http.url import Url
 from ..tls import TlsStream, TlsConfig
 from ..tcp import TcpStream
@@ -260,14 +261,44 @@ def _lower_local(s: String) -> String:
     return out^
 
 
+def _subprotocol_header(offered: List[String]) raises -> String:
+    """Validate the subprotocol candidates and join them for the request.
+
+    RFC 6455 sec 4.1 item 10: each name is a non-empty token and appears
+    at most once. Checked before any I/O so a bad name never reaches the
+    wire.
+
+    Returns:
+        The ``Sec-WebSocket-Protocol`` value, or ``""`` for no offer.
+
+    Raises:
+        WsHandshakeError: On an empty, non-token or repeated name.
+    """
+    var out = String("")
+    for i in range(len(offered)):
+        var name = offered[i]
+        if name.byte_length() == 0:
+            raise WsHandshakeError("empty subprotocol name")
+        for b in name.as_bytes():
+            if not _is_token_char(b):
+                raise WsHandshakeError("subprotocol name is not a token")
+        for j in range(i):
+            if offered[j] == name:
+                raise WsHandshakeError("subprotocol offered twice: " + name)
+        if i > 0:
+            out += ", "
+        out += name
+    return out^
+
+
 struct _UpgradeResponse(Movable):
     """What the client needs from the server's ``101`` header fields.
 
     RFC 6455 sec 4.1 makes the client fail the connection unless the
     response has ``Upgrade: websocket``, a ``Connection`` field with the
-    ``upgrade`` token and the right ``Sec-WebSocket-Accept``, and names no
-    subprotocol or extension (flare's request offers none). Only the accept
-    value used to be read.
+    ``upgrade`` token and the right ``Sec-WebSocket-Accept``, selects at
+    most one of the offered subprotocols and names no extension (flare's
+    request offers none).
     """
 
     var accept: String
@@ -276,8 +307,10 @@ struct _UpgradeResponse(Movable):
     """Some ``Upgrade`` value is ``websocket`` (case-insensitive)."""
     var connection_upgrade: Bool
     """Some ``Connection`` value has the token ``upgrade``."""
-    var protocol_seen: Bool
-    """A ``Sec-WebSocket-Protocol`` field is present."""
+    var protocol: String
+    """The last ``Sec-WebSocket-Protocol`` value."""
+    var protocol_fields: Int
+    """How many ``Sec-WebSocket-Protocol`` fields were seen."""
     var extensions_seen: Bool
     """A ``Sec-WebSocket-Extensions`` field is present."""
 
@@ -285,7 +318,8 @@ struct _UpgradeResponse(Movable):
         self.accept = String("")
         self.upgrade_websocket = False
         self.connection_upgrade = False
-        self.protocol_seen = False
+        self.protocol = String("")
+        self.protocol_fields = 0
         self.extensions_seen = False
 
     def observe(mut self, name: String, value: String):
@@ -300,12 +334,38 @@ struct _UpgradeResponse(Movable):
                 if _lower_local(String(String(tok).strip())) == "upgrade":
                     self.connection_upgrade = True
         elif name == "sec-websocket-protocol":
-            self.protocol_seen = True
+            self.protocol = value
+            self.protocol_fields += 1
         elif name == "sec-websocket-extensions":
             self.extensions_seen = True
 
-    def verify(self, expected_accept: String) raises:
+    def selected_protocol(self, offered: List[String]) raises -> String:
+        """The subprotocol the server picked, ``""`` for none.
+
+        RFC 6455 sec 4.1 item 6: a selection must be exactly one of the
+        offered names (case-sensitive). Repeated fields or a list fail.
+
+        Raises:
+            WsHandshakeError: On a selection that was not offered.
+        """
+        if self.protocol_fields == 0:
+            return String("")
+        if self.protocol_fields == 1:
+            for name in offered:
+                if name == self.protocol:
+                    return self.protocol
+        raise WsHandshakeError(
+            "101 response selects a subprotocol that was not requested"
+            " (RFC 6455 sec 4.1)"
+        )
+
+    def verify(
+        self, expected_accept: String, offered: List[String]
+    ) raises -> String:
         """Raise ``WsHandshakeError`` unless the 101 completes the handshake.
+
+        Returns:
+            The selected subprotocol, ``""`` for none.
 
         Raises:
             WsHandshakeError: On a missing or wrong ``Upgrade``,
@@ -329,16 +389,12 @@ struct _UpgradeResponse(Movable):
                 + expected_accept
                 + "'"
             )
-        if self.protocol_seen:
-            raise WsHandshakeError(
-                "101 response selects a subprotocol that was not requested"
-                " (RFC 6455 sec 4.1)"
-            )
         if self.extensions_seen:
             raise WsHandshakeError(
                 "101 response names an extension that was not requested"
                 " (RFC 6455 sec 4.1)"
             )
+        return self.selected_protocol(offered)
 
 
 # ── Internal stream union for WebSocket I/O ───────────────────────────────────
@@ -522,10 +578,15 @@ struct WsClient(Movable):
     """Bytes read off the socket past the last decoded frame. A read can
     carry more than one frame; ``_recv_one`` starts from these before it
     reads again."""
+    var subprotocol: String
+    """The subprotocol the server selected, ``""`` for none."""
 
-    def __init__(out self, var stream: _WsStream, key: String):
+    def __init__(
+        out self, var stream: _WsStream, key: String, subprotocol: String = ""
+    ):
         self._stream = stream^
         self._key = key
+        self.subprotocol = subprotocol
         self.max_frame_size = DEFAULT_MAX_FRAME_BYTES
         self._prebuf = List[UInt8]()
 
@@ -550,10 +611,14 @@ struct WsClient(Movable):
             NetworkError: If the TCP/TLS connection fails.
             WsHandshakeError: If the server's Upgrade response is invalid.
         """
-        return WsClient._connect_impl(url, TlsConfig())
+        return WsClient._connect_impl(url, TlsConfig(), List[String]())
 
     @staticmethod
-    def connect(url: String, config: TlsConfig) raises -> WsClient:
+    def connect(
+        url: String,
+        config: TlsConfig,
+        subprotocols: List[String] = List[String](),
+    ) raises -> WsClient:
         """Connect to a WebSocket server with custom TLS configuration.
 
         For ``wss://`` URLs, wraps the connection in TLS using ``config``.
@@ -561,19 +626,24 @@ struct WsClient(Movable):
         Args:
             url: WebSocket URL (``ws://`` or ``wss://``).
             config: TLS configuration (only used for ``wss://``).
+            subprotocols: ``Sec-WebSocket-Protocol`` candidates in order of
+                preference. The selected one is in :attr:`subprotocol`.
 
         Returns:
             A ``WsClient`` with the handshake complete.
 
         Raises:
             NetworkError: If the TCP/TLS connection fails.
-            WsHandshakeError: If the server's Upgrade response is invalid or
+            WsHandshakeError: If a subprotocol name is invalid, the server's
+                              Upgrade response is invalid or
                               ``Sec-WebSocket-Accept`` does not match.
         """
-        return WsClient._connect_impl(url, config)
+        return WsClient._connect_impl(url, config, subprotocols)
 
     @staticmethod
-    def _connect_impl(url: String, config: TlsConfig) raises -> WsClient:
+    def _connect_impl(
+        url: String, config: TlsConfig, subprotocols: List[String]
+    ) raises -> WsClient:
         """Internal implementation shared by both ``connect`` overloads.
 
         For ``wss://`` URLs, advertises ALPN ``["http/1.1"]``
@@ -593,6 +663,7 @@ struct WsClient(Movable):
         HTTP/1.1 path so existing wss:// users see no
         regression.
         """
+        var protocols = _subprotocol_header(subprotocols)
         var http_url = _ws_url_to_http(url)
         var u = Url.parse(http_url)
         var key = _generate_ws_key()
@@ -627,8 +698,10 @@ struct WsClient(Movable):
             + key
             + "\r\n"
             + "Sec-WebSocket-Version: 13\r\n"
-            + "\r\n"
         )
+        if protocols.byte_length() > 0:
+            req += "Sec-WebSocket-Protocol: " + protocols + "\r\n"
+        req += "\r\n"
 
         # ── 2. Connect and send ───────────────────────────────────────────────
         var scratch = List[UInt8](capacity=1)
@@ -670,10 +743,10 @@ struct WsClient(Movable):
                     upgrade.observe(hk, hv)
 
             # ── 4. Verify the handshake (RFC 6455 sec 4.1) ────────────────────
-            upgrade.verify(expected_accept)
+            var chosen = upgrade.verify(expected_accept, subprotocols)
 
             var ws_stream = _WsStream(tls^)
-            return WsClient(ws_stream^, key)
+            return WsClient(ws_stream^, key, chosen)
         else:
             var tcp = _connect_with_fallback(u.host, u.port, 5000)
             var req_bytes = req.as_bytes()
@@ -708,10 +781,10 @@ struct WsClient(Movable):
                     )
                     upgrade.observe(hk, hv)
 
-            upgrade.verify(expected_accept)
+            var chosen = upgrade.verify(expected_accept, subprotocols)
 
             var ws_stream = _WsStream(tcp^)
-            return WsClient(ws_stream^, key)
+            return WsClient(ws_stream^, key, chosen)
 
     # ── Sending ───────────────────────────────────────────────────────────────
 

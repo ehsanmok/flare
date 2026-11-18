@@ -44,8 +44,10 @@ from ..tls import TlsConfig, TlsStream
 from .client import (
     WsClient,
     WsHandshakeError,
+    _UpgradeResponse,
     _compute_accept,
     _generate_ws_key,
+    _subprotocol_header,
     _ws_url_to_http,
 )
 from .client_h2 import WsOverH2Stream, bootstrap_ws_over_h2
@@ -248,6 +250,10 @@ struct WsAutoClient(Movable):
     :attr:`chosen_wire` transitions to :data:`WsWireChoice.FAILED`.
     """
 
+    var subprotocol: String
+    """The subprotocol the server selected, ``""`` for none. Set by
+    :meth:`connect` on either wire."""
+
     var _h1_client: Optional[WsClient]
     """The HTTP/1.1 WS carrier when the dispatcher picked the h1
     path. Populated by :meth:`connect`; consumed by
@@ -262,6 +268,7 @@ struct WsAutoClient(Movable):
         self.config = config^
         self.chosen_wire = WsWireChoice.UNDETERMINED
         self.last_error = String("")
+        self.subprotocol = String("")
         self._h1_client = None
         self._h2_carrier = None
 
@@ -397,9 +404,13 @@ struct WsAutoClient(Movable):
                 " wss://; got "
                 + self.config.url
             )
+        var protocols = _subprotocol_header(self.config.subprotocols)
 
         if scheme == "ws":
-            var c = WsClient.connect(self.config.url)
+            var c = WsClient.connect(
+                self.config.url, TlsConfig(), self.config.subprotocols
+            )
+            self.subprotocol = c.subprotocol
             self._h1_client = Optional[WsClient](c^)
             self.chosen_wire = WsWireChoice.HTTP_1_1
             return
@@ -408,7 +419,10 @@ struct WsAutoClient(Movable):
             var cfg = self.config.tls_config.copy()
             cfg.alpn = List[String]()
             cfg.alpn.append("http/1.1")
-            var c = WsClient.connect(self.config.url, cfg)
+            var c = WsClient.connect(
+                self.config.url, cfg, self.config.subprotocols
+            )
+            self.subprotocol = c.subprotocol
             self._h1_client = Optional[WsClient](c^)
             self.chosen_wire = WsWireChoice.HTTP_1_1
             return
@@ -422,7 +436,7 @@ struct WsAutoClient(Movable):
         var alpn = tls.alpn_selected()
 
         if alpn == "h2":
-            self._open_h2_path(tls^, u)
+            self._open_h2_path(tls^, u, protocols)
             self.chosen_wire = WsWireChoice.HTTP_2
             return
 
@@ -437,11 +451,16 @@ struct WsAutoClient(Movable):
         var h1_cfg = self.config.tls_config.copy()
         h1_cfg.alpn = List[String]()
         h1_cfg.alpn.append("http/1.1")
-        var c = WsClient.connect(self.config.url, h1_cfg)
+        var c = WsClient.connect(
+            self.config.url, h1_cfg, self.config.subprotocols
+        )
+        self.subprotocol = c.subprotocol
         self._h1_client = Optional[WsClient](c^)
         self.chosen_wire = WsWireChoice.HTTP_1_1
 
-    def _open_h2_path(mut self, var tls: TlsStream, u: Url) raises:
+    def _open_h2_path(
+        mut self, var tls: TlsStream, u: Url, protocols: String
+    ) raises:
         """Drive the h2 connection preface + SETTINGS exchange,
         then bootstrap the Extended CONNECT stream. Stores the
         resulting carrier on :attr:`_h2_carrier`.
@@ -522,7 +541,7 @@ struct WsAutoClient(Movable):
             authority,
             u.request_target(),
             ws_key,
-            String(""),
+            protocols,
             String(""),
             String("https"),
         )
@@ -564,6 +583,10 @@ struct WsAutoClient(Movable):
                 "WsAutoClient: Extended CONNECT rejected, status = "
                 + String(resp.status)
             )
+        var picked = _UpgradeResponse()
+        for h in resp.headers:
+            picked.observe(h.name, String(h.value.strip()))
+        self.subprotocol = picked.selected_protocol(self.config.subprotocols)
 
         var stream = WsOverH2Stream(sid)
         self._h2_carrier = Optional[_WsAutoH2Carrier](

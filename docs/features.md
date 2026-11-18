@@ -634,7 +634,7 @@ Router erases the handler type at registration).
 
 | Surface | Where |
 |---|---|
-| `WsClient.connect(url)` — handshake + frame loop, `WsHandshakeError` | [`websocket_echo.mojo`](../examples/basic/websocket_echo.mojo) |
+| `WsClient.connect(url)` — handshake + frame loop, `WsHandshakeError`; `connect(url, tls, subprotocols)` offers `Sec-WebSocket-Protocol` candidates and `WsClient.subprotocol` holds the one the server picked (`WsAutoClientConfig.subprotocols` does the same on both wires) | [`websocket_echo.mojo`](../examples/basic/websocket_echo.mojo) |
 | `WsServer` — server-side handshake + frame loop | [`ws_server.mojo`](../examples/basic/ws_server.mojo) |
 | `WsHandler` trait + `WsServer.serve[H]` — stateful struct handler (per-connection state via `mut self`), the struct-handler twin of the `def(mut WsConnection)` callback | [`tests/ws/test_ws_stateful_handler.mojo`](../tests/ws/test_ws_stateful_handler.mojo) |
 | `WsMessage` — high-level text / binary message wrapper | [`ergonomics.mojo`](../examples/basic/ergonomics.mojo) |
@@ -1025,8 +1025,11 @@ of what you might reasonably assume from the surrounding feature.
   4.1), not only `Sec-WebSocket-Accept`: it raises `WsHandshakeError`
   unless the response has `Upgrade: websocket` and a `Connection` field
   with the `upgrade` token, and it refuses one that names a
-  `Sec-WebSocket-Protocol` or `Sec-WebSocket-Extensions` (the client
-  offers neither). A server that skipped those fields used to connect.
+  `Sec-WebSocket-Protocol` the client did not offer (or more than one)
+  or any `Sec-WebSocket-Extensions`. A server that skipped those fields
+  used to connect.
+- `WsAutoClientConfig.extensions` is not sent: the client frame path has
+  no permessage-deflate, so it offers no extension.
 - The standalone `WsServer` now checks the whole opening handshake (RFC
   6455 sec 4.2.1): a `GET` over HTTP/1.1, `Upgrade` and `Connection`
   matched as comma-separated tokens (`Connection: noupgrade` no longer

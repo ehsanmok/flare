@@ -200,6 +200,27 @@ from test_ws_client_handshake import (
     test_101_with_an_unrequested_subprotocol_is_refused as test_ws_client_handshake__test_101_with_an_unrequested_subprotocol_is_refused,
 )
 from test_ws_client_handshake import (
+    test_offered_subprotocol_is_sent_and_selected as test_ws_client_handshake__test_offered_subprotocol_is_sent_and_selected,
+)
+from test_ws_client_handshake import (
+    test_autoclient_offers_config_subprotocols as test_ws_client_handshake__test_autoclient_offers_config_subprotocols,
+)
+from test_ws_client_handshake import (
+    test_server_may_select_no_subprotocol as test_ws_client_handshake__test_server_may_select_no_subprotocol,
+)
+from test_ws_client_handshake import (
+    test_101_selecting_an_unoffered_subprotocol_is_refused as test_ws_client_handshake__test_101_selecting_an_unoffered_subprotocol_is_refused,
+)
+from test_ws_client_handshake import (
+    test_101_selecting_a_list_or_repeated_field_is_refused as test_ws_client_handshake__test_101_selecting_a_list_or_repeated_field_is_refused,
+)
+from test_ws_client_handshake import (
+    test_invalid_subprotocol_candidates_are_refused as test_ws_client_handshake__test_invalid_subprotocol_candidates_are_refused,
+)
+from test_ws_client_handshake import (
+    test_selected_protocol_matches_offer_exactly as test_ws_client_handshake__test_selected_protocol_matches_offer_exactly,
+)
+from test_ws_client_handshake import (
     test_101_with_an_unrequested_extension_is_refused as test_ws_client_handshake__test_101_with_an_unrequested_extension_is_refused,
 )
 from test_ws_client_handshake import (
@@ -583,6 +604,27 @@ def main() raises:
     ]()
     suite.test[
         test_ws_client_handshake__test_101_with_an_unrequested_subprotocol_is_refused
+    ]()
+    suite.test[
+        test_ws_client_handshake__test_offered_subprotocol_is_sent_and_selected
+    ]()
+    suite.test[
+        test_ws_client_handshake__test_autoclient_offers_config_subprotocols
+    ]()
+    suite.test[
+        test_ws_client_handshake__test_server_may_select_no_subprotocol
+    ]()
+    suite.test[
+        test_ws_client_handshake__test_101_selecting_an_unoffered_subprotocol_is_refused
+    ]()
+    suite.test[
+        test_ws_client_handshake__test_101_selecting_a_list_or_repeated_field_is_refused
+    ]()
+    suite.test[
+        test_ws_client_handshake__test_invalid_subprotocol_candidates_are_refused
+    ]()
+    suite.test[
+        test_ws_client_handshake__test_selected_protocol_matches_offer_exactly
     ]()
     suite.test[
         test_ws_client_handshake__test_101_with_an_unrequested_extension_is_refused
